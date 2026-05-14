@@ -9,16 +9,29 @@
   outputs = { self, nixpkgs, flake-utils }:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        pkgs = import nixpkgs { inherit system; };
+        mcpUnbrokenOverlay = final: prev: {
+          haskellPackages = prev.haskellPackages.override {
+            overrides = hfinal: hprev: {
+              # nixpkgs still marks haskellPackages.mcp as broken from an
+              # older Hydra failure, but the current version builds and its
+              # stdio transport tests pass.
+              mcp = prev.haskell.lib.markUnbroken hprev.mcp;
+            };
+          };
+        };
+
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [ mcpUnbrokenOverlay ];
+        };
 
         hs = pkgs.haskellPackages;
 
         haskellDeps = hpkgs: [
           hpkgs.Agda
           hpkgs.aeson
-          hpkgs.bytestring
           hpkgs.containers
-          hpkgs.mcp-types
+          hpkgs.mcp
           hpkgs.text
         ];
 
@@ -28,10 +41,9 @@
           ({ Agda
            , aeson
            , base
-           , bytestring
            , containers
            , lib
-           , mcp-types
+           , mcp
            , text
            }:
             hs.mkDerivation {
@@ -44,9 +56,8 @@
                 Agda
                 aeson
                 base
-                bytestring
                 containers
-                mcp-types
+                mcp
                 text
               ];
               description = "Agda MCP server";
