@@ -1,10 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module AgdaMCP.Tools
-    ( agdaTools
-    , agdaLoadTool
-    , agdaGiveTool
-    ) where
+module AgdaMCP.Tools (
+    agdaTools,
+    agdaLoadTool,
+    agdaGiveTool,
+) where
 
 import AgdaMCP.Runtime (AgdaRuntime, agdaGive, agdaLoad)
 import AgdaMCP.Types (AgdaError, renderAgdaError)
@@ -16,9 +16,10 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import MCP.Server qualified as MCP
 
--- | MCP tool definitions backed by the Agda runtime.
---
--- These are not wired into Main yet; Phase 1 just establishes the public shape.
+{- | MCP tool definitions backed by the Agda runtime.
+
+These are not wired into Main yet; Phase 1 just establishes the public shape.
+-}
 agdaTools :: AgdaRuntime -> [MCP.ToolHandler]
 agdaTools runtime =
     [ agdaLoadTool runtime
@@ -34,7 +35,7 @@ agdaLoadTool runtime =
         $ \args -> case lookupText "file_path" args of
             Nothing -> pure $ MCP.ProcessSuccess $ MCP.toolTextError "Missing required argument: file_path"
             Just filePath -> do
-                result <- liftIO $ agdaLoad runtime (textToFilePath filePath)
+                result <- liftIO $ agdaLoad runtime (Text.unpack filePath)
                 pure $ either errorResult loadResult result
 
 agdaGiveTool :: AgdaRuntime -> MCP.ToolHandler
@@ -45,7 +46,7 @@ agdaGiveTool runtime =
         agdaGiveSchema
         $ \args -> case (lookupText "file_path" args, lookupInt "goal_id" args, lookupText "expression" args) of
             (Just filePath, Just goalId, Just expression) -> do
-                result <- liftIO $ agdaGive runtime (textToFilePath filePath) goalId expression
+                result <- liftIO $ agdaGive runtime (Text.unpack filePath) goalId expression
                 pure $ either errorResult giveResult result
             _ -> pure $ MCP.ProcessSuccess $ MCP.toolTextError "Missing required arguments: file_path, goal_id, expression"
 
@@ -55,12 +56,13 @@ agdaLoadSchema =
         "object"
         ( Just $
             Map.fromList
-                [ ( "file_path"
-                  , Aeson.object
+                [
+                    ( "file_path"
+                    , Aeson.object
                         [ "type" Aeson..= ("string" :: Text)
                         , "description" Aeson..= ("Path to the Agda file to load." :: Text)
                         ]
-                  )
+                    )
                 ]
         )
         (Just ["file_path"])
@@ -71,36 +73,39 @@ agdaGiveSchema =
         "object"
         ( Just $
             Map.fromList
-                [ ( "file_path"
-                  , Aeson.object
+                [
+                    ( "file_path"
+                    , Aeson.object
                         [ "type" Aeson..= ("string" :: Text)
                         , "description" Aeson..= ("Path to the Agda file containing the goal." :: Text)
                         ]
-                  )
-                , ( "goal_id"
-                  , Aeson.object
+                    )
+                ,
+                    ( "goal_id"
+                    , Aeson.object
                         [ "type" Aeson..= ("integer" :: Text)
                         , "description" Aeson..= ("Agda interaction goal id." :: Text)
                         ]
-                  )
-                , ( "expression"
-                  , Aeson.object
+                    )
+                ,
+                    ( "expression"
+                    , Aeson.object
                         [ "type" Aeson..= ("string" :: Text)
                         , "description" Aeson..= ("Expression to give to the goal." :: Text)
                         ]
-                  )
+                    )
                 ]
         )
         (Just ["file_path", "goal_id", "expression"])
 
-loadResult :: Aeson.ToJSON result => result -> MCP.ProcessResult MCP.CallToolResult
+loadResult :: (Aeson.ToJSON result) => result -> MCP.ProcessResult MCP.CallToolResult
 loadResult result =
     MCP.ProcessSuccess $
         (MCP.toolTextResult ["agda_load completed"])
             { MCP.structuredContent = Just $ Map.fromList [("result", Aeson.toJSON result)]
             }
 
-giveResult :: Aeson.ToJSON result => result -> MCP.ProcessResult MCP.CallToolResult
+giveResult :: (Aeson.ToJSON result) => result -> MCP.ProcessResult MCP.CallToolResult
 giveResult result =
     MCP.ProcessSuccess $
         (MCP.toolTextResult ["agda_give completed"])
@@ -121,6 +126,3 @@ lookupInt key args = case args >>= Map.lookup key of
         Aeson.Success intValue -> Just intValue
         Aeson.Error _ -> Nothing
     _ -> Nothing
-
-textToFilePath :: Text -> FilePath
-textToFilePath = Text.unpack
