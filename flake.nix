@@ -9,20 +9,38 @@
   outputs = { self, nixpkgs, flake-utils }:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        mcpUnbrokenOverlay = final: prev: {
+        mcpOverlay = final: prev: {
           haskellPackages = prev.haskellPackages.override {
-            overrides = hfinal: hprev: {
-              # nixpkgs still marks haskellPackages.mcp as broken from an
-              # older Hydra failure, but the current version builds and its
-              # stdio transport tests pass.
-              mcp = prev.haskell.lib.markUnbroken hprev.mcp;
+            overrides = hfinal: _hprev: {
+              # Some nixpkgs revisions still package an older/broken mcp.
+              # Pin the Hackage release this server is written against so
+              # downstream flakes can make agda-mcp.inputs.nixpkgs follow
+              # their own nixpkgs without depending on that package set's
+              # mcp version.
+              jsonrpc = hfinal.callHackageDirect {
+                pkg = "jsonrpc";
+                ver = "0.2.0.0";
+                sha256 = "sha256-j9Xb3jlFlLN+XTxxgqI43tpB31PNZvNOu0h+8JzEVYo=";
+              } { };
+
+              mcp-types = hfinal.callHackageDirect {
+                pkg = "mcp-types";
+                ver = "0.1.1";
+                sha256 = "sha256-ZYx+R5PSLCD+rL0ZC0aOI523LvWxXp1LcVG1opEs9sc=";
+              } { };
+
+              mcp = prev.haskell.lib.markUnbroken (hfinal.callHackageDirect {
+                pkg = "mcp";
+                ver = "0.3.1.0";
+                sha256 = "sha256-TA31PP7X0tQFO8uLc0ptCxLObOPCJFCqxBusnBywhrk=";
+              } { });
             };
           };
         };
 
         pkgs = import nixpkgs {
           inherit system;
-          overlays = [ mcpUnbrokenOverlay ];
+          overlays = [ mcpOverlay ];
         };
 
         hs = pkgs.haskellPackages;
