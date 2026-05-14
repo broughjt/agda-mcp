@@ -50,6 +50,7 @@
           hpkgs.aeson
           hpkgs.containers
           hpkgs.mcp
+          hpkgs.mtl
           hpkgs.text
         ];
 
@@ -62,14 +63,23 @@
            , containers
            , lib
            , mcp
+           , mtl
            , text
            }:
             hs.mkDerivation {
               pname = "agda-mcp";
               version = "0.1.0.0";
               src = lib.cleanSource ./.;
-              isLibrary = false;
+              isLibrary = true;
               isExecutable = true;
+              libraryHaskellDepends = [
+                aeson
+                base
+                containers
+                mcp
+                mtl
+                text
+              ];
               executableHaskellDepends = [
                 Agda
                 aeson
