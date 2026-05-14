@@ -1,6 +1,6 @@
 # agda-mcp
 
-Haskell MCP server for Agda.
+MCP server for Agda.
 
 Prior art:
 
