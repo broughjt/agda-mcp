@@ -82,7 +82,7 @@ impl AgdaProcess {
         Ok(process)
     }
 
-    pub async fn send_command(&mut self, command: &command::Command<'_>) -> Result<Vec<Value>> {
+    pub async fn send(&mut self, command: &command::Command<'_>) -> Result<Vec<Value>> {
         let command_line = format!("{command}\n");
         self.stdin.write_all(command_line.as_bytes()).await?;
         self.stdin.flush().await?;

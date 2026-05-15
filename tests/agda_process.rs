@@ -7,7 +7,7 @@ async fn show_version_returns_version_display_info() {
         .expect("failed to spawn agda --interaction-json");
 
     let responses = agda
-        .send_command(&Command::show_version("."))
+        .send(&Command::show_version("."))
         .await
         .expect("failed to send Cmd_show_version to Agda");
 
