@@ -21,24 +21,20 @@ use serde_json::Value;
 use thiserror::Error;
 
 /// A single response object Agda emits between `JSON> ` prompts.
+///
+/// Variants are listed in the same order as Agda's `Response_boot` constructors:
+/// https://github.com/agda/agda/blob/3b57742a311b3a90b755737968d437f1ef902318/src/full/Agda/Interaction/Response/Base.hs#L51-L78
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind")]
 pub enum Response {
+    /// Highlighting payload — body intentionally unmodelled.
+    HighlightingInfo {},
     Status {
         status: Status,
     },
-    ClearRunningInfo,
-    ClearHighlighting {
-        #[serde(rename = "tokenBased")]
-        token_based: String,
-    },
-    RunningInfo {
-        #[serde(rename = "debugLevel")]
-        debug_level: u32,
-        message: String,
-    },
-    DisplayInfo {
-        info: Info,
+    JumpToError {
+        filepath: String,
+        position: i32,
     },
     InteractionPoints {
         #[serde(rename = "interactionPoints")]
@@ -50,20 +46,27 @@ pub enum Response {
         #[serde(rename = "giveResult")]
         give_result: GiveResult,
     },
-    JumpToError {
-        filepath: String,
-        position: i32,
-    },
-    DoneAborting,
-    DoneExiting,
-    /// Highlighting payload — body intentionally unmodelled.
-    HighlightingInfo {},
     /// Make-case clauses — body intentionally unmodelled for the load/give spike.
     MakeCase {},
     /// Solve-all solutions — body intentionally unmodelled.
     SolveAll {},
     /// Mimer solution — body intentionally unmodelled.
     Mimer {},
+    DisplayInfo {
+        info: Info,
+    },
+    RunningInfo {
+        #[serde(rename = "debugLevel")]
+        debug_level: u32,
+        message: String,
+    },
+    ClearRunningInfo,
+    ClearHighlighting {
+        #[serde(rename = "tokenBased")]
+        token_based: String,
+    },
+    DoneAborting,
+    DoneExiting,
 }
 
 impl Response {
@@ -216,20 +219,20 @@ mod tests {
         let kinds: Vec<&'static str> = parsed
             .iter()
             .map(|response| match response {
+                Response::HighlightingInfo { .. } => "HighlightingInfo",
                 Response::Status { .. } => "Status",
-                Response::ClearRunningInfo => "ClearRunningInfo",
-                Response::ClearHighlighting { .. } => "ClearHighlighting",
-                Response::RunningInfo { .. } => "RunningInfo",
-                Response::DisplayInfo { .. } => "DisplayInfo",
+                Response::JumpToError { .. } => "JumpToError",
                 Response::InteractionPoints { .. } => "InteractionPoints",
                 Response::GiveAction { .. } => "GiveAction",
-                Response::JumpToError { .. } => "JumpToError",
-                Response::DoneAborting => "DoneAborting",
-                Response::DoneExiting => "DoneExiting",
-                Response::HighlightingInfo { .. } => "HighlightingInfo",
                 Response::MakeCase { .. } => "MakeCase",
                 Response::SolveAll { .. } => "SolveAll",
                 Response::Mimer { .. } => "Mimer",
+                Response::DisplayInfo { .. } => "DisplayInfo",
+                Response::RunningInfo { .. } => "RunningInfo",
+                Response::ClearRunningInfo => "ClearRunningInfo",
+                Response::ClearHighlighting { .. } => "ClearHighlighting",
+                Response::DoneAborting => "DoneAborting",
+                Response::DoneExiting => "DoneExiting",
             })
             .collect();
 
