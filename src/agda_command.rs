@@ -14,15 +14,12 @@ pub struct Command<'a> {
 }
 
 impl<'a> Command<'a> {
-    pub fn load(path: &'a str, load_flags: &'a [String]) -> Self {
+    pub fn load(path: &'a str, flags: &'a [String]) -> Self {
         Self {
             path,
             highlighting_level: HighlightingLevel::default(),
             highlighting_method: HighlightingMethod::default(),
-            interaction: Interaction::Load(Load {
-                path,
-                flags: load_flags,
-            }),
+            interaction: Interaction::Load(Load { path, flags }),
         }
     }
 
@@ -364,20 +361,6 @@ pub fn render_string_list<S: AsRef<str>>(items: &[S]) -> String {
     format!("[{items}]")
 }
 
-pub fn render_load_command(path: &str, load_flags: &[String]) -> String {
-    Command::load(path, load_flags).to_string()
-}
-
-pub fn render_give_command(
-    path: &str,
-    force: UseForce,
-    interaction_point: u32,
-    range: &RangeArgument,
-    expression: &str,
-) -> String {
-    Command::give(path, force, interaction_point, range, expression).to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -411,22 +394,21 @@ mod tests {
     #[test]
     fn renders_load_command_without_flags_like_agda_fixtures() {
         assert_eq!(
-            render_load_command("ParenJSON.agda", &[]),
+            Command::load("ParenJSON.agda", &[]).to_string(),
             "IOTCM \"ParenJSON.agda\" None Indirect (Cmd_load \"ParenJSON.agda\" [])"
         );
     }
 
     #[test]
     fn renders_load_command_with_load_flags() {
+        let load_flags = [
+            "--no-default-libraries".to_owned(),
+            "-i".to_owned(),
+            ".".to_owned(),
+        ];
+
         assert_eq!(
-            render_load_command(
-                "Spike.agda",
-                &[
-                    "--no-default-libraries".to_owned(),
-                    "-i".to_owned(),
-                    ".".to_owned(),
-                ],
-            ),
+            Command::load("Spike.agda", &load_flags).to_string(),
             "IOTCM \"Spike.agda\" None Indirect (Cmd_load \"Spike.agda\" [\"--no-default-libraries\", \"-i\", \".\"])"
         );
     }
@@ -434,13 +416,14 @@ mod tests {
     #[test]
     fn renders_give_command_with_no_range_like_agda_fixtures() {
         assert_eq!(
-            render_give_command(
+            Command::give(
                 "Issue2174a.agda",
                 UseForce::WithoutForce,
                 0,
                 &RangeArgument(None),
                 "F ?",
-            ),
+            )
+            .to_string(),
             "IOTCM \"Issue2174a.agda\" None Indirect (Cmd_give WithoutForce 0 noRange \"F ?\")"
         );
     }
@@ -454,13 +437,14 @@ mod tests {
         );
 
         assert_eq!(
-            render_give_command(
+            Command::give(
                 "Issue2174a.agda",
                 UseForce::WithoutForce,
                 0,
                 &RangeArgument(Some(range)),
                 "F ?",
-            ),
+            )
+            .to_string(),
             "IOTCM \"Issue2174a.agda\" None Indirect (Cmd_give WithoutForce 0 (intervalsToRange (Just (mkAbsolute \"/tmp/Issue2174a.agda\")) [Interval () (Pn () 1 1 1) (Pn () 1 1 1)]) \"F ?\")"
         );
     }
