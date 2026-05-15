@@ -1,2 +1,2 @@
-pub mod agda_command;
+pub mod agda;
 pub mod tools;

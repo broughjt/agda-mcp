@@ -1,15 +1,20 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
+use crate::agda::command as agda_command;
+
 /// Parameters for the MCP `load` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct Load {
     /// Path to the Agda file to load.
     pub path: String,
-    // /// Agda command-line flags to use for this load, such as `-i`,
-    // /// `--library`, or `--no-default-libraries`.
-    // #[serde(default)]
-    // pub flags: Vec<String>,
+    // TODO: Whether to use the command line flags here?
+}
+
+impl Load {
+    pub fn to_agda_command(&self) -> agda_command::Command<'_> {
+        agda_command::Command::load(&self.path, &[])
+    }
 }
 
 /// Parameters for the MCP `give` tool.
@@ -23,7 +28,17 @@ pub struct Give {
 
     /// Expression to give to the interaction point.
     pub expression: String,
-    // /// Whether to use Agda's `WithForce` mode for give.
-    // #[serde(default)]
-    // pub force: bool,
+    // TODO: Whether to use the `force` option here?
+}
+
+impl Give {
+    pub fn to_agda_command(&self) -> agda_command::Command<'_> {
+        agda_command::Command::give(
+            &self.path,
+            agda_command::UseForce::WithoutForce,
+            self.goal_id,
+            &agda_command::NO_RANGE,
+            &self.expression,
+        )
+    }
 }

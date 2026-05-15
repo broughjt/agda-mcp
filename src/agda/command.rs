@@ -290,6 +290,8 @@ impl fmt::Display for AgdaRange {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RangeArgument(pub Option<AgdaRange>);
 
+pub const NO_RANGE: RangeArgument = RangeArgument(None);
+
 impl From<AgdaRange> for RangeArgument {
     fn from(range: AgdaRange) -> Self {
         Self(Some(range))
