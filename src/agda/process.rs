@@ -156,7 +156,7 @@ pub enum Error {
     },
 }
 
-fn parse_json_responses(output: &str) -> Result<Vec<Value>> {
+pub(crate) fn parse_json_responses(output: &str) -> Result<Vec<Value>> {
     output
         .lines()
         .filter_map(|line| {
