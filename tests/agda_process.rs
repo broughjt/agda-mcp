@@ -1,11 +1,8 @@
-use agda_mcp::agda::{
-    command::Command,
-    process::{AgdaConfig, AgdaProcess},
-};
+use agda_mcp::agda::{command::Command, process::AgdaProcess};
 
 #[tokio::test]
 async fn show_version_returns_version_display_info() {
-    let mut agda = AgdaProcess::spawn(AgdaConfig::from_env())
+    let mut agda = AgdaProcess::spawn()
         .await
         .expect("failed to spawn agda --interaction-json");
 
