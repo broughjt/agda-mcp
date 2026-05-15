@@ -43,18 +43,27 @@ impl AgdaProcess {
                 source,
             })?;
 
+        // Correctness: We configured stdin/stdout/stderr with `Stdio::piped()`
+        // above. Tokio populates these fields from the corresponding
+        // `std::process::Child` fields when building `tokio::process::Child`:
+        //
+        // https://github.com/tokio-rs/tokio/blob/tokio-1.52.3/tokio/src/process/mod.rs#L948-L958
+        //
+        // The platform implementations take the captured stdio handles here:
+        //
+        // https://github.com/tokio-rs/tokio/blob/tokio-1.52.3/tokio/src/process/unix/mod.rs#L118-L122
         let stdin = child
             .stdin
             .take()
-            .ok_or(Error::MissingPipe { stream: "stdin" })?;
+            .expect("bug: Agda process stdin should be piped");
         let stdout = child
             .stdout
             .take()
-            .ok_or(Error::MissingPipe { stream: "stdout" })?;
+            .expect("bug: Agda process stdout should be piped");
         let stderr = child
             .stderr
             .take()
-            .ok_or(Error::MissingPipe { stream: "stderr" })?;
+            .expect("bug: Agda process stderr should be piped");
 
         let stderr_task = tokio::spawn(async move {
             let mut stderr = BufReader::new(stderr);
@@ -69,16 +78,13 @@ impl AgdaProcess {
             stderr_task,
         };
         process.read_prompt_output().await?;
+
         Ok(process)
     }
 
     pub async fn send_command(&mut self, command: &command::Command<'_>) -> Result<Vec<Value>> {
-        self.send_raw_command_line(&command.to_string()).await
-    }
-
-    pub async fn send_raw_command_line(&mut self, line: &str) -> Result<Vec<Value>> {
-        self.stdin.write_all(line.as_bytes()).await?;
-        self.stdin.write_all(b"\n").await?;
+        let command_line = format!("{command}\n");
+        self.stdin.write_all(command_line.as_bytes()).await?;
         self.stdin.flush().await?;
 
         let output = self.read_prompt_output().await?;
@@ -127,9 +133,6 @@ pub enum Error {
         #[source]
         source: std::io::Error,
     },
-
-    #[error("Agda process did not provide a piped {stream}")]
-    MissingPipe { stream: &'static str },
 
     #[error("I/O error while communicating with Agda: {0}")]
     Io(#[from] std::io::Error),
