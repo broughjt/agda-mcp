@@ -5,52 +5,54 @@ use std::fmt;
 /// Mirrors Agda's `IOTCM` wrapper:
 /// https://github.com/agda/agda/blob/3b57742a311b3a90b755737968d437f1ef902318/src/full/Agda/Interaction/Base.hs#L343-L351
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Command {
+pub struct Command<'a> {
     /// The editor buffer/current file this command belongs to.
-    pub current_file: String,
+    pub path: &'a str,
     pub highlighting_level: HighlightingLevel,
     pub highlighting_method: HighlightingMethod,
-    pub interaction: Interaction,
+    pub interaction: Interaction<'a>,
 }
 
-impl Command {
-    pub fn load(path: impl Into<String>, load_flags: Vec<String>) -> Self {
-        let path = path.into();
+impl<'a> Command<'a> {
+    pub fn load(path: &'a str, load_flags: &'a [String]) -> Self {
         Self {
-            current_file: path.clone(),
+            path,
             highlighting_level: HighlightingLevel::default(),
             highlighting_method: HighlightingMethod::default(),
-            interaction: Interaction::Load(Load { path, load_flags }),
+            interaction: Interaction::Load(Load {
+                path,
+                flags: load_flags,
+            }),
         }
     }
 
     pub fn give(
-        current_file: impl Into<String>,
+        path: &'a str,
         force: UseForce,
         interaction_point: u32,
-        range: RangeArgument,
-        expression: impl Into<String>,
+        range: &'a RangeArgument,
+        expression: &'a str,
     ) -> Self {
         Self {
-            current_file: current_file.into(),
+            path,
             highlighting_level: HighlightingLevel::default(),
             highlighting_method: HighlightingMethod::default(),
             interaction: Interaction::Give(Give {
                 force,
                 interaction_point,
                 range,
-                expression: expression.into(),
+                expression,
             }),
         }
     }
 }
 
-impl fmt::Display for Command {
+impl fmt::Display for Command<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "IOTCM {} {} {} ({})",
-            render_haskell_string(&self.current_file),
+            render_haskell_string(self.path),
             self.highlighting_level,
             self.highlighting_method,
             self.interaction
@@ -63,12 +65,12 @@ impl fmt::Display for Command {
 /// Mirrors Agda's `Interaction'` type:
 /// https://github.com/agda/agda/blob/3b57742a311b3a90b755737968d437f1ef902318/src/full/Agda/Interaction/Base.hs#L158-L287
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Interaction {
-    Load(Load),
-    Give(Give),
+pub enum Interaction<'a> {
+    Load(Load<'a>),
+    Give(Give<'a>),
 }
 
-impl fmt::Display for Interaction {
+impl fmt::Display for Interaction<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Load(load) => write!(f, "{load}"),
@@ -82,18 +84,18 @@ impl fmt::Display for Interaction {
 /// Mirrors Agda's `Cmd_load`:
 /// https://github.com/agda/agda/blob/3b57742a311b3a90b755737968d437f1ef902318/src/full/Agda/Interaction/Base.hs#L161-L163
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Load {
-    pub path: String,
-    pub load_flags: Vec<String>,
+pub struct Load<'a> {
+    pub path: &'a str,
+    pub flags: &'a [String],
 }
 
-impl fmt::Display for Load {
+impl fmt::Display for Load<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "Cmd_load {} {}",
-            render_haskell_string(&self.path),
-            render_string_list(&self.load_flags)
+            render_haskell_string(self.path),
+            render_string_list(self.flags)
         )
     }
 }
@@ -103,14 +105,14 @@ impl fmt::Display for Load {
 /// Mirrors Agda's `Cmd_give`:
 /// https://github.com/agda/agda/blob/3b57742a311b3a90b755737968d437f1ef902318/src/full/Agda/Interaction/Base.hs#L284-L287
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Give {
+pub struct Give<'a> {
     pub force: UseForce,
     pub interaction_point: u32,
-    pub range: RangeArgument,
-    pub expression: String,
+    pub range: &'a RangeArgument,
+    pub expression: &'a str,
 }
 
-impl fmt::Display for Give {
+impl fmt::Display for Give<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -118,7 +120,7 @@ impl fmt::Display for Give {
             self.force,
             self.interaction_point,
             self.range,
-            render_haskell_string(&self.expression)
+            render_haskell_string(self.expression)
         )
     }
 }
@@ -362,22 +364,15 @@ pub fn render_string_list<S: AsRef<str>>(items: &[S]) -> String {
     format!("[{items}]")
 }
 
-pub fn render_load_command<S: AsRef<str>>(path: &str, load_flags: &[S]) -> String {
-    Command::load(
-        path,
-        load_flags
-            .iter()
-            .map(|flag| flag.as_ref().to_owned())
-            .collect(),
-    )
-    .to_string()
+pub fn render_load_command(path: &str, load_flags: &[String]) -> String {
+    Command::load(path, load_flags).to_string()
 }
 
 pub fn render_give_command(
     path: &str,
     force: UseForce,
     interaction_point: u32,
-    range: RangeArgument,
+    range: &RangeArgument,
     expression: &str,
 ) -> String {
     Command::give(path, force, interaction_point, range, expression).to_string()
@@ -416,7 +411,7 @@ mod tests {
     #[test]
     fn renders_load_command_without_flags_like_agda_fixtures() {
         assert_eq!(
-            render_load_command("ParenJSON.agda", &[] as &[&str]),
+            render_load_command("ParenJSON.agda", &[]),
             "IOTCM \"ParenJSON.agda\" None Indirect (Cmd_load \"ParenJSON.agda\" [])"
         );
     }
@@ -424,7 +419,14 @@ mod tests {
     #[test]
     fn renders_load_command_with_load_flags() {
         assert_eq!(
-            render_load_command("Spike.agda", &["--no-default-libraries", "-i", "."]),
+            render_load_command(
+                "Spike.agda",
+                &[
+                    "--no-default-libraries".to_owned(),
+                    "-i".to_owned(),
+                    ".".to_owned(),
+                ],
+            ),
             "IOTCM \"Spike.agda\" None Indirect (Cmd_load \"Spike.agda\" [\"--no-default-libraries\", \"-i\", \".\"])"
         );
     }
@@ -436,7 +438,7 @@ mod tests {
                 "Issue2174a.agda",
                 UseForce::WithoutForce,
                 0,
-                RangeArgument(None),
+                &RangeArgument(None),
                 "F ?",
             ),
             "IOTCM \"Issue2174a.agda\" None Indirect (Cmd_give WithoutForce 0 noRange \"F ?\")"
@@ -456,7 +458,7 @@ mod tests {
                 "Issue2174a.agda",
                 UseForce::WithoutForce,
                 0,
-                RangeArgument(Some(range)),
+                &RangeArgument(Some(range)),
                 "F ?",
             ),
             "IOTCM \"Issue2174a.agda\" None Indirect (Cmd_give WithoutForce 0 (intervalsToRange (Just (mkAbsolute \"/tmp/Issue2174a.agda\")) [Interval () (Pn () 1 1 1) (Pn () 1 1 1)]) \"F ?\")"
