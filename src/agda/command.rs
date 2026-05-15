@@ -14,6 +14,15 @@ pub struct Command<'a> {
 }
 
 impl<'a> Command<'a> {
+    pub fn show_version(path: &'a str) -> Self {
+        Self {
+            path,
+            highlighting_level: HighlightingLevel::default(),
+            highlighting_method: HighlightingMethod::default(),
+            interaction: Interaction::ShowVersion,
+        }
+    }
+
     pub fn load(path: &'a str, flags: &'a [String]) -> Self {
         Self {
             path,
@@ -63,6 +72,7 @@ impl fmt::Display for Command<'_> {
 /// https://github.com/agda/agda/blob/3b57742a311b3a90b755737968d437f1ef902318/src/full/Agda/Interaction/Base.hs#L158-L287
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Interaction<'a> {
+    ShowVersion,
     Load(Load<'a>),
     Give(Give<'a>),
 }
@@ -70,6 +80,7 @@ pub enum Interaction<'a> {
 impl fmt::Display for Interaction<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ShowVersion => formatter.write_str("Cmd_show_version"),
             Self::Load(load) => write!(formatter, "{load}"),
             Self::Give(give) => write!(formatter, "{give}"),
         }
