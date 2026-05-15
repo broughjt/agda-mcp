@@ -1,11 +1,11 @@
-//! Typed views over Agda's `--interaction-json` responses.
+//! Types for Agda's `--interaction-json` responses.
 //!
 //! Every Agda response kind we know exists is enumerated explicitly. If Agda
 //! ever emits something we have not modelled, parsing hard-fails with a
-//! `serde_json` error that names the unknown variant or missing field — that
-//! is the signal to update this module. Tolerating unknown kinds silently
-//! would just push the broken JSON to the MCP caller, who has no way to act
-//! on it.
+//! `serde_json` error that names the unknown variant or missing field. This
+//! acts as a signal to update this module. Tolerating unknown kinds silently
+//! would just push the broken JSON to the MCP caller, who has no way to act on
+//! it.
 //!
 //! Mirrors Agda's `Resp_*` constructors and their JSON encoder:
 //! https://github.com/agda/agda/blob/3b57742a311b3a90b755737968d437f1ef902318/src/full/Agda/Interaction/JSONTop.hs#L438-L483
