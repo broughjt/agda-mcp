@@ -358,17 +358,6 @@ fn write_haskell_char_escaped(f: &mut impl fmt::Write, ch: char, quote: char) ->
     }
 }
 
-/// Render a Rust string as a Haskell `Read`-compatible string literal.
-pub fn render_haskell_string(input: &str) -> String {
-    let mut rendered = String::with_capacity(input.len() + 2);
-    write_haskell_string(&mut rendered, input).expect("writing to a String cannot fail");
-    rendered
-}
-
-pub fn render_string_list<S: AsRef<str>>(items: &[S]) -> String {
-    HaskellList(items).to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -376,31 +365,31 @@ mod tests {
     #[test]
     fn haskell_string_escapes_common_special_characters() {
         assert_eq!(
-            render_haskell_string("quote: \" slash: \\ newline:\n tab:\t carriage:\r"),
+            HaskellString("quote: \" slash: \\ newline:\n tab:\t carriage:\r").to_string(),
             "\"quote: \\\" slash: \\\\ newline:\\n tab:\\t carriage:\\r\""
         );
     }
 
     #[test]
     fn haskell_string_preserves_unicode() {
-        assert_eq!(render_haskell_string("λ x → x"), "\"λ x → x\"");
+        assert_eq!(HaskellString("λ x → x").to_string(), "\"λ x → x\"");
     }
 
     #[test]
     fn haskell_string_escapes_control_characters() {
-        assert_eq!(render_haskell_string("\0\x01\x7f"), "\"\\0\\1\\127\"");
+        assert_eq!(HaskellString("\0\x01\x7f").to_string(), "\"\\0\\1\\127\"");
     }
 
     #[test]
     fn haskell_string_disambiguates_numeric_escapes_before_digits() {
-        assert_eq!(render_haskell_string("\x01 2"), "\"\\1 2\"");
-        assert_eq!(render_haskell_string("\x012"), "\"\\1\\&2\"");
+        assert_eq!(HaskellString("\x01 2").to_string(), "\"\\1 2\"");
+        assert_eq!(HaskellString("\x012").to_string(), "\"\\1\\&2\"");
     }
 
     #[test]
     fn renders_string_lists() {
         assert_eq!(
-            render_string_list(&["-i", ".", "--flag=quoted\"value"]),
+            HaskellList(&["-i", ".", "--flag=quoted\"value"]).to_string(),
             "[\"-i\", \".\", \"--flag=quoted\\\"value\"]"
         );
     }
