@@ -78,6 +78,7 @@
         devShells.default = craneLib.devShell {
           checks = self.checks.${system};
           packages = with pkgs; [
+            agda
             cargo-edit
             cargo-machete
             rust-analyzer
