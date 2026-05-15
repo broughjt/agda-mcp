@@ -45,9 +45,9 @@ impl<'a> Command<'a> {
 }
 
 impl fmt::Display for Command<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
-            f,
+            formatter,
             "IOTCM {} {} {} ({})",
             HaskellString(self.path),
             self.highlighting_level,
@@ -68,10 +68,10 @@ pub enum Interaction<'a> {
 }
 
 impl fmt::Display for Interaction<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Load(load) => write!(f, "{load}"),
-            Self::Give(give) => write!(f, "{give}"),
+            Self::Load(load) => write!(formatter, "{load}"),
+            Self::Give(give) => write!(formatter, "{give}"),
         }
     }
 }
@@ -87,9 +87,9 @@ pub struct Load<'a> {
 }
 
 impl fmt::Display for Load<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
-            f,
+            formatter,
             "Cmd_load {} {}",
             HaskellString(self.path),
             HaskellList(self.flags)
@@ -110,9 +110,9 @@ pub struct Give<'a> {
 }
 
 impl fmt::Display for Give<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
-            f,
+            formatter,
             "Cmd_give {} {} {} {}",
             self.force,
             self.interaction_point,
@@ -135,11 +135,11 @@ pub enum HighlightingLevel {
 }
 
 impl fmt::Display for HighlightingLevel {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::None => f.write_str("None"),
-            Self::NonInteractive => f.write_str("NonInteractive"),
-            Self::Interactive => f.write_str("Interactive"),
+            Self::None => formatter.write_str("None"),
+            Self::NonInteractive => formatter.write_str("NonInteractive"),
+            Self::Interactive => formatter.write_str("Interactive"),
         }
     }
 }
@@ -156,10 +156,10 @@ pub enum HighlightingMethod {
 }
 
 impl fmt::Display for HighlightingMethod {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Direct => f.write_str("Direct"),
-            Self::Indirect => f.write_str("Indirect"),
+            Self::Direct => formatter.write_str("Direct"),
+            Self::Indirect => formatter.write_str("Indirect"),
         }
     }
 }
@@ -175,10 +175,10 @@ pub enum UseForce {
 }
 
 impl fmt::Display for UseForce {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::WithForce => f.write_str("WithForce"),
-            Self::WithoutForce => f.write_str("WithoutForce"),
+            Self::WithForce => formatter.write_str("WithForce"),
+            Self::WithoutForce => formatter.write_str("WithoutForce"),
         }
     }
 }
@@ -209,8 +209,12 @@ impl AgdaPosition {
 }
 
 impl fmt::Display for AgdaPosition {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Pn () {} {} {}", self.position, self.line, self.column)
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "Pn () {} {} {}",
+            self.position, self.line, self.column
+        )
     }
 }
 
@@ -231,8 +235,8 @@ impl AgdaInterval {
 }
 
 impl fmt::Display for AgdaInterval {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Interval () ({}) ({})", self.start, self.end)
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "Interval () ({}) ({})", self.start, self.end)
     }
 }
 
@@ -258,24 +262,24 @@ impl AgdaRange {
 }
 
 impl fmt::Display for AgdaRange {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.file {
             Some(file) => write!(
-                f,
+                formatter,
                 "(intervalsToRange (Just (mkAbsolute {})) [",
                 HaskellString(file)
             )?,
-            None => f.write_str("(intervalsToRange Nothing [")?,
+            None => formatter.write_str("(intervalsToRange Nothing [")?,
         }
 
         for (index, interval) in self.intervals.iter().enumerate() {
             if index > 0 {
-                f.write_str(", ")?;
+                formatter.write_str(", ")?;
             }
-            write!(f, "{interval}")?;
+            write!(formatter, "{interval}")?;
         }
 
-        f.write_str("])")
+        formatter.write_str("])")
     }
 }
 
@@ -293,10 +297,10 @@ impl From<AgdaRange> for RangeArgument {
 }
 
 impl fmt::Display for RangeArgument {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.0 {
-            None => f.write_str("noRange"),
-            Some(range) => write!(f, "{range}"),
+            None => formatter.write_str("noRange"),
+            Some(range) => write!(formatter, "{range}"),
         }
     }
 }
@@ -304,57 +308,61 @@ impl fmt::Display for RangeArgument {
 struct HaskellString<'a>(&'a str);
 
 impl fmt::Display for HaskellString<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write_haskell_string(f, self.0)
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write_haskell_string(formatter, self.0)
     }
 }
 
 struct HaskellList<'a, T>(&'a [T]);
 
 impl<T: AsRef<str>> fmt::Display for HaskellList<'_, T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("[")?;
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("[")?;
         for (index, item) in self.0.iter().enumerate() {
             if index > 0 {
-                f.write_str(", ")?;
+                formatter.write_str(", ")?;
             }
-            write_haskell_string(f, item.as_ref())?;
+            write_haskell_string(formatter, item.as_ref())?;
         }
-        f.write_str("]")
+        formatter.write_str("]")
     }
 }
 
 /// Write a Rust string as a Haskell `Read`-compatible string literal.
-pub fn write_haskell_string(f: &mut impl fmt::Write, input: &str) -> fmt::Result {
-    f.write_char('"')?;
+pub fn write_haskell_string(formatter: &mut impl fmt::Write, input: &str) -> fmt::Result {
+    formatter.write_char('"')?;
 
     let mut previous_was_numeric_escape = false;
-    for ch in input.chars() {
-        if previous_was_numeric_escape && ch.is_ascii_digit() {
-            f.write_str("\\&")?;
+    for character in input.chars() {
+        if previous_was_numeric_escape && character.is_ascii_digit() {
+            formatter.write_str("\\&")?;
         }
 
-        previous_was_numeric_escape =
-            ch == '\0' || (ch.is_control() && !matches!(ch, '\n' | '\t' | '\r'));
-        write_haskell_char_escaped(f, ch, '"')?;
+        previous_was_numeric_escape = character == '\0'
+            || (character.is_control() && !matches!(character, '\n' | '\t' | '\r'));
+        write_haskell_char_escaped(formatter, character, '"')?;
     }
 
-    f.write_char('"')
+    formatter.write_char('"')
 }
 
-fn write_haskell_char_escaped(f: &mut impl fmt::Write, ch: char, quote: char) -> fmt::Result {
-    match ch {
-        '\\' => f.write_str("\\\\"),
-        '\n' => f.write_str("\\n"),
-        '\t' => f.write_str("\\t"),
-        '\r' => f.write_str("\\r"),
-        '\0' => f.write_str("\\0"),
-        ch if ch == quote => {
-            f.write_char('\\')?;
-            f.write_char(quote)
+fn write_haskell_char_escaped(
+    formatter: &mut impl fmt::Write,
+    character: char,
+    quote: char,
+) -> fmt::Result {
+    match character {
+        '\\' => formatter.write_str("\\\\"),
+        '\n' => formatter.write_str("\\n"),
+        '\t' => formatter.write_str("\\t"),
+        '\r' => formatter.write_str("\\r"),
+        '\0' => formatter.write_str("\\0"),
+        character if character == quote => {
+            formatter.write_char('\\')?;
+            formatter.write_char(quote)
         }
-        ch if ch.is_control() => write!(f, "\\{}", ch as u32),
-        ch => f.write_char(ch),
+        character if character.is_control() => write!(formatter, "\\{}", character as u32),
+        character => formatter.write_char(character),
     }
 }
 
