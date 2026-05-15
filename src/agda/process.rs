@@ -3,7 +3,7 @@ use std::{process::Stdio, string::FromUtf8Error, time::Duration};
 use serde_json::Value;
 use thiserror::Error;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     process::{self, Child, ChildStdin, ChildStdout},
     task::JoinHandle,
     time::timeout,
@@ -99,15 +99,17 @@ impl AgdaProcess {
 
     async fn read_prompt_output_without_timeout(&mut self) -> Result<String> {
         let mut output = Vec::new();
-        let mut byte = [0];
 
         loop {
-            let bytes_read = self.stdout.read(&mut byte).await?;
-            if bytes_read == 0 {
+            let chunk = self.stdout.fill_buf().await?;
+            if chunk.is_empty() {
                 return Err(Error::EofBeforePrompt);
             }
 
-            output.push(byte[0]);
+            let length = chunk.len();
+            output.extend_from_slice(chunk);
+            self.stdout.consume(length);
+
             if output.ends_with(PROMPT.as_bytes()) {
                 output.truncate(output.len() - PROMPT.len());
                 return String::from_utf8(output).map_err(Error::Utf8);
