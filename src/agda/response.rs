@@ -17,8 +17,9 @@
 //! we want for these "known noise" kinds.
 
 use serde::Deserialize;
-use serde_json::Value;
 use thiserror::Error;
+
+use crate::agda::process::PROMPT;
 
 /// A single response object Agda emits between `JSON> ` prompts.
 ///
@@ -70,16 +71,21 @@ pub enum Response {
 }
 
 impl Response {
-    /// Parse a batch of raw responses, hard-failing on the first one that
-    /// does not match an enumerated kind/field.
-    pub fn parse_all(values: &[Value]) -> Result<Vec<Self>, ParseError> {
-        values
-            .iter()
+    /// Parse Agda's prompt-delimited output into a batch of responses,
+    /// hard-failing on the first line that does not match an enumerated
+    /// kind/field.
+    pub fn parse_all(output: &str) -> Result<Vec<Self>, ParseError> {
+        output
+            .lines()
+            .filter_map(|line| {
+                let line = line.strip_prefix(PROMPT).unwrap_or(line).trim();
+                (!line.is_empty()).then_some(line)
+            })
             .enumerate()
-            .map(|(index, value)| {
-                serde_json::from_value(value.clone()).map_err(|source| ParseError {
+            .map(|(index, line)| {
+                serde_json::from_str(line).map_err(|source| ParseError {
                     index,
-                    raw: value.clone(),
+                    raw: line.to_owned(),
                     source,
                 })
             })
@@ -185,13 +191,10 @@ pub enum GiveResult {
 }
 
 #[derive(Debug, Error)]
-#[error(
-    "failed to parse Agda response #{index}: {source}\nraw response: {}",
-    serde_json::to_string(.raw).unwrap_or_else(|_| ".raw".to_owned())
-)]
+#[error("failed to parse Agda response #{index}: {source}\nraw response: {raw}")]
 pub struct ParseError {
     pub index: usize,
-    pub raw: Value,
+    pub raw: String,
     #[source]
     pub source: serde_json::Error,
 }
@@ -200,21 +203,19 @@ pub struct ParseError {
 mod tests {
     use super::*;
 
-    use crate::agda::process::parse_json_responses;
-
     /// Verbatim copy of `~/scratch/agda/test/interaction/ParenJSON.out` from the
     /// upstream Agda repo (commit 3b57742). Kept inline so the unit test is
     /// self-contained and survives reorganising the source tree.
     const PAREN_JSON_OUT: &str = "JSON> {\"kind\":\"Status\",\"status\":{\"checked\":false,\"showImplicitArguments\":false,\"showIrrelevantArguments\":false}}\n{\"kind\":\"ClearRunningInfo\"}\n{\"kind\":\"ClearHighlighting\",\"tokenBased\":\"NotOnlyTokenBased\"}\n{\"kind\":\"Status\",\"status\":{\"checked\":false,\"showImplicitArguments\":false,\"showIrrelevantArguments\":false}}\n{\"info\":{\"errors\":[],\"invisibleGoals\":[],\"kind\":\"AllGoalsWarnings\",\"visibleGoals\":[{\"constraintObj\":{\"id\":0,\"range\":[{\"end\":{\"col\":15,\"line\":10,\"pos\":110},\"start\":{\"col\":10,\"line\":10,\"pos\":105}}]},\"kind\":\"OfType\",\"type\":\"P a\"}],\"warnings\":[]},\"kind\":\"DisplayInfo\"}\n{\"interactionPoints\":[{\"id\":0,\"range\":[{\"end\":{\"col\":15,\"line\":10,\"pos\":110},\"start\":{\"col\":10,\"line\":10,\"pos\":105}}]}],\"kind\":\"InteractionPoints\"}\n";
 
-    fn parse_one(value: Value) -> Response {
-        serde_json::from_value(value).expect("response should parse")
+    fn parse_one(line: &str) -> Response {
+        serde_json::from_str(line).expect("response should parse")
     }
 
     #[test]
     fn parses_paren_json_load_transcript() {
-        let raw = parse_json_responses(PAREN_JSON_OUT).expect("ParenJSON output should be JSON");
-        let parsed = Response::parse_all(&raw).expect("ParenJSON transcript should parse");
+        let parsed =
+            Response::parse_all(PAREN_JSON_OUT).expect("ParenJSON transcript should parse");
 
         let kinds: Vec<&'static str> = parsed
             .iter()
@@ -251,8 +252,8 @@ mod tests {
 
     #[test]
     fn extracts_all_goals_warnings_from_paren_json() {
-        let raw = parse_json_responses(PAREN_JSON_OUT).expect("ParenJSON output should be JSON");
-        let parsed = Response::parse_all(&raw).expect("ParenJSON transcript should parse");
+        let parsed =
+            Response::parse_all(PAREN_JSON_OUT).expect("ParenJSON transcript should parse");
 
         let info = parsed
             .into_iter()
@@ -287,8 +288,8 @@ mod tests {
 
     #[test]
     fn extracts_interaction_points_from_paren_json() {
-        let raw = parse_json_responses(PAREN_JSON_OUT).expect("ParenJSON output should be JSON");
-        let parsed = Response::parse_all(&raw).expect("ParenJSON transcript should parse");
+        let parsed =
+            Response::parse_all(PAREN_JSON_OUT).expect("ParenJSON transcript should parse");
 
         let points = parsed
             .into_iter()
@@ -306,11 +307,9 @@ mod tests {
 
     #[test]
     fn parses_give_action_with_string_result() {
-        let response = parse_one(serde_json::json!({
-            "kind": "GiveAction",
-            "interactionPoint": 7,
-            "giveResult": { "str": "suc zero" },
-        }));
+        let response = parse_one(
+            r#"{"kind":"GiveAction","interactionPoint":7,"giveResult":{"str":"suc zero"}}"#,
+        );
 
         let Response::GiveAction {
             interaction_point,
@@ -330,11 +329,8 @@ mod tests {
 
     #[test]
     fn parses_give_action_with_paren_true() {
-        let response = parse_one(serde_json::json!({
-            "kind": "GiveAction",
-            "interactionPoint": 0,
-            "giveResult": { "paren": true },
-        }));
+        let response =
+            parse_one(r#"{"kind":"GiveAction","interactionPoint":0,"giveResult":{"paren":true}}"#);
 
         let Response::GiveAction { give_result, .. } = response else {
             panic!("expected GiveAction");
@@ -344,11 +340,8 @@ mod tests {
 
     #[test]
     fn parses_give_action_with_paren_false() {
-        let response = parse_one(serde_json::json!({
-            "kind": "GiveAction",
-            "interactionPoint": 0,
-            "giveResult": { "paren": false },
-        }));
+        let response =
+            parse_one(r#"{"kind":"GiveAction","interactionPoint":0,"giveResult":{"paren":false}}"#);
 
         let Response::GiveAction { give_result, .. } = response else {
             panic!("expected GiveAction");
@@ -358,10 +351,9 @@ mod tests {
 
     #[test]
     fn parses_version_display_info() {
-        let response = parse_one(serde_json::json!({
-            "kind": "DisplayInfo",
-            "info": { "kind": "Version", "version": "2.7.0-abc123" },
-        }));
+        let response = parse_one(
+            r#"{"kind":"DisplayInfo","info":{"kind":"Version","version":"2.7.0-abc123"}}"#,
+        );
 
         let Response::DisplayInfo {
             info: Info::Version { version },
@@ -374,14 +366,9 @@ mod tests {
 
     #[test]
     fn parses_error_display_info() {
-        let response = parse_one(serde_json::json!({
-            "kind": "DisplayInfo",
-            "info": {
-                "kind": "Error",
-                "warnings": [],
-                "error": { "message": "Not in scope: foo" },
-            },
-        }));
+        let response = parse_one(
+            r#"{"kind":"DisplayInfo","info":{"kind":"Error","warnings":[],"error":{"message":"Not in scope: foo"}}}"#,
+        );
 
         let Response::DisplayInfo {
             info: Info::Error { warnings, error },
@@ -395,11 +382,8 @@ mod tests {
 
     #[test]
     fn unknown_top_level_kind_is_hard_error() {
-        let raw = vec![serde_json::json!({
-            "kind": "SomeFutureResponse",
-            "payload": 42,
-        })];
-        let error = Response::parse_all(&raw).expect_err("unknown kinds must hard-fail");
+        let error = Response::parse_all(r#"{"kind":"SomeFutureResponse","payload":42}"#)
+            .expect_err("unknown kinds must hard-fail");
 
         assert_eq!(error.index, 0);
         let message = format!("{error}");
@@ -415,12 +399,9 @@ mod tests {
 
     #[test]
     fn unknown_display_info_kind_is_hard_error() {
-        let raw = vec![serde_json::json!({
-            "kind": "DisplayInfo",
-            "info": { "kind": "Time", "time": "0.01s" },
-        })];
         let error =
-            Response::parse_all(&raw).expect_err("unmodelled DisplayInfo kinds must hard-fail");
+            Response::parse_all(r#"{"kind":"DisplayInfo","info":{"kind":"Time","time":"0.01s"}}"#)
+                .expect_err("unmodelled DisplayInfo kinds must hard-fail");
 
         assert_eq!(error.index, 0);
         assert!(
@@ -431,18 +412,10 @@ mod tests {
 
     #[test]
     fn unknown_visible_goal_kind_is_hard_error() {
-        let raw = vec![serde_json::json!({
-            "kind": "DisplayInfo",
-            "info": {
-                "kind": "AllGoalsWarnings",
-                "visibleGoals": [{ "kind": "CmpInType" }],
-                "invisibleGoals": [],
-                "warnings": [],
-                "errors": [],
-            },
-        })];
-        let error =
-            Response::parse_all(&raw).expect_err("unmodelled visible-goal kinds must hard-fail");
+        let error = Response::parse_all(
+            r#"{"kind":"DisplayInfo","info":{"kind":"AllGoalsWarnings","visibleGoals":[{"kind":"CmpInType"}],"invisibleGoals":[],"warnings":[],"errors":[]}}"#,
+        )
+        .expect_err("unmodelled visible-goal kinds must hard-fail");
 
         assert!(
             format!("{error}").contains("CmpInType"),
@@ -452,8 +425,8 @@ mod tests {
 
     #[test]
     fn response_without_kind_is_hard_error() {
-        let raw = vec![serde_json::json!({ "foo": "bar" })];
-        let error = Response::parse_all(&raw).expect_err("missing kind must hard-fail");
+        let error =
+            Response::parse_all(r#"{"foo":"bar"}"#).expect_err("missing kind must hard-fail");
         let message = format!("{error}");
         assert!(
             message.contains("kind") || message.contains("variant"),
@@ -463,11 +436,8 @@ mod tests {
 
     #[test]
     fn parse_error_includes_response_index_in_batch() {
-        let raw = vec![
-            serde_json::json!({ "kind": "ClearRunningInfo" }),
-            serde_json::json!({ "kind": "Bogus" }),
-        ];
-        let error = Response::parse_all(&raw).expect_err("second response should fail");
+        let error = Response::parse_all("{\"kind\":\"ClearRunningInfo\"}\n{\"kind\":\"Bogus\"}\n")
+            .expect_err("second response should fail");
         assert_eq!(error.index, 1);
     }
 
@@ -476,20 +446,10 @@ mod tests {
         // We deliberately do not model the bodies of these kinds; they should
         // still parse so that an incoming Resp_HighlightingInfo or
         // Resp_MakeCase from Agda doesn't tank the whole batch.
-        let raw = vec![
-            serde_json::json!({
-                "kind": "HighlightingInfo",
-                "direct": false,
-                "filepath": "/tmp/whatever",
-            }),
-            serde_json::json!({
-                "kind": "MakeCase",
-                "interactionPoint": 0,
-                "variant": "Function",
-                "clauses": ["foo = bar"],
-            }),
-        ];
-        let parsed = Response::parse_all(&raw).expect("known noise kinds should parse");
+        let parsed = Response::parse_all(
+            "{\"kind\":\"HighlightingInfo\",\"direct\":false,\"filepath\":\"/tmp/whatever\"}\n{\"kind\":\"MakeCase\",\"interactionPoint\":0,\"variant\":\"Function\",\"clauses\":[\"foo = bar\"]}\n",
+        )
+        .expect("known noise kinds should parse");
         assert!(matches!(parsed[0], Response::HighlightingInfo { .. }));
         assert!(matches!(parsed[1], Response::MakeCase { .. }));
     }
