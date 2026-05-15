@@ -49,7 +49,7 @@ impl fmt::Display for Command<'_> {
         write!(
             f,
             "IOTCM {} {} {} ({})",
-            render_haskell_string(self.path),
+            HaskellString(self.path),
             self.highlighting_level,
             self.highlighting_method,
             self.interaction
@@ -91,8 +91,8 @@ impl fmt::Display for Load<'_> {
         write!(
             f,
             "Cmd_load {} {}",
-            render_haskell_string(self.path),
-            render_string_list(self.flags)
+            HaskellString(self.path),
+            HaskellList(self.flags)
         )
     }
 }
@@ -117,7 +117,7 @@ impl fmt::Display for Give<'_> {
             self.force,
             self.interaction_point,
             self.range,
-            render_haskell_string(self.expression)
+            HaskellString(self.expression)
         )
     }
 }
@@ -263,7 +263,7 @@ impl fmt::Display for AgdaRange {
             Some(file) => write!(
                 f,
                 "(intervalsToRange (Just (mkAbsolute {})) [",
-                render_haskell_string(file)
+                HaskellString(file)
             )?,
             None => f.write_str("(intervalsToRange Nothing [")?,
         }
@@ -301,64 +301,72 @@ impl fmt::Display for RangeArgument {
     }
 }
 
+struct HaskellString<'a>(&'a str);
+
+impl fmt::Display for HaskellString<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write_haskell_string(f, self.0)
+    }
+}
+
+struct HaskellList<'a, T>(&'a [T]);
+
+impl<T: AsRef<str>> fmt::Display for HaskellList<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("[")?;
+        for (index, item) in self.0.iter().enumerate() {
+            if index > 0 {
+                f.write_str(", ")?;
+            }
+            write_haskell_string(f, item.as_ref())?;
+        }
+        f.write_str("]")
+    }
+}
+
+/// Write a Rust string as a Haskell `Read`-compatible string literal.
+pub fn write_haskell_string(f: &mut impl fmt::Write, input: &str) -> fmt::Result {
+    f.write_char('"')?;
+
+    let mut previous_was_numeric_escape = false;
+    for ch in input.chars() {
+        if previous_was_numeric_escape && ch.is_ascii_digit() {
+            f.write_str("\\&")?;
+        }
+
+        previous_was_numeric_escape =
+            ch == '\0' || (ch.is_control() && !matches!(ch, '\n' | '\t' | '\r'));
+        write_haskell_char_escaped(f, ch, '"')?;
+    }
+
+    f.write_char('"')
+}
+
+fn write_haskell_char_escaped(f: &mut impl fmt::Write, ch: char, quote: char) -> fmt::Result {
+    match ch {
+        '\\' => f.write_str("\\\\"),
+        '\n' => f.write_str("\\n"),
+        '\t' => f.write_str("\\t"),
+        '\r' => f.write_str("\\r"),
+        '\0' => f.write_str("\\0"),
+        ch if ch == quote => {
+            f.write_char('\\')?;
+            f.write_char(quote)
+        }
+        ch if ch.is_control() => write!(f, "\\{}", ch as u32),
+        ch => f.write_char(ch),
+    }
+}
+
 /// Render a Rust string as a Haskell `Read`-compatible string literal.
 pub fn render_haskell_string(input: &str) -> String {
     let mut rendered = String::with_capacity(input.len() + 2);
-    rendered.push('"');
-    for ch in input.chars() {
-        match ch {
-            '\\' => rendered.push_str("\\\\"),
-            '"' => rendered.push_str("\\\""),
-            '\n' => rendered.push_str("\\n"),
-            '\t' => rendered.push_str("\\t"),
-            '\r' => rendered.push_str("\\r"),
-            '\0' => rendered.push_str("\\NUL"),
-            '\x07' => rendered.push_str("\\a"),
-            '\x08' => rendered.push_str("\\b"),
-            '\x0c' => rendered.push_str("\\f"),
-            '\x0b' => rendered.push_str("\\v"),
-            '\x01' => rendered.push_str("\\SOH"),
-            '\x02' => rendered.push_str("\\STX"),
-            '\x03' => rendered.push_str("\\ETX"),
-            '\x04' => rendered.push_str("\\EOT"),
-            '\x05' => rendered.push_str("\\ENQ"),
-            '\x06' => rendered.push_str("\\ACK"),
-            '\x0e' => rendered.push_str("\\SO"),
-            '\x0f' => rendered.push_str("\\SI"),
-            '\x10' => rendered.push_str("\\DLE"),
-            '\x11' => rendered.push_str("\\DC1"),
-            '\x12' => rendered.push_str("\\DC2"),
-            '\x13' => rendered.push_str("\\DC3"),
-            '\x14' => rendered.push_str("\\DC4"),
-            '\x15' => rendered.push_str("\\NAK"),
-            '\x16' => rendered.push_str("\\SYN"),
-            '\x17' => rendered.push_str("\\ETB"),
-            '\x18' => rendered.push_str("\\CAN"),
-            '\x19' => rendered.push_str("\\EM"),
-            '\x1a' => rendered.push_str("\\SUB"),
-            '\x1b' => rendered.push_str("\\ESC"),
-            '\x1c' => rendered.push_str("\\FS"),
-            '\x1d' => rendered.push_str("\\GS"),
-            '\x1e' => rendered.push_str("\\RS"),
-            '\x1f' => rendered.push_str("\\US"),
-            '\x7f' => rendered.push_str("\\DEL"),
-            ch if ch.is_control() => {
-                rendered.push_str(&format!("\\x{:x}\\&", ch as u32));
-            }
-            ch => rendered.push(ch),
-        }
-    }
-    rendered.push('"');
+    write_haskell_string(&mut rendered, input).expect("writing to a String cannot fail");
     rendered
 }
 
 pub fn render_string_list<S: AsRef<str>>(items: &[S]) -> String {
-    let items = items
-        .iter()
-        .map(|item| render_haskell_string(item.as_ref()))
-        .collect::<Vec<_>>()
-        .join(", ");
-    format!("[{items}]")
+    HaskellList(items).to_string()
 }
 
 #[cfg(test)]
@@ -380,7 +388,13 @@ mod tests {
 
     #[test]
     fn haskell_string_escapes_control_characters() {
-        assert_eq!(render_haskell_string("\0\x01\x7f"), "\"\\NUL\\SOH\\DEL\"");
+        assert_eq!(render_haskell_string("\0\x01\x7f"), "\"\\0\\1\\127\"");
+    }
+
+    #[test]
+    fn haskell_string_disambiguates_numeric_escapes_before_digits() {
+        assert_eq!(render_haskell_string("\x01 2"), "\"\\1 2\"");
+        assert_eq!(render_haskell_string("\x012"), "\"\\1\\&2\"");
     }
 
     #[test]
