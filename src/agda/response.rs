@@ -29,7 +29,7 @@ use crate::agda::source::Interval;
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind")]
 pub enum Response {
-    /// Highlighting payload — body intentionally unmodelled.
+    /// Highlighting payload (body intentionally unmodelled)
     HighlightingInfo {},
     Status {
         status: Status,
@@ -48,11 +48,11 @@ pub enum Response {
         #[serde(rename = "giveResult")]
         give_result: GiveResult,
     },
-    /// Make-case clauses — body intentionally unmodelled for the load/give spike.
+    /// Make-case clauses (body intentionally unmodelled)
     MakeCase {},
-    /// Solve-all solutions — body intentionally unmodelled.
+    /// Solve-all solutions (body intentionally unmodelled)
     SolveAll {},
-    /// Mimer solution — body intentionally unmodelled.
+    /// Mimer solution (body intentionally unmodelled)
     Mimer {},
     DisplayInfo {
         info: Info,
@@ -72,9 +72,7 @@ pub enum Response {
 }
 
 impl Response {
-    /// Parse Agda's prompt-delimited output into a batch of responses,
-    /// hard-failing on the first line that does not match an enumerated
-    /// kind/field.
+    /// Parse and collect responses. Each response is JSON terminated by a newline.
     pub fn parse_all(output: &str) -> Result<Vec<Self>, ParseError> {
         output
             .lines()
