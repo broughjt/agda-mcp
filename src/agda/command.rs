@@ -1,5 +1,7 @@
 use std::fmt;
 
+use crate::agda::source::{Interval, Position};
+
 /// A complete command sent to Agda's `--interaction-json` REPL.
 ///
 /// Mirrors Agda's `IOTCM` wrapper:
@@ -194,63 +196,6 @@ impl fmt::Display for UseForce {
     }
 }
 
-/// A source position in Agda's interaction protocol.
-///
-/// Agda positions are 1-based. The `position` field is Agda's character
-/// position in the file, while `line` and `column` are the user-facing line and
-/// column.
-///
-/// Mirrors Agda's `Position'` / `Pn` pattern:
-/// https://github.com/agda/agda/blob/3b57742a311b3a90b755737968d437f1ef902318/src/full/Agda/Syntax/Position.hs#L134-L154
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AgdaPosition {
-    pub position: u32,
-    pub line: u32,
-    pub column: u32,
-}
-
-impl AgdaPosition {
-    pub const fn new(position: u32, line: u32, column: u32) -> Self {
-        Self {
-            position,
-            line,
-            column,
-        }
-    }
-}
-
-impl fmt::Display for AgdaPosition {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "Pn () {} {} {}",
-            self.position, self.line, self.column
-        )
-    }
-}
-
-/// A half-open source interval in Agda's interaction protocol.
-///
-/// Mirrors Agda's `Interval'`; Agda documents that `iEnd` is not included:
-/// https://github.com/agda/agda/blob/3b57742a311b3a90b755737968d437f1ef902318/src/full/Agda/Syntax/Position.hs#L238-L249
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AgdaInterval {
-    pub start: AgdaPosition,
-    pub end: AgdaPosition,
-}
-
-impl AgdaInterval {
-    pub const fn new(start: AgdaPosition, end: AgdaPosition) -> Self {
-        Self { start, end }
-    }
-}
-
-impl fmt::Display for AgdaInterval {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "Interval () ({}) ({})", self.start, self.end)
-    }
-}
-
 /// A source range in Agda's interaction protocol.
 ///
 /// Mirrors Agda's `Range'` and its `intervalsToRange` constructor function:
@@ -259,16 +204,16 @@ impl fmt::Display for AgdaInterval {
 pub struct AgdaRange {
     /// Absolute path for the range, if known.
     pub file: Option<String>,
-    pub intervals: Vec<AgdaInterval>,
+    pub intervals: Vec<Interval>,
 }
 
 impl AgdaRange {
-    pub fn new(file: Option<String>, intervals: Vec<AgdaInterval>) -> Self {
+    pub fn new(file: Option<String>, intervals: Vec<Interval>) -> Self {
         Self { file, intervals }
     }
 
-    pub fn single(file: Option<String>, start: AgdaPosition, end: AgdaPosition) -> Self {
-        Self::new(file, vec![AgdaInterval::new(start, end)])
+    pub fn single(file: Option<String>, start: Position, end: Position) -> Self {
+        Self::new(file, vec![Interval::new(start, end)])
     }
 }
 
@@ -456,8 +401,8 @@ mod tests {
     fn renders_give_command_with_explicit_range() {
         let range = AgdaRange::single(
             Some("/tmp/Issue2174a.agda".to_owned()),
-            AgdaPosition::new(1, 1, 1),
-            AgdaPosition::new(1, 1, 1),
+            Position::new(1, 1, 1),
+            Position::new(1, 1, 1),
         );
 
         assert_eq!(

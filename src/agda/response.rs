@@ -20,6 +20,7 @@ use serde::Deserialize;
 use thiserror::Error;
 
 use crate::agda::process::PROMPT;
+use crate::agda::source::Interval;
 
 /// A single response object Agda emits between `JSON> ` prompts.
 ///
@@ -159,19 +160,6 @@ pub struct Message {
 pub struct InteractionPoint {
     pub id: u32,
     pub range: Vec<Interval>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct Interval {
-    pub start: Position,
-    pub end: Position,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize)]
-pub struct Position {
-    pub pos: u32,
-    pub line: u32,
-    pub col: u32,
 }
 
 /// The `giveResult` payload inside a `GiveAction` response.
