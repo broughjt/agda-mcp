@@ -1,38 +1,85 @@
+use std::sync::Arc;
+
 use rmcp::{
-    ServerHandler, ServiceExt, handler::server::wrapper::Parameters, tool, tool_handler,
-    tool_router, transport::stdio,
+    ErrorData, ServerHandler, ServiceExt,
+    handler::server::wrapper::Parameters,
+    model::{CallToolResult, Content},
+    tool, tool_handler, tool_router,
+    transport::stdio,
 };
-use schemars::JsonSchema;
-use serde::Deserialize;
+use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
+
+use agda_mcp::server::ServerState;
+use agda_mcp::tools::{Load, LoadOutput};
 
 #[derive(Clone)]
-struct AgdaMcpServer;
+struct AgdaMcpServer {
+    state: Arc<Mutex<ServerState>>,
+}
 
-#[derive(Debug, Deserialize, JsonSchema)]
-struct HelloParams {
-    /// Optional name to greet.
-    name: Option<String>,
+impl AgdaMcpServer {
+    fn new(state: ServerState) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(state)),
+        }
+    }
 }
 
 #[tool_router]
 impl AgdaMcpServer {
-    #[tool(description = "Return a fake hello greeting")]
-    fn hello(&self, Parameters(HelloParams { name }): Parameters<HelloParams>) -> String {
-        let name = name.unwrap_or_else(|| "world".to_owned());
-        format!("Hello, {name}!")
+    #[tool(
+        description = "Type-check an Agda file and return its goals, warnings, and errors.",
+        output_schema = rmcp::handler::server::common::schema_for_output::<LoadOutput>()
+            .expect("LoadOutput should produce an object JSON schema")
+    )]
+    async fn load(
+        &self,
+        Parameters(params): Parameters<Load>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let mut state = self.state.lock().await;
+        let output = state.load(&params).await?;
+
+        // Pack the load result into an MCP tool result with both a
+        // human-readable text summary (`content`) and the typed structured
+        // payload (`structured_content`). LLM clients read the text;
+        // programmatic clients consume the structured object against the
+        // published output schema.
+        let mut result = CallToolResult::default();
+        result.content = vec![Content::text(output.format_text())];
+        result.structured_content =
+            Some(serde_json::to_value(&output).expect("LoadOutput serializes cleanly"));
+        result.is_error = Some(!output.ok);
+
+        Ok(result)
     }
 }
 
 #[tool_handler(
     name = "agda-mcp",
     version = "0.1.0",
-    instructions = "Stub MCP server for Agda with a fake hello tool."
+    instructions = "MCP server for Agda. Call `load` with the path to an Agda file to type-check it and inspect interaction goals."
 )]
 impl ServerHandler for AgdaMcpServer {}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let service = AgdaMcpServer.serve(stdio()).await?;
+    let shutdown = CancellationToken::new();
+    let state = ServerState::spawn(shutdown.clone()).await?;
+    let service = AgdaMcpServer::new(state).serve(stdio()).await?;
+
+    // When `shutdown` fires (e.g. a tool observed a protocol-fatal error),
+    // cancel the rmcp service's internal token. That makes the service loop
+    // drain its queue, flush the in-flight tool response back to the client,
+    // and return, so that `service.waiting()` below resolves cleanly.
+    let service_token = service.cancellation_token();
+    let shutdown_listener = shutdown.clone();
+    tokio::spawn(async move {
+        shutdown_listener.cancelled().await;
+        tracing::error!("shutting down MCP service: Agda interaction protocol error");
+        service_token.cancel();
+    });
+
     service.waiting().await?;
     Ok(())
 }

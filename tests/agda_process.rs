@@ -10,12 +10,12 @@ async fn show_version_returns_version_display_info() {
         .await
         .expect("failed to spawn agda --interaction-json");
 
-    let parsed = agda
+    let responses = agda
         .send(&Command::show_version("."))
         .await
         .expect("failed to send Cmd_show_version to Agda");
 
-    let version = parsed.iter().find_map(|response| match response {
+    let version = responses.iter().find_map(|response| match response {
         Response::DisplayInfo {
             info: Info::Version { version },
         } => Some(version.clone()),
@@ -24,6 +24,6 @@ async fn show_version_returns_version_display_info() {
 
     assert!(
         version.is_some(),
-        "expected a DisplayInfo/Version response, got parsed: {parsed:#?}"
+        "expected a DisplayInfo/Version response, got parsed: {responses:#?}"
     );
 }

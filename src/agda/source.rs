@@ -2,7 +2,8 @@
 
 use std::fmt;
 
-use serde::Deserialize;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 /// A source position in Agda's interaction protocol.
 ///
@@ -13,7 +14,7 @@ use serde::Deserialize;
 ///
 /// Mirrors Agda's `Position'` / `Pn` pattern:
 /// https://github.com/agda/agda/blob/3b57742a311b3a90b755737968d437f1ef902318/src/full/Agda/Syntax/Position.hs#L134-L154
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct Position {
     pub pos: u32,
     pub line: u32,
@@ -36,7 +37,7 @@ impl fmt::Display for Position {
 ///
 /// Mirrors Agda's `Interval'`; Agda documents that `iEnd` is not included:
 /// https://github.com/agda/agda/blob/3b57742a311b3a90b755737968d437f1ef902318/src/full/Agda/Syntax/Position.hs#L238-L249
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct Interval {
     pub start: Position,
     pub end: Position,

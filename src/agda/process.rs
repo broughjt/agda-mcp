@@ -10,7 +10,7 @@ use tokio::{
 
 use crate::agda::{
     command,
-    response::{ParseError, Response},
+    response::{self, ParseError, Response},
 };
 
 pub(crate) const PROMPT: &str = "JSON> ";
@@ -89,8 +89,23 @@ impl AgdaProcess {
         self.stdin.write_all(command_line.as_bytes()).await?;
         self.stdin.flush().await?;
 
-        let output = self.read_prompt_output().await?;
-        Ok(Response::parse_all(&output)?)
+        let payload = self.read_prompt_output().await?;
+        match response::parse_all(&payload) {
+            Ok(responses) => Ok(responses),
+            Err(source) => {
+                // Strict parsing failed. Re-parse the same payload as raw JSON
+                // values for diagnostics. If even that fails, the payload
+                // string is still attached. Either way, the protocol is out of
+                // sync with our types. The caller is expected to treat this as
+                // fatal for the session.
+                let payload_values = response::parse_raw_values(&payload).ok();
+                Err(Error::Parse(Box::new(ParseFailure {
+                    source,
+                    payload,
+                    payload_values,
+                })))
+            }
+        }
     }
 
     async fn read_prompt_output(&mut self) -> Result<String> {
@@ -150,6 +165,42 @@ pub enum Error {
     #[error("Agda output was not UTF-8: {0}")]
     Utf8(#[from] FromUtf8Error),
 
-    #[error(transparent)]
-    Parse(#[from] ParseError),
+    #[error("failed to parse Agda response: {0}")]
+    Parse(Box<ParseFailure>),
+}
+
+impl Error {
+    /// Whether this error indicates the wire-level protocol is out of sync
+    /// with our parser. Callers should treat protocol-fatal errors as
+    /// terminal for the session.
+    pub fn is_protocol_fatal(&self) -> bool {
+        matches!(self, Self::Parse(_) | Self::Utf8(_) | Self::EofBeforePrompt)
+    }
+}
+
+/// Rich diagnostic captured when strict response parsing fails.
+///
+/// `source` is the strict-parse error (line index, raw line, underlying
+/// `serde_json::Error`). `payload` is the full prompt-delimited output we
+/// read from Agda. `payload_values` is a best-effort fallback parse of the
+/// same payload into untyped JSON values; `None` means even the loose parse
+/// failed (a line wasn't valid JSON at all), in which case `payload`
+/// remains the authoritative diagnostic.
+#[derive(Debug)]
+pub struct ParseFailure {
+    pub source: ParseError,
+    pub payload: String,
+    pub payload_values: Option<Vec<serde_json::Value>>,
+}
+
+impl std::fmt::Display for ParseFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}", self.source)
+    }
+}
+
+impl std::error::Error for ParseFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
 }

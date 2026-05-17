@@ -201,13 +201,13 @@ impl fmt::Display for UseForce {
 /// Mirrors Agda's `Range'` and its `intervalsToRange` constructor function:
 /// https://github.com/agda/agda/blob/3b57742a311b3a90b755737968d437f1ef902318/src/full/Agda/Syntax/Position.hs#L309-L363
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AgdaRange {
+pub struct Range {
     /// Absolute path for the range, if known.
     pub file: Option<String>,
     pub intervals: Vec<Interval>,
 }
 
-impl AgdaRange {
+impl Range {
     pub fn new(file: Option<String>, intervals: Vec<Interval>) -> Self {
         Self { file, intervals }
     }
@@ -217,7 +217,7 @@ impl AgdaRange {
     }
 }
 
-impl fmt::Display for AgdaRange {
+impl fmt::Display for Range {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.file {
             Some(file) => write!(
@@ -244,12 +244,12 @@ impl fmt::Display for AgdaRange {
 /// Agda command parsing accepts either `noRange` or `intervalsToRange ...`:
 /// https://github.com/agda/agda/blob/3b57742a311b3a90b755737968d437f1ef902318/src/full/Agda/Interaction/Base.hs#L428-L431
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct RangeArgument(pub Option<AgdaRange>);
+pub struct RangeArgument(pub Option<Range>);
 
 pub const NO_RANGE: RangeArgument = RangeArgument(None);
 
-impl From<AgdaRange> for RangeArgument {
-    fn from(range: AgdaRange) -> Self {
+impl From<Range> for RangeArgument {
+    fn from(range: Range) -> Self {
         Self(Some(range))
     }
 }
@@ -399,7 +399,7 @@ mod tests {
 
     #[test]
     fn renders_give_command_with_explicit_range() {
-        let range = AgdaRange::single(
+        let range = Range::single(
             Some("/tmp/Issue2174a.agda".to_owned()),
             Position::new(1, 1, 1),
             Position::new(1, 1, 1),
