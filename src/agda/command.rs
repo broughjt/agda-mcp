@@ -2,9 +2,9 @@ use std::fmt;
 
 use crate::agda::source::{Interval, Position};
 
-/// A complete command sent to Agda's `--interaction-json` REPL.
+/// A command sent to Agda's `--interaction-json` REPL.
 ///
-/// Mirrors Agda's `IOTCM` wrapper:
+/// Mirrors Agda's `IOTCM'` wrapper:
 /// https://github.com/agda/agda/blob/3b57742a311b3a90b755737968d437f1ef902318/src/full/Agda/Interaction/Base.hs#L343-L351
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Command<'a> {
@@ -101,11 +101,10 @@ pub struct Load<'a> {
 
 impl fmt::Display for Load<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
+        write!(formatter, "Cmd_load {} ", HaskellString(self.path))?;
+        write_haskell_list(
             formatter,
-            "Cmd_load {} {}",
-            HaskellString(self.path),
-            HaskellList(self.flags)
+            self.flags.iter().map(|flag| HaskellString(flag.as_str())),
         )
     }
 }
@@ -222,20 +221,14 @@ impl fmt::Display for Range {
         match &self.file {
             Some(file) => write!(
                 formatter,
-                "(intervalsToRange (Just (mkAbsolute {})) [",
+                "(intervalsToRange (Just (mkAbsolute {})) ",
                 HaskellString(file)
             )?,
-            None => formatter.write_str("(intervalsToRange Nothing [")?,
+            None => formatter.write_str("(intervalsToRange Nothing ")?,
         }
 
-        for (index, interval) in self.intervals.iter().enumerate() {
-            if index > 0 {
-                formatter.write_str(", ")?;
-            }
-            write!(formatter, "{interval}")?;
-        }
-
-        formatter.write_str("])")
+        write_haskell_list(formatter, self.intervals.iter())?;
+        formatter.write_str(")")
     }
 }
 
@@ -271,19 +264,18 @@ impl fmt::Display for HaskellString<'_> {
     }
 }
 
-struct HaskellList<'a, T>(&'a [T]);
-
-impl<T: AsRef<str>> fmt::Display for HaskellList<'_, T> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("[")?;
-        for (index, item) in self.0.iter().enumerate() {
-            if index > 0 {
-                formatter.write_str(", ")?;
-            }
-            write_haskell_string(formatter, item.as_ref())?;
+fn write_haskell_list(
+    formatter: &mut impl fmt::Write,
+    items: impl IntoIterator<Item = impl fmt::Display>,
+) -> fmt::Result {
+    formatter.write_str("[")?;
+    for (index, item) in items.into_iter().enumerate() {
+        if index > 0 {
+            formatter.write_str(", ")?;
         }
-        formatter.write_str("]")
+        write!(formatter, "{item}")?;
     }
+    formatter.write_str("]")
 }
 
 /// Write a Rust string as a Haskell `Read`-compatible string literal.
@@ -354,10 +346,16 @@ mod tests {
 
     #[test]
     fn renders_string_lists() {
-        assert_eq!(
-            HaskellList(&["-i", ".", "--flag=quoted\"value"]).to_string(),
-            "[\"-i\", \".\", \"--flag=quoted\\\"value\"]"
-        );
+        let mut output = String::new();
+        write_haskell_list(
+            &mut output,
+            ["-i", ".", "--flag=quoted\"value"]
+                .iter()
+                .map(|flag| HaskellString(flag)),
+        )
+        .unwrap();
+
+        assert_eq!(output, "[\"-i\", \".\", \"--flag=quoted\\\"value\"]");
     }
 
     #[test]
