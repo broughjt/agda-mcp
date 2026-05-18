@@ -171,19 +171,19 @@ pub enum OutputConstraint<C> {
         #[serde(rename = "constraintObj")]
         constraint_obj: C,
         #[serde(rename = "type")]
-        ty: String,
+        _type: String,
     },
     CmpInType {
         comparison: String,
         #[serde(rename = "type")]
-        ty: String,
+        _type: String,
         #[serde(rename = "constraintObjs")]
         constraint_objs: Vec<C>,
     },
     CmpElim {
         polarities: Vec<String>,
         #[serde(rename = "type")]
-        ty: String,
+        _type: String,
         #[serde(rename = "constraintObjs")]
         constraint_objs: Vec<Vec<C>>,
     },
@@ -225,7 +225,7 @@ pub enum OutputConstraint<C> {
         constraint_obj: C,
         value: String,
         #[serde(rename = "type")]
-        ty: String,
+        _type: String,
     },
     PostponedCheckArgs {
         #[serde(rename = "constraintObj")]
@@ -234,22 +234,22 @@ pub enum OutputConstraint<C> {
         of_type: String,
         arguments: Vec<String>,
         #[serde(rename = "type")]
-        ty: String,
+        _type: String,
     },
     IsEmptyType {
         #[serde(rename = "type")]
-        ty: String,
+        _type: String,
     },
     SizeLtSat {
         #[serde(rename = "type")]
-        ty: String,
+        _type: String,
     },
     FindInstanceOF {
         #[serde(rename = "constraintObj")]
         constraint_obj: C,
         candidates: Vec<Candidate>,
         #[serde(rename = "type")]
-        ty: String,
+        _type: String,
     },
     ResolveInstanceOF {
         name: String,
@@ -261,7 +261,7 @@ pub enum OutputConstraint<C> {
     PostponedCheckFunDef {
         name: String,
         #[serde(rename = "type")]
-        ty: String,
+        _type: String,
         error: Message,
     },
     DataSort {
@@ -405,11 +405,15 @@ mod tests {
         assert!(errors.is_empty());
         assert_eq!(visible_goals.len(), 1);
 
-        let OutputConstraint::OfType { constraint_obj, ty } = &visible_goals[0] else {
+        let OutputConstraint::OfType {
+            constraint_obj,
+            _type,
+        } = &visible_goals[0]
+        else {
             panic!("expected OfType visible goal")
         };
         assert_eq!(constraint_obj.id, 0);
-        assert_eq!(ty, "P a");
+        assert_eq!(_type, "P a");
         assert_eq!(constraint_obj.range.len(), 1);
         assert_eq!(constraint_obj.range[0].start.pos, 105);
         assert_eq!(constraint_obj.range[0].end.pos, 110);
@@ -553,13 +557,17 @@ mod tests {
         };
 
         assert_eq!(invisible_goals.len(), 1);
-        let OutputConstraint::OfType { constraint_obj, ty } = &invisible_goals[0] else {
+        let OutputConstraint::OfType {
+            constraint_obj,
+            _type,
+        } = &invisible_goals[0]
+        else {
             panic!("expected OfType invisible goal")
         };
         assert_eq!(constraint_obj.name, "_0");
         assert_eq!(constraint_obj.range[0].start.line, 6);
         assert_eq!(constraint_obj.range[0].start.col, 7);
-        assert_eq!(ty, "Type");
+        assert_eq!(_type, "Type");
     }
 
     #[test]
@@ -578,14 +586,14 @@ mod tests {
         assert_eq!(visible_goals.len(), 1);
         let OutputConstraint::CmpInType {
             comparison,
-            ty,
+            _type,
             constraint_objs,
         } = &visible_goals[0]
         else {
             panic!("expected CmpInType visible goal")
         };
         assert_eq!(comparison, "CmpEq");
-        assert_eq!(ty, "Nat");
+        assert_eq!(_type, "Nat");
         assert_eq!(constraint_objs.len(), 2);
         assert_eq!(constraint_objs[0].id, 0);
         assert_eq!(constraint_objs[1].id, 1);
