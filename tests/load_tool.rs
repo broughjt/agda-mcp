@@ -1,7 +1,7 @@
 use std::fs;
 
 use agda_mcp::server::ServerState;
-use agda_mcp::tools::Load;
+use agda_mcp::tools::LoadRequest;
 use tempfile::tempdir;
 use tokio_util::sync::CancellationToken;
 
@@ -23,14 +23,16 @@ async fn load_spike_file_returns_single_nat_goal() {
         .await
         .expect("failed to spawn Agda interaction process");
     let output = state
-        .load(&Load {
+        .load(&LoadRequest {
             path: spike_path.to_string_lossy().into_owned(),
         })
         .await
         .expect("load should succeed against a well-formed file");
 
-    assert!(output.ok, "expected ok=true, errors: {:#?}", output.errors);
-    assert!(output.checked, "expected checked=true");
+    assert!(
+        !output.checked,
+        "Agda reports checked=false while interaction goals remain open"
+    );
     assert!(output.errors.is_empty(), "errors: {:?}", output.errors);
 
     assert_eq!(
@@ -42,9 +44,9 @@ async fn load_spike_file_returns_single_nat_goal() {
     let goal = &output.goals[0];
     assert_eq!(goal.id, 0, "expected goal id 0, got {}", goal.id);
     assert!(
-        goal.ty.contains("Nat"),
+        goal._type.contains("Nat"),
         "expected goal type to contain `Nat`, got {:?}",
-        goal.ty
+        goal._type
     );
     assert!(
         !goal.range.is_empty(),
@@ -56,14 +58,11 @@ async fn load_spike_file_returns_single_nat_goal() {
         "expected goal range to span at least one character: {interval:?}"
     );
 
-    // Canonicalised path should match the temp file we just wrote.
+    // The session should remember the load.
     let expected_path = fs::canonicalize(&spike_path)
         .expect("canonicalise spike path")
         .to_string_lossy()
         .into_owned();
-    assert_eq!(output.current_file, expected_path);
-
-    // The session should remember the load.
     let loaded = state.loaded().expect("state should cache the loaded file");
     assert_eq!(loaded.current_file, expected_path);
     assert_eq!(loaded.goals.len(), 1);

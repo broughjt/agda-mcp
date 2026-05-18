@@ -1,5 +1,8 @@
+use std::fmt;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use crate::agda::{
     command::Command,
@@ -9,36 +12,153 @@ use crate::agda::{
 
 /// Parameters for the MCP `load` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
-pub struct Load {
+pub struct LoadRequest {
     /// Path to the Agda file to load.
     pub path: String,
     // TODO: Whether to use the command line flags here?
 }
 
-impl Load {
-    pub fn to_agda_command(&self) -> Command<'_> {
+impl LoadRequest {
+    pub fn to_command(&self) -> Command<'_> {
         Command::load(&self.path, &[])
     }
 }
 
 /// Summary returned to the MCP client for a `load` call.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct LoadOutput {
-    /// `true` when Agda accepted the file with no errors.
-    pub ok: bool,
-    /// `true` when Agda finished type checking the file without errors.
+pub struct LoadResponse {
+    /// Agda's final `Status.checked` value after the load.
     ///
-    /// This is derived from the same signal as `ok` for now: the spike does
-    /// not distinguish "type-checking ran" from "type-checking succeeded".
+    /// This is `true` only when Agda considers the file checked. A file with
+    /// open interaction goals can load without hard errors while still having
+    /// `checked = false`.
     pub checked: bool,
-    /// Absolute path of the file that was loaded, canonicalised if possible.
-    pub current_file: String,
     /// Visible interaction goals after the load, in the order Agda reported.
     pub goals: Vec<Goal>,
     /// Non-fatal warnings reported by Agda.
     pub warnings: Vec<String>,
-    /// Errors reported by Agda. Non-empty when `ok` is `false`.
+    /// Errors reported by Agda.
     pub errors: Vec<String>,
+}
+
+impl fmt::Display for LoadResponse {
+    /// Render the load result in an Agda-like format for humans.
+    ///
+    /// The structured fields remain the source of truth for clients that need
+    /// machine-readable data. This text is intentionally close to Agda's Emacs
+    /// info buffer: goals first, then grouped errors, then grouped warnings,
+    /// but without the long horizontal rule delimiters.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.goals.is_empty() && self.errors.is_empty() && self.warnings.is_empty() {
+            return if self.checked {
+                formatter.write_str("Checked. No goals, warnings, or errors.")
+            } else {
+                formatter.write_str(
+                    "Loaded, but Agda reports `checked=false`. No visible goals, warnings, or errors.",
+                )
+            };
+        }
+
+        if let Some((goal, remaining_goals)) = self.goals.split_first() {
+            write!(formatter, "{goal}")?;
+            for goal in remaining_goals {
+                write!(formatter, "\n{goal}")?;
+            }
+        }
+
+        if !self.goals.is_empty() && (!self.errors.is_empty() || !self.warnings.is_empty()) {
+            formatter.write_str("\n\n")?;
+        }
+
+        match self.errors.as_slice() {
+            [] => {}
+            [error] => write!(formatter, "Error:\n{error}")?,
+            [first_error, remaining_errors @ ..] => {
+                write!(formatter, "Errors:\n{first_error}")?;
+                for error in remaining_errors {
+                    write!(formatter, "\n\n{error}")?;
+                }
+            }
+        }
+
+        if !self.errors.is_empty() && !self.warnings.is_empty() {
+            formatter.write_str("\n\n")?;
+        }
+
+        match self.warnings.as_slice() {
+            [] => {}
+            [warning] => write!(formatter, "Warning:\n{warning}")?,
+            [first_warning, remaining_warnings @ ..] => {
+                write!(formatter, "Warnings:\n{first_warning}")?;
+                for warning in remaining_warnings {
+                    write!(formatter, "\n\n{warning}")?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl TryFrom<Vec<Response>> for LoadResponse {
+    type Error = LoadResponseError;
+
+    fn try_from(responses: Vec<Response>) -> Result<Self, Self::Error> {
+        let mut checked = None;
+        let mut goals = Vec::new();
+        let mut warnings = Vec::new();
+        let mut errors = Vec::new();
+
+        for response in responses {
+            match response {
+                Response::Status { status } => checked = Some(status.checked),
+                Response::DisplayInfo {
+                    info:
+                        Info::AllGoalsWarnings {
+                            visible_goals,
+                            warnings: agda_warnings,
+                            errors: agda_errors,
+                            ..
+                        },
+                } => {
+                    for goal in visible_goals {
+                        let VisibleGoal::OfType { constraint_obj, ty } = goal;
+                        goals.push(Goal {
+                            id: constraint_obj.id,
+                            range: constraint_obj.range,
+                            _type: ty,
+                        });
+                    }
+                    warnings.extend(agda_warnings.into_iter().map(|m| m.message));
+                    errors.extend(agda_errors.into_iter().map(|m| m.message));
+                }
+                Response::DisplayInfo {
+                    info:
+                        Info::Error {
+                            warnings: agda_warnings,
+                            error,
+                        },
+                } => {
+                    warnings.extend(agda_warnings.into_iter().map(|m| m.message));
+                    errors.push(error.message);
+                }
+                _ => {}
+            }
+        }
+
+        Ok(Self {
+            checked: checked.ok_or(LoadResponseError::MissingStatus)?,
+            goals,
+            warnings,
+            errors,
+        })
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum LoadResponseError {
+    #[error("Cmd_load output did not include a Status response")]
+    MissingStatus,
 }
 
 /// A visible interaction goal in the current file.
@@ -47,107 +167,19 @@ pub struct Goal {
     pub id: u32,
     pub range: Vec<Interval>,
     #[serde(rename = "type")]
-    pub ty: String,
+    pub _type: String,
 }
 
-impl LoadOutput {
-    /// Compact human-readable summary, one line per goal/warning/error.
-    ///
-    /// Intended for the `content` field of the MCP tool result, where an LLM
-    /// reads it directly. The full structured payload lives in
-    /// `structured_content` alongside this text.
-    pub fn format_text(&self) -> String {
-        let mut lines: Vec<String> = Vec::new();
-        for error in &self.errors {
-            lines.push(format!("[Error] {error}"));
+impl fmt::Display for Goal {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.range.first() {
+            Some(interval) => write!(
+                formatter,
+                "?{} : {} at {}:{}",
+                self.id, self._type, interval.start.line, interval.start.col
+            ),
+            None => write!(formatter, "?{} : {}", self.id, self._type),
         }
-        for warning in &self.warnings {
-            lines.push(format!("[Warning] {warning}"));
-        }
-        for goal in &self.goals {
-            let location = goal
-                .range
-                .first()
-                .map(|interval| format!(" at {}:{}", interval.start.line, interval.start.col))
-                .unwrap_or_default();
-            lines.push(format!("[Goal {}] {}{location}", goal.id, goal.ty));
-        }
-
-        if lines.is_empty() {
-            return if self.checked {
-                format!(
-                    "Checked {}. No goals, warnings, or errors.",
-                    self.current_file
-                )
-            } else {
-                format!("Failed to check {}.", self.current_file)
-            };
-        }
-
-        let header = if self.checked {
-            format!("Checked {}.", self.current_file)
-        } else {
-            format!("Failed to check {}.", self.current_file)
-        };
-        lines.insert(0, header);
-        lines.join("\n")
-    }
-}
-
-/// Build a `LoadOutput` from the responses Agda emitted for one `Cmd_load`.
-///
-/// Errors are collected from any `DisplayInfo Error` response and from the
-/// `errors` field of `AllGoalsWarnings`. Either source makes `ok` and
-/// `checked` `false`.
-pub fn summarize_load(current_file: String, responses: &[Response]) -> LoadOutput {
-    let mut goals = Vec::new();
-    let mut warnings = Vec::new();
-    let mut errors = Vec::new();
-
-    for response in responses {
-        match response {
-            Response::DisplayInfo {
-                info:
-                    Info::AllGoalsWarnings {
-                        visible_goals,
-                        warnings: agda_warnings,
-                        errors: agda_errors,
-                        ..
-                    },
-            } => {
-                for goal in visible_goals {
-                    let VisibleGoal::OfType { constraint_obj, ty } = goal;
-                    goals.push(Goal {
-                        id: constraint_obj.id,
-                        range: constraint_obj.range.clone(),
-                        ty: ty.clone(),
-                    });
-                }
-                warnings.extend(agda_warnings.iter().map(|m| m.message.clone()));
-                errors.extend(agda_errors.iter().map(|m| m.message.clone()));
-            }
-            Response::DisplayInfo {
-                info:
-                    Info::Error {
-                        warnings: agda_warnings,
-                        error,
-                    },
-            } => {
-                warnings.extend(agda_warnings.iter().map(|m| m.message.clone()));
-                errors.push(error.message.clone());
-            }
-            _ => {}
-        }
-    }
-
-    let ok = errors.is_empty();
-    LoadOutput {
-        ok,
-        checked: ok,
-        current_file,
-        goals,
-        warnings,
-        errors,
     }
 }
 
@@ -167,6 +199,17 @@ mod tests {
         })
     }
 
+    fn status(checked: bool) -> serde_json::Value {
+        json!({
+            "kind": "Status",
+            "status": {
+                "checked": checked,
+                "showImplicitArguments": false,
+                "showIrrelevantArguments": false,
+            },
+        })
+    }
+
     fn all_goals_warnings(goals: serde_json::Value) -> serde_json::Value {
         json!({
             "kind": "DisplayInfo",
@@ -180,25 +223,41 @@ mod tests {
         })
     }
 
+    fn interaction_points(points: serde_json::Value) -> serde_json::Value {
+        json!({
+            "kind": "InteractionPoints",
+            "interactionPoints": points,
+        })
+    }
+
+    fn parse_responses(raw: Vec<serde_json::Value>) -> Vec<Response> {
+        raw.into_iter()
+            .map(|value| serde_json::from_value::<Response>(value).unwrap())
+            .collect()
+    }
+
     #[test]
-    fn summarize_load_extracts_visible_goals() {
-        let raw = [all_goals_warnings(json!([{
-            "kind": "OfType",
-            "constraintObj": point(0, 100, 105),
-            "type": "Nat",
-        }]))];
-        let responses = raw
-            .iter()
-            .map(|value| serde_json::from_value::<Response>(value.clone()).unwrap())
-            .collect::<Vec<_>>();
+    fn load_output_extracts_visible_goals_and_checked_status() {
+        let point = point(0, 100, 105);
+        let responses = parse_responses(vec![
+            status(false),
+            json!({ "kind": "ClearRunningInfo" }),
+            json!({ "kind": "ClearHighlighting", "tokenBased": "NotOnlyTokenBased" }),
+            status(false),
+            all_goals_warnings(json!([{
+                "kind": "OfType",
+                "constraintObj": point.clone(),
+                "type": "Nat",
+            }])),
+            interaction_points(json!([point])),
+        ]);
 
-        let output = summarize_load("/tmp/X.agda".to_owned(), &responses);
+        let output = LoadResponse::try_from(responses).unwrap();
 
-        assert!(output.ok);
-        assert!(output.checked);
+        assert!(!output.checked, "holes should keep checked=false");
         assert_eq!(output.goals.len(), 1);
         assert_eq!(output.goals[0].id, 0);
-        assert_eq!(output.goals[0].ty, "Nat");
+        assert_eq!(output.goals[0]._type, "Nat");
         assert_eq!(
             output.goals[0].range,
             vec![Interval::new(
@@ -209,70 +268,194 @@ mod tests {
         assert!(output.errors.is_empty());
     }
 
+    fn goal(id: u32, ty: &str, line: u32, col: u32) -> Goal {
+        Goal {
+            id,
+            range: vec![Interval::new(
+                Position::new(100 + id, line, col),
+                Position::new(101 + id, line, col + 1),
+            )],
+            _type: ty.to_owned(),
+        }
+    }
+
+    fn load_response(
+        checked: bool,
+        goals: Vec<Goal>,
+        warnings: Vec<&str>,
+        errors: Vec<&str>,
+    ) -> LoadResponse {
+        LoadResponse {
+            checked,
+            goals,
+            warnings: warnings.into_iter().map(str::to_owned).collect(),
+            errors: errors.into_iter().map(str::to_owned).collect(),
+        }
+    }
+
     #[test]
-    fn format_text_summarises_goals_warnings_errors() {
-        let output = LoadOutput {
-            ok: false,
-            checked: false,
-            current_file: "/tmp/X.agda".to_owned(),
-            goals: vec![Goal {
-                id: 0,
-                range: vec![Interval::new(
-                    Position::new(100, 5, 10),
-                    Position::new(105, 5, 15),
-                )],
-                ty: "Nat".to_owned(),
-            }],
-            warnings: vec!["Unsolved meta".to_owned()],
-            errors: vec!["Not in scope: foo".to_owned()],
-        };
+    fn display_scenario_successful_typecheck_no_holes() {
+        let output = load_response(true, vec![], vec![], vec![]);
 
         assert_eq!(
-            output.format_text(),
-            "Failed to check /tmp/X.agda.\n\
-             [Error] Not in scope: foo\n\
-             [Warning] Unsolved meta\n\
-             [Goal 0] Nat at 5:10"
+            output.to_string(),
+            "Checked. No goals, warnings, or errors."
         );
     }
 
     #[test]
-    fn format_text_handles_clean_load() {
-        let output = LoadOutput {
-            ok: true,
-            checked: true,
-            current_file: "/tmp/X.agda".to_owned(),
-            goals: vec![],
-            warnings: vec![],
-            errors: vec![],
-        };
+    fn display_scenario_successful_load_with_holes() {
+        let output = load_response(false, vec![goal(0, "Unit", 9, 5)], vec![], vec![]);
+
+        assert_eq!(output.to_string(), "?0 : Unit at 9:5");
+    }
+
+    #[test]
+    fn display_scenario_type_error_and_holes() {
+        let message = "/home/jackson/repositories/hott-reals/source/MCPExamples/TypeErrorAndHole.agda:15.7-11: error: [UnequalTerms]\nBool !=< Unit\nwhen checking that the expression true has type Unit";
+        let output = load_response(false, vec![], vec![], vec![message]);
+
+        assert_eq!(output.to_string(), format!("Error:\n{message}"));
+    }
+
+    #[test]
+    fn display_scenario_type_error_no_holes() {
+        let message = "/home/jackson/repositories/hott-reals/source/MCPExamples/TypeErrorNoHoles.agda:12.7-11: error: [UnequalTerms]\nBool !=< Unit\nwhen checking that the expression true has type Unit";
+        let output = load_response(false, vec![], vec![], vec![message]);
+
+        assert_eq!(output.to_string(), format!("Error:\n{message}"));
+    }
+
+    #[test]
+    fn display_scenario_type_warning() {
+        let message = "/home/jackson/repositories/hott-reals/source/MCPExamples/Warning.agda:3.1-8: warning: -W[no]EmptyPrivate\nEmpty private block.";
+        let output = load_response(true, vec![], vec![message], vec![]);
+
+        assert_eq!(output.to_string(), format!("Warning:\n{message}"));
+    }
+
+    #[test]
+    fn display_scenario_parse_error() {
+        let message = "/home/jackson/repositories/hott-reals/source/MCPExamples/ParseError.agda:6.5: error: [ParseError]\n<EOF><ERROR> ...";
+        let output = load_response(false, vec![], vec![], vec![message]);
+
+        assert_eq!(output.to_string(), format!("Error:\n{message}"));
+    }
+
+    #[test]
+    fn display_groups_multiple_errors() {
+        let output = load_response(false, vec![], vec![], vec!["first error", "second error"]);
+
+        assert_eq!(output.to_string(), "Errors:\nfirst error\n\nsecond error");
+    }
+
+    #[test]
+    fn display_groups_multiple_warnings() {
+        let output = load_response(
+            true,
+            vec![],
+            vec!["first warning", "second warning"],
+            vec![],
+        );
 
         assert_eq!(
-            output.format_text(),
-            "Checked /tmp/X.agda. No goals, warnings, or errors."
+            output.to_string(),
+            "Warnings:\nfirst warning\n\nsecond warning"
         );
     }
 
     #[test]
-    fn summarize_load_treats_display_info_error_as_failure() {
-        let raw = [json!({
-            "kind": "DisplayInfo",
-            "info": {
-                "kind": "Error",
-                "warnings": [],
-                "error": { "message": "Not in scope: foo" },
-            }
-        })];
-        let responses = raw
-            .iter()
-            .map(|value| serde_json::from_value::<Response>(value.clone()).unwrap())
-            .collect::<Vec<_>>();
+    fn display_groups_goals_errors_and_warnings() {
+        let output = load_response(
+            false,
+            vec![goal(0, "Nat", 5, 10)],
+            vec!["Unsolved meta"],
+            vec!["Not in scope: foo"],
+        );
 
-        let output = summarize_load("/tmp/X.agda".to_owned(), &responses);
+        assert_eq!(
+            output.to_string(),
+            "?0 : Nat at 5:10\n\nError:\nNot in scope: foo\n\nWarning:\nUnsolved meta"
+        );
+    }
 
-        assert!(!output.ok);
+    #[test]
+    fn display_formats_multiple_goals() {
+        let output = load_response(
+            false,
+            vec![goal(0, "A", 1, 2), goal(1, "B", 3, 4)],
+            vec![],
+            vec![],
+        );
+
+        assert_eq!(output.to_string(), "?0 : A at 1:2\n?1 : B at 3:4");
+    }
+
+    #[test]
+    fn display_handles_checked_false_without_visible_messages() {
+        let output = load_response(false, vec![], vec![], vec![]);
+
+        assert_eq!(
+            output.to_string(),
+            "Loaded, but Agda reports `checked=false`. No visible goals, warnings, or errors."
+        );
+    }
+
+    #[test]
+    fn load_output_treats_display_info_error_as_failure() {
+        let responses = parse_responses(vec![
+            status(false),
+            json!({
+                "kind": "DisplayInfo",
+                "info": {
+                    "kind": "Error",
+                    "warnings": [],
+                    "error": { "message": "Not in scope: foo" },
+                }
+            }),
+            json!({
+                "kind": "JumpToError",
+                "filepath": "/tmp/X.agda",
+                "position": 1,
+            }),
+            json!({ "kind": "HighlightingInfo", "direct": false, "filepath": "/tmp/agda" }),
+            status(false),
+        ]);
+
+        let output = LoadResponse::try_from(responses).unwrap();
+
         assert!(!output.checked);
         assert_eq!(output.errors, vec!["Not in scope: foo".to_owned()]);
         assert!(output.goals.is_empty());
     }
+
+    // #[test]
+    // fn rejects_give_responses() {
+    //     let responses = parse_responses(vec![
+    //         status(false),
+    //         json!({ "kind": "GiveAction", "interactionPoint": 0, "giveResult": { "str": "tt" } }),
+    //     ]);
+
+    //     let error =
+    //         LoadResponse::try_from(responses).expect_err("GiveAction is not Cmd_load output");
+    //     assert!(matches!(
+    //         error,
+    //         LoadResponseError::UnexpectedResponse {
+    //             kind: "GiveAction",
+    //             ..
+    //         }
+    //     ));
+    // }
+
+    // #[test]
+    // fn rejects_metas_responses_without_interaction_points() {
+    //     let responses = parse_responses(vec![status(false), all_goals_warnings(json!([]))]);
+
+    //     let error = LoadResponse::try_from(responses)
+    //         .expect_err("Cmd_metas-like output should not be accepted as Cmd_load");
+    //     assert!(matches!(
+    //         error,
+    //         LoadResponseError::InteractionPointsCount { count: 0 }
+    //     ));
+    // }
 }

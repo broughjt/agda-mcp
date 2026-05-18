@@ -16,7 +16,7 @@ use crate::agda::{
     process::{self, AgdaProcess},
     response::Response,
 };
-use crate::tools::{Goal, Load, LoadOutput, summarize_load};
+use crate::tools::{Goal, LoadRequest, LoadResponse, LoadResponseError};
 
 /// Cached state about the most recent successful `load`.
 #[derive(Debug, Clone)]
@@ -56,18 +56,24 @@ impl ServerState {
     ///
     /// The returned `LoadOutput` is also cached so future `give` calls can
     /// resolve goal ranges without an extra round trip.
-    pub async fn load(&mut self, params: &Load) -> Result<LoadOutput, Error> {
+    pub async fn load(&mut self, params: &LoadRequest) -> Result<LoadResponse, Error> {
         let current_file = absolute_path(&params.path);
 
         let responses = self
             .send(&agda_command::Command::load(&current_file, &[]))
             .await?;
 
-        let output = summarize_load(current_file, &responses);
+        let output = match LoadResponse::try_from(responses) {
+            Ok(output) => output,
+            Err(error) => {
+                self.shutdown.cancel();
+                return Err(Error::LoadResponse(error));
+            }
+        };
 
-        if output.ok {
+        if output.errors.is_empty() {
             self.loaded = Some(LoadedFile {
-                current_file: output.current_file.clone(),
+                current_file,
                 goals: output.goals.clone(),
             });
         }
@@ -121,6 +127,9 @@ fn absolute_path(path: &str) -> String {
 pub enum Error {
     #[error(transparent)]
     Process(#[from] process::Error),
+
+    #[error("unexpected Agda response sequence for Cmd_load: {0}")]
+    LoadResponse(#[from] LoadResponseError),
 }
 
 impl From<Error> for ErrorData {
@@ -143,6 +152,13 @@ impl From<Error> for ErrorData {
                     format!("Agda response parse failure: {}", failure),
                     Some(data),
                 )
+            }
+            Error::LoadResponse(load_error) => {
+                let data = serde_json::json!({
+                    "kind": "agda_load_response_parse_failure",
+                    "error": load_error.to_string(),
+                });
+                ErrorData::internal_error(error.to_string(), Some(data))
             }
             _ => ErrorData::internal_error(error.to_string(), None),
         }

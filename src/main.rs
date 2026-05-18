@@ -11,7 +11,7 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use agda_mcp::server::ServerState;
-use agda_mcp::tools::{Load, LoadOutput};
+use agda_mcp::tools::{LoadRequest, LoadResponse};
 
 #[derive(Clone)]
 struct AgdaMcpServer {
@@ -30,12 +30,12 @@ impl AgdaMcpServer {
 impl AgdaMcpServer {
     #[tool(
         description = "Type-check an Agda file and return its goals, warnings, and errors.",
-        output_schema = rmcp::handler::server::common::schema_for_output::<LoadOutput>()
+        output_schema = rmcp::handler::server::common::schema_for_output::<LoadResponse>()
             .expect("LoadOutput should produce an object JSON schema")
     )]
     async fn load(
         &self,
-        Parameters(params): Parameters<Load>,
+        Parameters(params): Parameters<LoadRequest>,
     ) -> Result<CallToolResult, ErrorData> {
         let mut state = self.state.lock().await;
         let output = state.load(&params).await?;
@@ -46,10 +46,10 @@ impl AgdaMcpServer {
         // programmatic clients consume the structured object against the
         // published output schema.
         let mut result = CallToolResult::default();
-        result.content = vec![Content::text(output.format_text())];
+        result.content = vec![Content::text(output.to_string())];
         result.structured_content =
             Some(serde_json::to_value(&output).expect("LoadOutput serializes cleanly"));
-        result.is_error = Some(!output.ok);
+        result.is_error = Some(!output.errors.is_empty());
 
         Ok(result)
     }

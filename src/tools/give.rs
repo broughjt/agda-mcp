@@ -7,7 +7,7 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use crate::agda::command as agda_command;
+use crate::agda::command::{Command, NO_RANGE, UseForce};
 
 /// Parameters for the MCP `give` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -24,12 +24,12 @@ pub struct Give {
 }
 
 impl Give {
-    pub fn to_agda_command(&self) -> agda_command::Command<'_> {
-        agda_command::Command::give(
+    pub fn to_command(&self) -> Command<'_> {
+        Command::give(
             &self.path,
-            agda_command::UseForce::WithoutForce,
+            UseForce::WithoutForce,
             self.goal_id,
-            &agda_command::NO_RANGE,
+            &NO_RANGE,
             &self.expression,
         )
     }
