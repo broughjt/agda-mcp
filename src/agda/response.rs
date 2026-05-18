@@ -30,7 +30,7 @@ use crate::agda::write_haskell_list;
 ///
 /// Variants are listed in the same order as Agda's `Response_boot` constructors:
 /// https://github.com/agda/agda/blob/3b57742a311b3a90b755737968d437f1ef902318/src/full/Agda/Interaction/Response/Base.hs#L51-L78
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "kind")]
 pub enum Response {
     /// Highlighting payload (body intentionally unmodelled)

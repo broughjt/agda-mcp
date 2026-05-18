@@ -156,7 +156,7 @@ impl From<Error> for ErrorData {
             Error::LoadResponse(load_error) => {
                 let data = serde_json::json!({
                     "kind": "agda_load_response_parse_failure",
-                    "error": load_error.to_string(),
+                    "responses": load_error.0,
                 });
                 ErrorData::internal_error(error.to_string(), Some(data))
             }
