@@ -713,34 +713,4 @@ mod tests {
         assert_eq!(output.errors, vec!["Not in scope: foo".to_owned()]);
         assert!(output.goals.is_empty());
     }
-
-    // #[test]
-    // fn rejects_give_responses() {
-    //     let responses = parse_responses(vec![
-    //         status(false),
-    //         json!({ "kind": "GiveAction", "interactionPoint": 0, "giveResult": { "str": "tt" } }),
-    //     ]);
-
-    //     let error =
-    //         LoadResponse::try_from(responses).expect_err("GiveAction is not Cmd_load output");
-    //     assert!(matches!(
-    //         error,
-    //         LoadResponseError::UnexpectedResponse {
-    //             kind: "GiveAction",
-    //             ..
-    //         }
-    //     ));
-    // }
-
-    // #[test]
-    // fn rejects_metas_responses_without_interaction_points() {
-    //     let responses = parse_responses(vec![status(false), all_goals_warnings(json!([]))]);
-
-    //     let error = LoadResponse::try_from(responses)
-    //         .expect_err("Cmd_metas-like output should not be accepted as Cmd_load");
-    //     assert!(matches!(
-    //         error,
-    //         LoadResponseError::InteractionPointsCount { count: 0 }
-    //     ));
-    // }
 }
