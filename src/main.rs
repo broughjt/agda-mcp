@@ -49,7 +49,12 @@ impl AgdaMcpServer {
         result.content = vec![Content::text(output.to_string())];
         result.structured_content =
             Some(serde_json::to_value(&output).expect("LoadOutput serializes cleanly"));
-        result.is_error = Some(!output.errors.is_empty());
+        // Agda type/checking errors are the expected domain-level result of a
+        // successful `load` tool call, not an MCP transport/tool failure. If we
+        // mark the MCP result itself as an error, clients such as pi prepend
+        // their own `Error:` label to the text summary, producing confusing
+        // output like `Error: Error:` and sometimes adding tool-schema help.
+        result.is_error = Some(false);
 
         Ok(result)
     }
