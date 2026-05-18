@@ -113,7 +113,7 @@ fn response_lines(output: &str) -> impl Iterator<Item = (usize, &str)> {
         .enumerate()
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Status {
     pub checked: bool,
     #[serde(rename = "showImplicitArguments")]
@@ -127,7 +127,7 @@ pub struct Status {
 /// Only the kinds the spike acts on (or wants to surface) are modelled.
 /// Anything else hard-fails so we can decide how to handle it on the next
 /// pass.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "kind")]
 pub enum Info {
     Version {
@@ -456,7 +456,7 @@ impl<C: fmt::Display> fmt::Display for OutputConstraint<C> {
 ///
 /// Mirrors Agda's `GiveResult` JSON encoding:
 /// https://github.com/agda/agda/blob/3b57742a311b3a90b755737968d437f1ef902318/src/full/Agda/Interaction/JSONTop.hs#L152-L156
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum GiveResult {
     String {
