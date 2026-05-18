@@ -58,15 +58,24 @@ impl fmt::Display for LoadResponse {
     /// info buffer: goals first, then grouped errors, then grouped warnings,
     /// but without the long horizontal rule delimiters.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let goal_lines = self
+        let mut goal_lines = self
             .goals
             .iter()
-            .map(ToString::to_string)
-            .chain(self.invisible_goals.iter().map(ToString::to_string))
-            .chain(self.visible_constraints.iter().map(ToString::to_string))
-            .collect::<Vec<_>>();
+            .map(|goal| goal as &dyn fmt::Display)
+            .chain(
+                self.invisible_goals
+                    .iter()
+                    .map(|goal| goal as &dyn fmt::Display),
+            )
+            .chain(
+                self.visible_constraints
+                    .iter()
+                    .map(|constraint| constraint as &dyn fmt::Display),
+            )
+            .peekable();
+        let has_goal_lines = goal_lines.peek().is_some();
 
-        if goal_lines.is_empty() && self.errors.is_empty() && self.warnings.is_empty() {
+        if !has_goal_lines && self.errors.is_empty() && self.warnings.is_empty() {
             return if self.checked {
                 formatter.write_str("Checked. No goals, warnings, or errors.")
             } else {
@@ -76,14 +85,14 @@ impl fmt::Display for LoadResponse {
             };
         }
 
-        if let Some((line, remaining_lines)) = goal_lines.split_first() {
-            formatter.write_str(line)?;
-            for line in remaining_lines {
-                write!(formatter, "\n{line}")?;
+        while let Some(line) = goal_lines.next() {
+            write!(formatter, "{line}")?;
+            if goal_lines.peek().is_some() {
+                formatter.write_str("\n")?;
             }
         }
 
-        if !goal_lines.is_empty() && (!self.errors.is_empty() || !self.warnings.is_empty()) {
+        if has_goal_lines && (!self.errors.is_empty() || !self.warnings.is_empty()) {
             formatter.write_str("\n\n")?;
         }
 
