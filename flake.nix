@@ -43,6 +43,10 @@
           commonArgs
           // {
             inherit cargoArtifacts;
+            # Keep package builds lightweight for downstream dev shells. The
+            # integration tests in tests/ spawn Agda, so run only crate-local
+            # tests here and exercise the full suite in checks.default below.
+            cargoTestExtraArgs = "--lib --bins";
             meta.mainProgram = packageName;
           }
         );
@@ -62,7 +66,13 @@
         };
 
         checks = {
-          default = package;
+          default = craneLib.cargoTest (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              nativeCheckInputs = [ pkgs.agda ];
+            }
+          );
 
           clippy = craneLib.cargoClippy (
             commonArgs
