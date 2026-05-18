@@ -104,61 +104,13 @@ impl TryFrom<Vec<Response>> for LoadResponse {
     type Error = LoadResponseError;
 
     fn try_from(responses: Vec<Response>) -> Result<Self, Self::Error> {
-        let mut checked = None;
-        let mut goals = Vec::new();
-        let mut warnings = Vec::new();
-        let mut errors = Vec::new();
-
-        for response in responses {
-            match response {
-                Response::Status { status } => checked = Some(status.checked),
-                Response::DisplayInfo {
-                    info:
-                        Info::AllGoalsWarnings {
-                            visible_goals,
-                            warnings: agda_warnings,
-                            errors: agda_errors,
-                            ..
-                        },
-                } => {
-                    for goal in visible_goals {
-                        let VisibleGoal::OfType { constraint_obj, ty } = goal;
-                        goals.push(Goal {
-                            id: constraint_obj.id,
-                            range: constraint_obj.range,
-                            _type: ty,
-                        });
-                    }
-                    warnings.extend(agda_warnings.into_iter().map(|m| m.message));
-                    errors.extend(agda_errors.into_iter().map(|m| m.message));
-                }
-                Response::DisplayInfo {
-                    info:
-                        Info::Error {
-                            warnings: agda_warnings,
-                            error,
-                        },
-                } => {
-                    warnings.extend(agda_warnings.into_iter().map(|m| m.message));
-                    errors.push(error.message);
-                }
-                _ => {}
-            }
-        }
-
-        Ok(Self {
-            checked: checked.ok_or(LoadResponseError::MissingStatus)?,
-            goals,
-            warnings,
-            errors,
-        })
+        todo!()
     }
 }
 
 #[derive(Debug, Error)]
 pub enum LoadResponseError {
-    #[error("Cmd_load output did not include a Status response")]
-    MissingStatus,
+    // TODO:
 }
 
 /// A visible interaction goal in the current file.
