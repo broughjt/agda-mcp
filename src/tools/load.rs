@@ -4,11 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::agda::{
-    command::Command,
-    response::{Info, Response, VisibleGoal},
-    source::Interval,
-};
+use crate::agda::{command::Command, response::Response, source::Interval};
 
 /// Parameters for the MCP `load` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -33,8 +29,21 @@ pub struct LoadResponse {
     /// open interaction goals can load without hard errors while still having
     /// `checked = false`.
     pub checked: bool,
-    /// Visible interaction goals after the load, in the order Agda reported.
+    /// Visible `OfType` interaction goals after the load, in the order Agda reported.
+    ///
+    /// These are the actionable goals that can be passed to editor commands
+    /// such as `give`/`refine`.
     pub goals: Vec<Goal>,
+    /// Other visible output constraints Agda reported.
+    ///
+    /// These are associated with interaction points, but are not the simple
+    /// `id : type` goal shape represented by [`Goal`].
+    pub visible_constraints: Vec<Constraint>,
+    /// Invisible/hidden unsolved metas Agda reported.
+    ///
+    /// These are diagnostics only: they are not interaction points and cannot
+    /// be passed to `give`.
+    pub invisible_goals: Vec<InvisibleGoal>,
     /// Non-fatal warnings reported by Agda.
     pub warnings: Vec<String>,
     /// Errors reported by Agda.
@@ -49,24 +58,32 @@ impl fmt::Display for LoadResponse {
     /// info buffer: goals first, then grouped errors, then grouped warnings,
     /// but without the long horizontal rule delimiters.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.goals.is_empty() && self.errors.is_empty() && self.warnings.is_empty() {
+        let goal_lines = self
+            .goals
+            .iter()
+            .map(ToString::to_string)
+            .chain(self.invisible_goals.iter().map(ToString::to_string))
+            .chain(self.visible_constraints.iter().map(ToString::to_string))
+            .collect::<Vec<_>>();
+
+        if goal_lines.is_empty() && self.errors.is_empty() && self.warnings.is_empty() {
             return if self.checked {
                 formatter.write_str("Checked. No goals, warnings, or errors.")
             } else {
                 formatter.write_str(
-                    "Loaded, but Agda reports `checked=false`. No visible goals, warnings, or errors.",
+                    "Loaded, but Agda reports `checked=false`. No goals, invisible goals, constraints, warnings, or errors.",
                 )
             };
         }
 
-        if let Some((goal, remaining_goals)) = self.goals.split_first() {
-            write!(formatter, "{goal}")?;
-            for goal in remaining_goals {
-                write!(formatter, "\n{goal}")?;
+        if let Some((line, remaining_lines)) = goal_lines.split_first() {
+            formatter.write_str(line)?;
+            for line in remaining_lines {
+                write!(formatter, "\n{line}")?;
             }
         }
 
-        if !self.goals.is_empty() && (!self.errors.is_empty() || !self.warnings.is_empty()) {
+        if !goal_lines.is_empty() && (!self.errors.is_empty() || !self.warnings.is_empty()) {
             formatter.write_str("\n\n")?;
         }
 
@@ -103,7 +120,7 @@ impl fmt::Display for LoadResponse {
 impl TryFrom<Vec<Response>> for LoadResponse {
     type Error = LoadResponseError;
 
-    fn try_from(responses: Vec<Response>) -> Result<Self, Self::Error> {
+    fn try_from(_responses: Vec<Response>) -> Result<Self, Self::Error> {
         todo!()
     }
 }
@@ -131,6 +148,50 @@ impl fmt::Display for Goal {
                 self.id, self._type, interval.start.line, interval.start.col
             ),
             None => write!(formatter, "?{} : {}", self.id, self._type),
+        }
+    }
+}
+
+/// An invisible/hidden unsolved meta reported by Agda.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct InvisibleGoal {
+    pub name: String,
+    pub range: Vec<Interval>,
+    /// Type of the hidden meta when Agda reported an `OfType` constraint.
+    #[serde(rename = "type")]
+    pub _type: Option<String>,
+    /// Original Agda output-constraint kind, e.g. `OfType` or `JustSort`.
+    pub kind: String,
+}
+
+impl fmt::Display for InvisibleGoal {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let description = self._type.as_deref().unwrap_or(&self.kind);
+        match self.range.first() {
+            Some(interval) => write!(
+                formatter,
+                "[invisible {}] {} at {}:{}",
+                self.name, description, interval.start.line, interval.start.col
+            ),
+            None => write!(formatter, "[invisible {}] {}", self.name, description),
+        }
+    }
+}
+
+/// A visible Agda output constraint that is not represented as a simple
+/// actionable `Goal`.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct Constraint {
+    pub kind: String,
+    pub text: String,
+}
+
+impl fmt::Display for Constraint {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.text.is_empty() {
+            write!(formatter, "[{}]", self.kind)
+        } else {
+            write!(formatter, "[{}] {}", self.kind, self.text)
         }
     }
 }
@@ -231,15 +292,38 @@ mod tests {
         }
     }
 
+    fn invisible_goal(name: &str, ty: &str, line: u32, col: u32) -> InvisibleGoal {
+        InvisibleGoal {
+            name: name.to_owned(),
+            range: vec![Interval::new(
+                Position::new(100, line, col),
+                Position::new(101, line, col + 1),
+            )],
+            _type: Some(ty.to_owned()),
+            kind: "OfType".to_owned(),
+        }
+    }
+
+    fn constraint(kind: &str, text: &str) -> Constraint {
+        Constraint {
+            kind: kind.to_owned(),
+            text: text.to_owned(),
+        }
+    }
+
     fn load_response(
         checked: bool,
         goals: Vec<Goal>,
+        invisible_goals: Vec<InvisibleGoal>,
+        visible_constraints: Vec<Constraint>,
         warnings: Vec<&str>,
         errors: Vec<&str>,
     ) -> LoadResponse {
         LoadResponse {
             checked,
             goals,
+            visible_constraints,
+            invisible_goals,
             warnings: warnings.into_iter().map(str::to_owned).collect(),
             errors: errors.into_iter().map(str::to_owned).collect(),
         }
@@ -247,7 +331,7 @@ mod tests {
 
     #[test]
     fn display_scenario_successful_typecheck_no_holes() {
-        let output = load_response(true, vec![], vec![], vec![]);
+        let output = load_response(true, vec![], vec![], vec![], vec![], vec![]);
 
         assert_eq!(
             output.to_string(),
@@ -257,7 +341,14 @@ mod tests {
 
     #[test]
     fn display_scenario_successful_load_with_holes() {
-        let output = load_response(false, vec![goal(0, "Unit", 9, 5)], vec![], vec![]);
+        let output = load_response(
+            false,
+            vec![goal(0, "Unit", 9, 5)],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+        );
 
         assert_eq!(output.to_string(), "?0 : Unit at 9:5");
     }
@@ -265,7 +356,7 @@ mod tests {
     #[test]
     fn display_scenario_type_error_and_holes() {
         let message = "/home/jackson/repositories/hott-reals/source/MCPExamples/TypeErrorAndHole.agda:15.7-11: error: [UnequalTerms]\nBool !=< Unit\nwhen checking that the expression true has type Unit";
-        let output = load_response(false, vec![], vec![], vec![message]);
+        let output = load_response(false, vec![], vec![], vec![], vec![], vec![message]);
 
         assert_eq!(output.to_string(), format!("Error:\n{message}"));
     }
@@ -273,7 +364,7 @@ mod tests {
     #[test]
     fn display_scenario_type_error_no_holes() {
         let message = "/home/jackson/repositories/hott-reals/source/MCPExamples/TypeErrorNoHoles.agda:12.7-11: error: [UnequalTerms]\nBool !=< Unit\nwhen checking that the expression true has type Unit";
-        let output = load_response(false, vec![], vec![], vec![message]);
+        let output = load_response(false, vec![], vec![], vec![], vec![], vec![message]);
 
         assert_eq!(output.to_string(), format!("Error:\n{message}"));
     }
@@ -281,7 +372,7 @@ mod tests {
     #[test]
     fn display_scenario_type_warning() {
         let message = "/home/jackson/repositories/hott-reals/source/MCPExamples/Warning.agda:3.1-8: warning: -W[no]EmptyPrivate\nEmpty private block.";
-        let output = load_response(true, vec![], vec![message], vec![]);
+        let output = load_response(true, vec![], vec![], vec![], vec![message], vec![]);
 
         assert_eq!(output.to_string(), format!("Warning:\n{message}"));
     }
@@ -289,14 +380,21 @@ mod tests {
     #[test]
     fn display_scenario_parse_error() {
         let message = "/home/jackson/repositories/hott-reals/source/MCPExamples/ParseError.agda:6.5: error: [ParseError]\n<EOF><ERROR> ...";
-        let output = load_response(false, vec![], vec![], vec![message]);
+        let output = load_response(false, vec![], vec![], vec![], vec![], vec![message]);
 
         assert_eq!(output.to_string(), format!("Error:\n{message}"));
     }
 
     #[test]
     fn display_groups_multiple_errors() {
-        let output = load_response(false, vec![], vec![], vec!["first error", "second error"]);
+        let output = load_response(
+            false,
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec!["first error", "second error"],
+        );
 
         assert_eq!(output.to_string(), "Errors:\nfirst error\n\nsecond error");
     }
@@ -305,6 +403,8 @@ mod tests {
     fn display_groups_multiple_warnings() {
         let output = load_response(
             true,
+            vec![],
+            vec![],
             vec![],
             vec!["first warning", "second warning"],
             vec![],
@@ -321,6 +421,8 @@ mod tests {
         let output = load_response(
             false,
             vec![goal(0, "Nat", 5, 10)],
+            vec![],
+            vec![],
             vec!["Unsolved meta"],
             vec!["Not in scope: foo"],
         );
@@ -338,18 +440,65 @@ mod tests {
             vec![goal(0, "A", 1, 2), goal(1, "B", 3, 4)],
             vec![],
             vec![],
+            vec![],
+            vec![],
         );
 
         assert_eq!(output.to_string(), "?0 : A at 1:2\n?1 : B at 3:4");
     }
 
     #[test]
-    fn display_handles_checked_false_without_visible_messages() {
-        let output = load_response(false, vec![], vec![], vec![]);
+    fn display_formats_invisible_goals() {
+        let output = load_response(
+            false,
+            vec![],
+            vec![invisible_goal("_0", "Type", 6, 7)],
+            vec![],
+            vec![],
+            vec![],
+        );
+
+        assert_eq!(output.to_string(), "[invisible _0] Type at 6:7");
+    }
+
+    #[test]
+    fn display_formats_visible_constraints() {
+        let output = load_response(
+            false,
+            vec![],
+            vec![],
+            vec![constraint("CmpInType", "Nat: ?0 = ?1")],
+            vec![],
+            vec![],
+        );
+
+        assert_eq!(output.to_string(), "[CmpInType] Nat: ?0 = ?1");
+    }
+
+    #[test]
+    fn display_groups_goals_invisible_goals_and_constraints() {
+        let output = load_response(
+            false,
+            vec![goal(0, "Unit", 9, 5)],
+            vec![invisible_goal("_1", "Type", 12, 3)],
+            vec![constraint("JustSort", "_2")],
+            vec![],
+            vec![],
+        );
 
         assert_eq!(
             output.to_string(),
-            "Loaded, but Agda reports `checked=false`. No visible goals, warnings, or errors."
+            "?0 : Unit at 9:5\n[invisible _1] Type at 12:3\n[JustSort] _2"
+        );
+    }
+
+    #[test]
+    fn display_handles_checked_false_without_visible_messages() {
+        let output = load_response(false, vec![], vec![], vec![], vec![], vec![]);
+
+        assert_eq!(
+            output.to_string(),
+            "Loaded, but Agda reports `checked=false`. No goals, invisible goals, constraints, warnings, or errors."
         );
     }
 
