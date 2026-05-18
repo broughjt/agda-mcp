@@ -198,51 +198,52 @@ impl TryFrom<Vec<Response>> for LoadResponse {
                 Response::DisplayInfo {
                     info: Info::Error { warnings, error },
                 },
-                rest @ ..,
-            ] => match rest {
-                [
-                    Response::JumpToError {
-                        filepath: _,
-                        position: _,
-                    },
-                    Response::HighlightingInfo {},
-                    Response::Status {
-                        status:
-                            Status {
-                                checked: false,
-                                show_implicit_arguments: _,
-                                show_irrelevant_arguments: _,
-                            },
-                    },
-                ]
-                | [
-                    Response::HighlightingInfo {},
-                    Response::Status {
-                        status:
-                            Status {
-                                checked: false,
-                                show_implicit_arguments: _,
-                                show_irrelevant_arguments: _,
-                            },
-                    },
-                ] => {
-                    let warnings = mem::take(warnings);
-                    let error = mem::take(&mut error.message);
+                Response::JumpToError {
+                    filepath: _,
+                    position: _,
+                },
+                Response::HighlightingInfo {},
+                Response::Status {
+                    status:
+                        Status {
+                            checked: false,
+                            show_implicit_arguments: _,
+                            show_irrelevant_arguments: _,
+                        },
+                },
+            ]
+            | [
+                Response::Status { status: _ },
+                Response::ClearRunningInfo,
+                Response::ClearHighlighting { token_based: _ },
+                Response::DisplayInfo {
+                    info: Info::Error { warnings, error },
+                },
+                Response::HighlightingInfo {},
+                Response::Status {
+                    status:
+                        Status {
+                            checked: false,
+                            show_implicit_arguments: _,
+                            show_irrelevant_arguments: _,
+                        },
+                },
+            ] => {
+                let warnings = mem::take(warnings);
+                let error = mem::take(&mut error.message);
 
-                    Ok(LoadResponse {
-                        checked: false,
-                        goals: Vec::new(),
-                        visible_constraints: Vec::new(),
-                        invisible_goals: Vec::new(),
-                        warnings: warnings
-                            .into_iter()
-                            .map(|Message { message }| message)
-                            .collect(),
-                        errors: vec![error],
-                    })
-                }
-                _ => Err(LoadResponseError(responses)),
-            },
+                Ok(LoadResponse {
+                    checked: false,
+                    goals: Vec::new(),
+                    visible_constraints: Vec::new(),
+                    invisible_goals: Vec::new(),
+                    warnings: warnings
+                        .into_iter()
+                        .map(|Message { message }| message)
+                        .collect(),
+                    errors: vec![error],
+                })
+            }
             _ => Err(LoadResponseError(responses)),
         }
     }
