@@ -145,23 +145,149 @@ pub enum Info {
 
 /// A visible goal in `AllGoalsWarnings.visibleGoals`.
 ///
-/// Agda emits one of many `OutputConstraint` shapes here. For the spike we
-/// only model `OfType` (the common case for `Cmd_load`); anything else
-/// hard-fails.
+/// Visible goals are output constraints whose constraint object is an
+/// interaction point. These are the goals an editor can act on with commands
+/// such as give/refine.
+pub type VisibleGoal = OutputConstraint<InteractionPoint>;
+
+/// An invisible goal in `AllGoalsWarnings.invisibleGoals`.
+///
+/// Invisible goals are output constraints whose constraint object is a named
+/// meta-variable. They are diagnostics for unsolved hidden/internal metas, not
+/// editor interaction points.
+pub type InvisibleGoal = OutputConstraint<NamedMeta>;
+
+/// An Agda `OutputConstraint` as emitted in JSON for visible and invisible
+/// goals.
+///
+/// The type parameter is the JSON shape of the constraint object:
+/// [`InteractionPoint`] for visible goals and [`NamedMeta`] for invisible
+/// goals. Pretty-printed Agda terms/types are represented as strings because
+/// that is how `Agda.Interaction.JSONTop` encodes them.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind")]
-pub enum VisibleGoal {
+pub enum OutputConstraint<C> {
     OfType {
         #[serde(rename = "constraintObj")]
-        constraint_obj: InteractionPoint,
+        constraint_obj: C,
         #[serde(rename = "type")]
         ty: String,
     },
+    CmpInType {
+        comparison: String,
+        #[serde(rename = "type")]
+        ty: String,
+        #[serde(rename = "constraintObjs")]
+        constraint_objs: Vec<C>,
+    },
+    CmpElim {
+        polarities: Vec<String>,
+        #[serde(rename = "type")]
+        ty: String,
+        #[serde(rename = "constraintObjs")]
+        constraint_objs: Vec<Vec<C>>,
+    },
+    JustType {
+        #[serde(rename = "constraintObj")]
+        constraint_obj: C,
+    },
+    JustSort {
+        #[serde(rename = "constraintObj")]
+        constraint_obj: C,
+    },
+    CmpTypes {
+        comparison: String,
+        #[serde(rename = "constraintObjs")]
+        constraint_objs: Vec<C>,
+    },
+    CmpLevels {
+        comparison: String,
+        #[serde(rename = "constraintObjs")]
+        constraint_objs: Vec<C>,
+    },
+    CmpTeles {
+        comparison: String,
+        #[serde(rename = "constraintObjs")]
+        constraint_objs: Vec<C>,
+    },
+    CmpSorts {
+        comparison: String,
+        #[serde(rename = "constraintObjs")]
+        constraint_objs: Vec<C>,
+    },
+    Assign {
+        #[serde(rename = "constraintObj")]
+        constraint_obj: C,
+        value: String,
+    },
+    TypedAssign {
+        #[serde(rename = "constraintObj")]
+        constraint_obj: C,
+        value: String,
+        #[serde(rename = "type")]
+        ty: String,
+    },
+    PostponedCheckArgs {
+        #[serde(rename = "constraintObj")]
+        constraint_obj: C,
+        #[serde(rename = "ofType")]
+        of_type: String,
+        arguments: Vec<String>,
+        #[serde(rename = "type")]
+        ty: String,
+    },
+    IsEmptyType {
+        #[serde(rename = "type")]
+        ty: String,
+    },
+    SizeLtSat {
+        #[serde(rename = "type")]
+        ty: String,
+    },
+    FindInstanceOF {
+        #[serde(rename = "constraintObj")]
+        constraint_obj: C,
+        candidates: Vec<Candidate>,
+        #[serde(rename = "type")]
+        ty: String,
+    },
+    ResolveInstanceOF {
+        name: String,
+    },
+    PTSInstance {
+        #[serde(rename = "constraintObjs")]
+        constraint_objs: Vec<C>,
+    },
+    PostponedCheckFunDef {
+        name: String,
+        #[serde(rename = "type")]
+        ty: String,
+        error: Message,
+    },
+    DataSort {
+        name: String,
+        sort: String,
+    },
+    CheckLock {
+        head: String,
+        lock: String,
+    },
+    UsableAtMod {
+        #[serde(rename = "mod")]
+        module: String,
+        term: String,
+    },
 }
 
-/// `NamedMeta`-shaped invisible goal.
 #[derive(Debug, Clone, Deserialize)]
-pub struct InvisibleGoal {
+pub struct Candidate {
+    pub value: String,
+    #[serde(rename = "type")]
+    pub _type: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct NamedMeta {
     pub name: String,
     pub range: Vec<Interval>,
 }
@@ -279,7 +405,9 @@ mod tests {
         assert!(errors.is_empty());
         assert_eq!(visible_goals.len(), 1);
 
-        let VisibleGoal::OfType { constraint_obj, ty } = &visible_goals[0];
+        let OutputConstraint::OfType { constraint_obj, ty } = &visible_goals[0] else {
+            panic!("expected OfType visible goal")
+        };
         assert_eq!(constraint_obj.id, 0);
         assert_eq!(ty, "P a");
         assert_eq!(constraint_obj.range.len(), 1);
@@ -410,15 +538,69 @@ mod tests {
     }
 
     #[test]
-    fn unknown_visible_goal_kind_is_hard_error() {
+    fn parses_invisible_of_type_goal() {
+        let response = parse_one(
+            r#"{"kind":"DisplayInfo","info":{"kind":"AllGoalsWarnings","visibleGoals":[],"invisibleGoals":[{"kind":"OfType","constraintObj":{"name":"_0","range":[{"start":{"pos":95,"line":6,"col":7},"end":{"pos":96,"line":6,"col":8}}]},"type":"Type"}],"warnings":[],"errors":[]}}"#,
+        );
+
+        let Response::DisplayInfo {
+            info: Info::AllGoalsWarnings {
+                invisible_goals, ..
+            },
+        } = response
+        else {
+            panic!("expected DisplayInfo/AllGoalsWarnings");
+        };
+
+        assert_eq!(invisible_goals.len(), 1);
+        let OutputConstraint::OfType { constraint_obj, ty } = &invisible_goals[0] else {
+            panic!("expected OfType invisible goal")
+        };
+        assert_eq!(constraint_obj.name, "_0");
+        assert_eq!(constraint_obj.range[0].start.line, 6);
+        assert_eq!(constraint_obj.range[0].start.col, 7);
+        assert_eq!(ty, "Type");
+    }
+
+    #[test]
+    fn parses_visible_non_of_type_goal() {
+        let response = parse_one(
+            r#"{"kind":"DisplayInfo","info":{"kind":"AllGoalsWarnings","visibleGoals":[{"kind":"CmpInType","comparison":"CmpEq","type":"Nat","constraintObjs":[{"id":0,"range":[]},{"id":1,"range":[]}]}],"invisibleGoals":[],"warnings":[],"errors":[]}}"#,
+        );
+
+        let Response::DisplayInfo {
+            info: Info::AllGoalsWarnings { visible_goals, .. },
+        } = response
+        else {
+            panic!("expected DisplayInfo/AllGoalsWarnings");
+        };
+
+        assert_eq!(visible_goals.len(), 1);
+        let OutputConstraint::CmpInType {
+            comparison,
+            ty,
+            constraint_objs,
+        } = &visible_goals[0]
+        else {
+            panic!("expected CmpInType visible goal")
+        };
+        assert_eq!(comparison, "CmpEq");
+        assert_eq!(ty, "Nat");
+        assert_eq!(constraint_objs.len(), 2);
+        assert_eq!(constraint_objs[0].id, 0);
+        assert_eq!(constraint_objs[1].id, 1);
+    }
+
+    #[test]
+    fn unknown_output_constraint_kind_is_hard_error() {
         let error = parse_all(
-            r#"{"kind":"DisplayInfo","info":{"kind":"AllGoalsWarnings","visibleGoals":[{"kind":"CmpInType"}],"invisibleGoals":[],"warnings":[],"errors":[]}}"#,
+            r#"{"kind":"DisplayInfo","info":{"kind":"AllGoalsWarnings","visibleGoals":[{"kind":"FutureConstraint"}],"invisibleGoals":[],"warnings":[],"errors":[]}}"#,
         )
-        .expect_err("unmodelled visible-goal kinds must hard-fail");
+        .expect_err("unknown output-constraint kinds must hard-fail");
 
         assert!(
-            format!("{error}").contains("CmpInType"),
-            "error should name the unmodelled goal kind: {error}"
+            format!("{error}").contains("FutureConstraint"),
+            "error should name the unknown output-constraint kind: {error}"
         );
     }
 
