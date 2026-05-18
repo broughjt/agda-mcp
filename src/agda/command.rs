@@ -1,6 +1,7 @@
 use std::fmt;
 
 use crate::agda::source::{Interval, Position};
+use crate::agda::write_haskell_list;
 
 /// A command sent to Agda's `--interaction-json` REPL.
 ///
@@ -262,20 +263,6 @@ impl fmt::Display for HaskellString<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write_haskell_string(formatter, self.0)
     }
-}
-
-fn write_haskell_list(
-    formatter: &mut impl fmt::Write,
-    items: impl IntoIterator<Item = impl fmt::Display>,
-) -> fmt::Result {
-    formatter.write_str("[")?;
-    for (index, item) in items.into_iter().enumerate() {
-        if index > 0 {
-            formatter.write_str(", ")?;
-        }
-        write!(formatter, "{item}")?;
-    }
-    formatter.write_str("]")
 }
 
 /// Write a Rust string as a Haskell `Read`-compatible string literal.

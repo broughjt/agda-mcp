@@ -1,10 +1,14 @@
-use std::fmt;
+use std::{fmt, mem};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::agda::{command::Command, response::Response, source::Interval};
+use crate::agda::{
+    command::Command,
+    response::{Info, InteractionPoint, Message, NamedMeta, OutputConstraint, Response, Status},
+    source::Interval,
+};
 
 /// Parameters for the MCP `load` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -36,14 +40,17 @@ pub struct LoadResponse {
     pub goals: Vec<Goal>,
     /// Other visible output constraints Agda reported.
     ///
-    /// These are associated with interaction points, but are not the simple
-    /// `id : type` goal shape represented by [`Goal`].
-    pub visible_constraints: Vec<Constraint>,
+    /// These are associated with interaction points, but are not the simple `id
+    /// : type` goal shape represented by [`Goal`]. The full
+    /// [`OutputConstraint`] payload is preserved so we can format it in
+    /// `Display` the way Agda does.
+    pub visible_constraints: Vec<OutputConstraint<InteractionPoint>>,
     /// Invisible/hidden unsolved metas Agda reported.
     ///
     /// These are diagnostics only: they are not interaction points and cannot
-    /// be passed to `give`.
-    pub invisible_goals: Vec<InvisibleGoal>,
+    /// be passed to `give`. The full [`OutputConstraint`] payload is preserved
+    /// so we can format them in `Display` the way Agda does.
+    pub invisible_goals: Vec<OutputConstraint<NamedMeta>>,
     /// Non-fatal warnings reported by Agda.
     pub warnings: Vec<String>,
     /// Errors reported by Agda.
@@ -51,29 +58,15 @@ pub struct LoadResponse {
 }
 
 impl fmt::Display for LoadResponse {
-    /// Render the load result in an Agda-like format for humans.
+    /// Render the load result textually.
     ///
-    /// The structured fields remain the source of truth for clients that need
-    /// machine-readable data. This text is intentionally close to Agda's Emacs
-    /// info buffer: goals first, then grouped errors, then grouped warnings,
-    /// but without the long horizontal rule delimiters.
+    /// This text is intentionally close to Agda's Emacs info buffer: goals
+    /// first, then grouped errors, then grouped warnings, but without the long
+    /// horizontal rule delimiters.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut goal_lines = self
-            .goals
-            .iter()
-            .map(|goal| goal as &dyn fmt::Display)
-            .chain(
-                self.invisible_goals
-                    .iter()
-                    .map(|goal| goal as &dyn fmt::Display),
-            )
-            .chain(
-                self.visible_constraints
-                    .iter()
-                    .map(|constraint| constraint as &dyn fmt::Display),
-            )
-            .peekable();
-        let has_goal_lines = goal_lines.peek().is_some();
+        let has_goal_lines = !self.goals.is_empty()
+            || !self.invisible_goals.is_empty()
+            || !self.visible_constraints.is_empty();
 
         if !has_goal_lines && self.errors.is_empty() && self.warnings.is_empty() {
             return if self.checked {
@@ -85,11 +78,23 @@ impl fmt::Display for LoadResponse {
             };
         }
 
-        while let Some(line) = goal_lines.next() {
-            write!(formatter, "{line}")?;
-            if goal_lines.peek().is_some() {
+        let mut wrote_any = false;
+        let mut write_line = |formatter: &mut fmt::Formatter<'_>, line: &dyn fmt::Display| {
+            if wrote_any {
                 formatter.write_str("\n")?;
             }
+            wrote_any = true;
+            write!(formatter, "{line}")
+        };
+
+        for goal in &self.goals {
+            write_line(formatter, goal)?;
+        }
+        for constraint in &self.invisible_goals {
+            write_line(formatter, &InvisibleEntry(constraint))?;
+        }
+        for constraint in &self.visible_constraints {
+            write_line(formatter, constraint)?;
         }
 
         if has_goal_lines && (!self.errors.is_empty() || !self.warnings.is_empty()) {
@@ -129,15 +134,123 @@ impl fmt::Display for LoadResponse {
 impl TryFrom<Vec<Response>> for LoadResponse {
     type Error = LoadResponseError;
 
-    fn try_from(_responses: Vec<Response>) -> Result<Self, Self::Error> {
-        todo!()
+    fn try_from(mut responses: Vec<Response>) -> Result<Self, Self::Error> {
+        match &mut responses[..] {
+            [
+                Response::Status { status: _ },
+                Response::ClearRunningInfo,
+                Response::ClearHighlighting { token_based: _ },
+                Response::Status {
+                    status:
+                        Status {
+                            checked,
+                            show_implicit_arguments: _,
+                            show_irrelevant_arguments: _,
+                        },
+                },
+                Response::DisplayInfo {
+                    info:
+                        Info::AllGoalsWarnings {
+                            visible_goals,
+                            invisible_goals,
+                            warnings,
+                            errors,
+                        },
+                },
+                Response::InteractionPoints { points: _ },
+            ] => {
+                let visible_goals = mem::take(visible_goals);
+                let invisible_goals = mem::take(invisible_goals);
+                let warnings = mem::take(warnings);
+                let errors = mem::take(errors);
+
+                let mut goals = Vec::new();
+                let mut visible_constraints = Vec::new();
+                for constraint in visible_goals {
+                    match constraint {
+                        OutputConstraint::OfType {
+                            constraint_obj: InteractionPoint { id, range },
+                            _type,
+                        } => goals.push(Goal { id, range, _type }),
+                        other => visible_constraints.push(other),
+                    }
+                }
+
+                Ok(LoadResponse {
+                    checked: *checked,
+                    goals,
+                    visible_constraints,
+                    invisible_goals,
+                    warnings: warnings
+                        .into_iter()
+                        .map(|Message { message }| message)
+                        .collect(),
+                    errors: errors
+                        .into_iter()
+                        .map(|Message { message }| message)
+                        .collect(),
+                })
+            }
+            [
+                Response::Status { status: _ },
+                Response::ClearRunningInfo,
+                Response::ClearHighlighting { token_based: _ },
+                Response::DisplayInfo {
+                    info: Info::Error { warnings, error },
+                },
+                rest @ ..,
+            ] => match rest {
+                [
+                    Response::JumpToError {
+                        filepath: _,
+                        position: _,
+                    },
+                    Response::HighlightingInfo {},
+                    Response::Status {
+                        status:
+                            Status {
+                                checked: false,
+                                show_implicit_arguments: _,
+                                show_irrelevant_arguments: _,
+                            },
+                    },
+                ]
+                | [
+                    Response::HighlightingInfo {},
+                    Response::Status {
+                        status:
+                            Status {
+                                checked: false,
+                                show_implicit_arguments: _,
+                                show_irrelevant_arguments: _,
+                            },
+                    },
+                ] => {
+                    let warnings = mem::take(warnings);
+                    let error = mem::take(&mut error.message);
+
+                    Ok(LoadResponse {
+                        checked: false,
+                        goals: Vec::new(),
+                        visible_constraints: Vec::new(),
+                        invisible_goals: Vec::new(),
+                        warnings: warnings
+                            .into_iter()
+                            .map(|Message { message }| message)
+                            .collect(),
+                        errors: vec![error],
+                    })
+                }
+                _ => Err(LoadResponseError(responses)),
+            },
+            _ => Err(LoadResponseError(responses)),
+        }
     }
 }
 
 #[derive(Debug, Error)]
-pub enum LoadResponseError {
-    // TODO:
-}
+#[error("unexpected Agda response sequence ({} responses)", .0.len())]
+pub struct LoadResponseError(pub Vec<Response>);
 
 /// A visible interaction goal in the current file.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -150,57 +263,96 @@ pub struct Goal {
 
 impl fmt::Display for Goal {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.range.first() {
-            Some(interval) => write!(
-                formatter,
-                "?{} : {} at {}:{}",
-                self.id, self._type, interval.start.line, interval.start.col
-            ),
-            None => write!(formatter, "?{} : {}", self.id, self._type),
-        }
+        write!(formatter, "?{} : {}", self.id, self._type)
     }
 }
 
-/// An invisible/hidden unsolved meta reported by Agda.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct InvisibleGoal {
-    pub name: String,
-    pub range: Vec<Interval>,
-    /// Type of the hidden meta when Agda reported an `OfType` constraint.
-    #[serde(rename = "type")]
-    pub _type: Option<String>,
-    /// Original Agda output-constraint kind, e.g. `OfType` or `JustSort`.
-    pub kind: String,
-}
+/// Display adapter that renders an invisible goal as Agda's Emacs goal buffer
+/// does: the constraint prose followed by `[ at <range> ]` when a range is
+/// available.
+///
+/// Mirrors `pr` in Agda's `prettyGoals`:
+/// https://github.com/agda/agda/blob/3b57742a311b3a90b755737968d437f1ef902318/src/full/Agda/Interaction/BasicOps.hs#L862-L867
+struct InvisibleEntry<'a>(&'a OutputConstraint<NamedMeta>);
 
-impl fmt::Display for InvisibleGoal {
+impl fmt::Display for InvisibleEntry<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let description = self._type.as_deref().unwrap_or(&self.kind);
-        match self.range.first() {
-            Some(interval) => write!(
-                formatter,
-                "[invisible {}] {} at {}:{}",
-                self.name, description, interval.start.line, interval.start.col
-            ),
-            None => write!(formatter, "[invisible {}] {}", self.name, description),
+        fn invisible_meta_range(
+            constraint: &OutputConstraint<NamedMeta>,
+        ) -> Option<RangeDisplay<'_>> {
+            let intervals: &[Interval] = match constraint {
+                OutputConstraint::OfType { constraint_obj, .. }
+                | OutputConstraint::JustType { constraint_obj }
+                | OutputConstraint::JustSort { constraint_obj }
+                | OutputConstraint::Assign { constraint_obj, .. }
+                | OutputConstraint::TypedAssign { constraint_obj, .. }
+                | OutputConstraint::PostponedCheckArgs { constraint_obj, .. }
+                | OutputConstraint::FindInstanceOF { constraint_obj, .. } => &constraint_obj.range,
+                OutputConstraint::CmpInType {
+                    constraint_objs, ..
+                }
+                | OutputConstraint::CmpTypes {
+                    constraint_objs, ..
+                }
+                | OutputConstraint::CmpLevels {
+                    constraint_objs, ..
+                }
+                | OutputConstraint::CmpTeles {
+                    constraint_objs, ..
+                }
+                | OutputConstraint::CmpSorts {
+                    constraint_objs, ..
+                }
+                | OutputConstraint::PTSInstance { constraint_objs } => {
+                    constraint_objs.first().map(|m| m.range.as_slice())?
+                }
+                OutputConstraint::CmpElim {
+                    constraint_objs, ..
+                } => constraint_objs
+                    .iter()
+                    .flatten()
+                    .next()
+                    .map(|m| m.range.as_slice())?,
+                OutputConstraint::IsEmptyType { .. }
+                | OutputConstraint::SizeLtSat { .. }
+                | OutputConstraint::ResolveInstanceOF { .. }
+                | OutputConstraint::PostponedCheckFunDef { .. }
+                | OutputConstraint::DataSort { .. }
+                | OutputConstraint::CheckLock { .. }
+                | OutputConstraint::UsableAtMod { .. } => return None,
+            };
+            (!intervals.is_empty()).then_some(RangeDisplay(intervals))
         }
+
+        write!(formatter, "{}", self.0)?;
+        if let Some(range) = invisible_meta_range(self.0) {
+            write!(formatter, " [ at {range} ]")?;
+        }
+        Ok(())
     }
 }
 
-/// A visible Agda output constraint that is not represented as a simple
-/// actionable `Goal`.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct Constraint {
-    pub kind: String,
-    pub text: String,
-}
+/// Render a list of intervals in Agda's `<line>.<startCol>-<endCol>` form.
+///
+/// Mirrors Agda's `prettyInterval`:
+/// https://github.com/agda/agda/blob/3b57742a311b3a90b755737968d437f1ef902318/src/full/Agda/Syntax/Common/Pretty.hs#L163-L182
+struct RangeDisplay<'a>(&'a [Interval]);
 
-impl fmt::Display for Constraint {
+impl fmt::Display for RangeDisplay<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.text.is_empty() {
-            write!(formatter, "[{}]", self.kind)
+        let first = self.0.first().expect("RangeDisplay is non-empty");
+        let last = self.0.last().expect("RangeDisplay is non-empty");
+        let (start, end) = (first.start, last.end);
+        if start == end {
+            write!(formatter, "{}.{}", start.line, start.col)
+        } else if start.line == end.line {
+            write!(formatter, "{}.{}-{}", start.line, start.col, end.col)
         } else {
-            write!(formatter, "[{}] {}", self.kind, self.text)
+            write!(
+                formatter,
+                "{}.{}-{}.{}",
+                start.line, start.col, end.line, end.col
+            )
         }
     }
 }
@@ -301,30 +453,50 @@ mod tests {
         }
     }
 
-    fn invisible_goal(name: &str, ty: &str, line: u32, col: u32) -> InvisibleGoal {
-        InvisibleGoal {
-            name: name.to_owned(),
-            range: vec![Interval::new(
-                Position::new(100, line, col),
-                Position::new(101, line, col + 1),
-            )],
-            _type: Some(ty.to_owned()),
-            kind: "OfType".to_owned(),
+    fn invisible_goal(name: &str, ty: &str, line: u32, col: u32) -> OutputConstraint<NamedMeta> {
+        OutputConstraint::OfType {
+            constraint_obj: NamedMeta {
+                name: name.to_owned(),
+                range: vec![Interval::new(
+                    Position::new(100, line, col),
+                    Position::new(101, line, col + 1),
+                )],
+            },
+            _type: ty.to_owned(),
         }
     }
 
-    fn constraint(kind: &str, text: &str) -> Constraint {
-        Constraint {
-            kind: kind.to_owned(),
-            text: text.to_owned(),
+    fn just_sort(id: u32, line: u32, col: u32) -> OutputConstraint<InteractionPoint> {
+        OutputConstraint::JustSort {
+            constraint_obj: InteractionPoint {
+                id,
+                range: vec![Interval::new(
+                    Position::new(100 + id, line, col),
+                    Position::new(101 + id, line, col + 1),
+                )],
+            },
+        }
+    }
+
+    fn cmp_in_type(comparison: &str, ty: &str, ids: &[u32]) -> OutputConstraint<InteractionPoint> {
+        OutputConstraint::CmpInType {
+            comparison: comparison.to_owned(),
+            _type: ty.to_owned(),
+            constraint_objs: ids
+                .iter()
+                .map(|&id| InteractionPoint {
+                    id,
+                    range: Vec::new(),
+                })
+                .collect(),
         }
     }
 
     fn load_response(
         checked: bool,
         goals: Vec<Goal>,
-        invisible_goals: Vec<InvisibleGoal>,
-        visible_constraints: Vec<Constraint>,
+        invisible_goals: Vec<OutputConstraint<NamedMeta>>,
+        visible_constraints: Vec<OutputConstraint<InteractionPoint>>,
         warnings: Vec<&str>,
         errors: Vec<&str>,
     ) -> LoadResponse {
@@ -359,7 +531,7 @@ mod tests {
             vec![],
         );
 
-        assert_eq!(output.to_string(), "?0 : Unit at 9:5");
+        assert_eq!(output.to_string(), "?0 : Unit");
     }
 
     #[test]
@@ -438,7 +610,7 @@ mod tests {
 
         assert_eq!(
             output.to_string(),
-            "?0 : Nat at 5:10\n\nError:\nNot in scope: foo\n\nWarning:\nUnsolved meta"
+            "?0 : Nat\n\nError:\nNot in scope: foo\n\nWarning:\nUnsolved meta"
         );
     }
 
@@ -453,7 +625,7 @@ mod tests {
             vec![],
         );
 
-        assert_eq!(output.to_string(), "?0 : A at 1:2\n?1 : B at 3:4");
+        assert_eq!(output.to_string(), "?0 : A\n?1 : B");
     }
 
     #[test]
@@ -467,7 +639,7 @@ mod tests {
             vec![],
         );
 
-        assert_eq!(output.to_string(), "[invisible _0] Type at 6:7");
+        assert_eq!(output.to_string(), "_0 : Type [ at 6.7-8 ]");
     }
 
     #[test]
@@ -476,12 +648,12 @@ mod tests {
             false,
             vec![],
             vec![],
-            vec![constraint("CmpInType", "Nat: ?0 = ?1")],
+            vec![cmp_in_type("CmpEq", "Nat", &[0, 1])],
             vec![],
             vec![],
         );
 
-        assert_eq!(output.to_string(), "[CmpInType] Nat: ?0 = ?1");
+        assert_eq!(output.to_string(), "?0 CmpEq ?1 : Nat");
     }
 
     #[test]
@@ -490,14 +662,14 @@ mod tests {
             false,
             vec![goal(0, "Unit", 9, 5)],
             vec![invisible_goal("_1", "Type", 12, 3)],
-            vec![constraint("JustSort", "_2")],
+            vec![just_sort(2, 0, 0)],
             vec![],
             vec![],
         );
 
         assert_eq!(
             output.to_string(),
-            "?0 : Unit at 9:5\n[invisible _1] Type at 12:3\n[JustSort] _2"
+            "?0 : Unit\n_1 : Type [ at 12.3-4 ]\nSort ?2"
         );
     }
 
@@ -515,6 +687,8 @@ mod tests {
     fn load_output_treats_display_info_error_as_failure() {
         let responses = parse_responses(vec![
             status(false),
+            json!({ "kind": "ClearRunningInfo" }),
+            json!({ "kind": "ClearHighlighting", "tokenBased": "NotOnlyTokenBased" }),
             json!({
                 "kind": "DisplayInfo",
                 "info": {

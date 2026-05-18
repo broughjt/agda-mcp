@@ -16,11 +16,15 @@
 //! struct variants with no fields accept arbitrary extra keys, which is what
 //! we want for these "known noise" kinds.
 
-use serde::Deserialize;
+use std::fmt;
+
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::agda::process::PROMPT;
 use crate::agda::source::Interval;
+use crate::agda::write_haskell_list;
 
 /// A single response object Agda emits between `JSON> ` prompts.
 ///
@@ -164,7 +168,7 @@ pub type InvisibleGoal = OutputConstraint<NamedMeta>;
 /// [`InteractionPoint`] for visible goals and [`NamedMeta`] for invisible
 /// goals. Pretty-printed Agda terms/types are represented as strings because
 /// that is how `Agda.Interaction.JSONTop` encodes them.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "kind")]
 pub enum OutputConstraint<C> {
     OfType {
@@ -279,28 +283,173 @@ pub enum OutputConstraint<C> {
     },
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct Candidate {
     pub value: String,
     #[serde(rename = "type")]
     pub _type: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct NamedMeta {
     pub name: String,
     pub range: Vec<Interval>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct Message {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct InteractionPoint {
     pub id: u32,
     pub range: Vec<Interval>,
+}
+
+impl fmt::Display for InteractionPoint {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "?{}", self.id)
+    }
+}
+
+impl fmt::Display for NamedMeta {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.name)
+    }
+}
+
+/// Render an `OutputConstraint` in Agda's Emacs prose style.
+///
+/// Mirrors Agda's `instance Pretty (OutputConstraint a b)`:
+/// https://github.com/agda/agda/blob/3b57742a311b3a90b755737968d437f1ef902318/src/full/Agda/Interaction/BasicOps.hs#L536-L571
+///
+/// The constraint object(s) are rendered via `C`'s own `Display`
+/// impl. `InteractionPoint` looks like "?<id>" and `NamedMeta` looks like
+/// "_<id>". Pretty-printed Agda terms/types come directly from the Agda
+/// backend.
+impl<C: fmt::Display> fmt::Display for OutputConstraint<C> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fn write_compared<C: fmt::Display>(
+            formatter: &mut fmt::Formatter<'_>,
+            comparison: &str,
+            objects: &[C],
+        ) -> fmt::Result {
+            let mut iter = objects.iter();
+            if let Some(first) = iter.next() {
+                write!(formatter, "{first}")?;
+                for next in iter {
+                    write!(formatter, " {comparison} {next}")?;
+                }
+            }
+            Ok(())
+        }
+
+        match self {
+            Self::OfType {
+                constraint_obj,
+                _type,
+            } => write!(formatter, "{constraint_obj} : {_type}"),
+            Self::JustType { constraint_obj } => write!(formatter, "Type {constraint_obj}"),
+            Self::JustSort { constraint_obj } => write!(formatter, "Sort {constraint_obj}"),
+            Self::CmpInType {
+                comparison,
+                _type,
+                constraint_objs,
+            } => {
+                write_compared(formatter, comparison, constraint_objs)?;
+                write!(formatter, " : {_type}")
+            }
+            Self::CmpElim {
+                polarities,
+                _type,
+                constraint_objs,
+            } => {
+                let mut groups = constraint_objs.iter();
+                if let Some(first) = groups.next() {
+                    write_haskell_list(formatter, first)?;
+                    for next in groups {
+                        write!(formatter, " {} ", polarities.join(","))?;
+                        write_haskell_list(formatter, next)?;
+                    }
+                }
+                write!(formatter, " : {_type}")
+            }
+            Self::CmpTypes {
+                comparison,
+                constraint_objs,
+            }
+            | Self::CmpLevels {
+                comparison,
+                constraint_objs,
+            }
+            | Self::CmpTeles {
+                comparison,
+                constraint_objs,
+            }
+            | Self::CmpSorts {
+                comparison,
+                constraint_objs,
+            } => write_compared(formatter, comparison, constraint_objs),
+            Self::Assign {
+                constraint_obj,
+                value,
+            } => write!(formatter, "{constraint_obj} := {value}"),
+            Self::TypedAssign {
+                constraint_obj,
+                value,
+                _type,
+            } => write!(formatter, "{constraint_obj} := {value} :? {_type}"),
+            Self::PostponedCheckArgs {
+                constraint_obj,
+                of_type,
+                arguments,
+                _type,
+            } => {
+                write!(formatter, "{constraint_obj} := (_ : {of_type})")?;
+                for argument in arguments {
+                    write!(formatter, " {argument}")?;
+                }
+                write!(formatter, " : {_type}")
+            }
+            Self::IsEmptyType { _type } => write!(formatter, "Is empty: {_type}"),
+            Self::SizeLtSat { _type } => write!(formatter, "Not empty type of sizes: {_type}"),
+            Self::FindInstanceOF {
+                constraint_obj,
+                candidates,
+                _type,
+            } => {
+                write!(
+                    formatter,
+                    "Resolve instance argument {constraint_obj} : {_type}"
+                )?;
+                for Candidate { value, _type } in candidates {
+                    write!(formatter, "\n  {value} : {_type}")?;
+                }
+                Ok(())
+            }
+            Self::ResolveInstanceOF { name } => {
+                write!(formatter, "Resolve output type of instance {name}")
+            }
+            Self::PTSInstance { constraint_objs } => {
+                write!(formatter, "PTS instance for")?;
+                for object in constraint_objs {
+                    write!(formatter, " {object}")?;
+                }
+                Ok(())
+            }
+            Self::PostponedCheckFunDef { name, _type, .. } => {
+                write!(formatter, "Check definition of {name} : {_type}")
+            }
+            Self::DataSort { sort, .. } => {
+                write!(formatter, "Sort {sort} allows data/record definitions")
+            }
+            Self::CheckLock { head, lock } => write!(formatter, "Check lock {lock} allows {head}"),
+            Self::UsableAtMod { module, term } => {
+                write!(formatter, "Is usable at {module} modality: {term}")
+            }
+        }
+    }
 }
 
 /// The `giveResult` payload inside a `GiveAction` response.
