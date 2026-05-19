@@ -479,6 +479,24 @@ pub enum GiveResult {
     },
 }
 
+impl GiveResult {
+    /// Compute the text that should replace the `{! ... !}` hole, given
+    /// the expression the caller sent with `Cmd_give`.
+    ///
+    /// - [`GiveResult::String`] supplies the replacement text directly.
+    /// - [`GiveResult::Paren`] with `paren: false` echoes the caller's
+    ///   `original` expression.
+    /// - [`GiveResult::Paren`] with `paren: true` wraps the caller's
+    ///   `original` expression in parentheses.
+    pub fn replacement(self, original: &str) -> String {
+        match self {
+            Self::String { expression } => expression,
+            Self::Paren { paren: false } => original.to_owned(),
+            Self::Paren { paren: true } => format!("({original})"),
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 #[error("failed to parse Agda response #{index}: {source}\nraw response: {raw}")]
 pub struct ParseError {
@@ -803,5 +821,27 @@ mod tests {
         .expect("known noise kinds should parse");
         assert!(matches!(parsed[0], Response::HighlightingInfo { .. }));
         assert!(matches!(parsed[1], Response::MakeCase { .. }));
+    }
+
+    #[test]
+    fn give_result_string_takes_agda_text_verbatim() {
+        let result = GiveResult::String {
+            expression: "zero".to_owned(),
+        };
+        // The caller's `original` is ignored: Agda has already decided
+        // what should land in the file (e.g. a pretty-printed term).
+        assert_eq!(result.replacement("anything else"), "zero");
+    }
+
+    #[test]
+    fn give_result_no_paren_echoes_caller_expression() {
+        let result = GiveResult::Paren { paren: false };
+        assert_eq!(result.replacement("f x"), "f x");
+    }
+
+    #[test]
+    fn give_result_paren_wraps_caller_expression() {
+        let result = GiveResult::Paren { paren: true };
+        assert_eq!(result.replacement("f x"), "(f x)");
     }
 }
