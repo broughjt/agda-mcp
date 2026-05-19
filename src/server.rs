@@ -16,20 +16,12 @@ use crate::agda::{
     process::{self, AgdaProcess},
     response::Response,
 };
-use crate::tools::{Goal, LoadRequest, LoadResponse, LoadResponseError};
-
-/// Cached state about the most recent successful `load`.
-#[derive(Debug, Clone)]
-pub struct LoadedFile {
-    pub current_file: String,
-    pub goals: Vec<Goal>,
-}
+use crate::tools::{LoadRequest, LoadResponse, LoadResponseError};
 
 /// Backing state for the MCP server.
 #[derive(Debug)]
 pub struct ServerState {
     agda: AgdaProcess,
-    loaded: Option<LoadedFile>,
     /// Signalled when the underlying Agda process produces a protocol-fatal
     /// error (parse failure, non-UTF-8 output, premature EOF). The caller is
     /// expected to race this against `RunningService::waiting()` and trigger
@@ -47,15 +39,11 @@ impl ServerState {
     pub async fn spawn(shutdown: CancellationToken) -> Result<Self, Error> {
         Ok(Self {
             agda: AgdaProcess::spawn().await?,
-            loaded: None,
             shutdown,
         })
     }
 
     /// Run an Agda `Cmd_load` for `params.path` and summarise the response.
-    ///
-    /// The returned `LoadOutput` is also cached so future `give` calls can
-    /// resolve goal ranges without an extra round trip.
     pub async fn load(&mut self, params: &LoadRequest) -> Result<LoadResponse, Error> {
         let current_file = absolute_path(&params.path);
 
@@ -63,26 +51,13 @@ impl ServerState {
             .send(&agda_command::Command::load(&current_file, &[]))
             .await?;
 
-        let output = match LoadResponse::try_from(responses) {
-            Ok(output) => output,
+        match LoadResponse::try_from(responses) {
+            Ok(output) => Ok(output),
             Err(error) => {
                 self.shutdown.cancel();
-                return Err(Error::LoadResponse(error));
+                Err(Error::LoadResponse(error))
             }
-        };
-
-        if output.errors.is_empty() {
-            self.loaded = Some(LoadedFile {
-                current_file,
-                goals: output.goals.clone(),
-            });
         }
-
-        Ok(output)
-    }
-
-    pub fn loaded(&self) -> Option<&LoadedFile> {
-        self.loaded.as_ref()
     }
 
     /// Shared `send` wrapper. Forwards to `AgdaProcess::send` and, on a

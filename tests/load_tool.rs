@@ -58,15 +58,6 @@ async fn load_spike_file_returns_single_nat_goal() {
         "expected goal range to span at least one character: {interval:?}"
     );
 
-    // The session should remember the load.
-    let expected_path = fs::canonicalize(&spike_path)
-        .expect("canonicalise spike path")
-        .to_string_lossy()
-        .into_owned();
-    let loaded = state.loaded().expect("state should cache the loaded file");
-    assert_eq!(loaded.current_file, expected_path);
-    assert_eq!(loaded.goals.len(), 1);
-
     // A successful round-trip must not have signalled shutdown.
     assert!(
         !shutdown.is_cancelled(),

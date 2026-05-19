@@ -46,9 +46,15 @@ pub enum Response {
         #[serde(rename = "interactionPoints")]
         points: Vec<InteractionPoint>,
     },
+    /// `interaction_point` arrives as an [`InteractionPoint`] object
+    /// (`{"id": _, "range": _}`) rather than a bare integer. Agda routes the
+    /// field through its `EncodeTCM InteractionId` instance via the `@=`
+    /// operator, not the plain `ToJSON InteractionId` instance:
+    /// https://github.com/agda/agda/blob/3b57742a311b3a90b755737968d437f1ef902318/src/full/Agda/Interaction/JSONTop.hs#L133-L141
+    /// https://github.com/agda/agda/blob/3b57742a311b3a90b755737968d437f1ef902318/src/full/Agda/Interaction/JSONTop.hs#L464-L467
     GiveAction {
         #[serde(rename = "interactionPoint")]
-        interaction_point: u32,
+        interaction_point: InteractionPoint,
         #[serde(rename = "giveResult")]
         give_result: GiveResult,
     },
@@ -456,7 +462,12 @@ impl<C: fmt::Display> fmt::Display for OutputConstraint<C> {
 ///
 /// Mirrors Agda's `GiveResult` JSON encoding:
 /// https://github.com/agda/agda/blob/3b57742a311b3a90b755737968d437f1ef902318/src/full/Agda/Interaction/JSONTop.hs#L152-L156
-#[derive(Debug, Clone, Deserialize, Serialize)]
+///
+/// With `noRange` Agda always returns [`GiveResult::String`] (see
+/// `mkNewTxt` in `InteractionTop.hs` which requires `rng /= noRange` for
+/// the `Paren`/`NoParen` cases). [`GiveResult::Paren`] becomes reachable
+/// once we send explicit ranges.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum GiveResult {
     String {
@@ -589,7 +600,7 @@ mod tests {
     #[test]
     fn parses_give_action_with_string_result() {
         let response = parse_one(
-            r#"{"kind":"GiveAction","interactionPoint":7,"giveResult":{"str":"suc zero"}}"#,
+            r#"{"kind":"GiveAction","interactionPoint":{"id":7,"range":[{"start":{"pos":63,"line":5,"col":5},"end":{"pos":68,"line":5,"col":10}}]},"giveResult":{"str":"suc zero"}}"#,
         );
 
         let Response::GiveAction {
@@ -599,7 +610,8 @@ mod tests {
         else {
             panic!("expected GiveAction");
         };
-        assert_eq!(interaction_point, 7);
+        assert_eq!(interaction_point.id, 7);
+        assert_eq!(interaction_point.range.len(), 1);
         match give_result {
             GiveResult::String { expression } => assert_eq!(expression, "suc zero"),
             GiveResult::Paren { paren } => {
@@ -610,8 +622,9 @@ mod tests {
 
     #[test]
     fn parses_give_action_with_paren_true() {
-        let response =
-            parse_one(r#"{"kind":"GiveAction","interactionPoint":0,"giveResult":{"paren":true}}"#);
+        let response = parse_one(
+            r#"{"kind":"GiveAction","interactionPoint":{"id":0,"range":[]},"giveResult":{"paren":true}}"#,
+        );
 
         let Response::GiveAction { give_result, .. } = response else {
             panic!("expected GiveAction");
@@ -621,8 +634,9 @@ mod tests {
 
     #[test]
     fn parses_give_action_with_paren_false() {
-        let response =
-            parse_one(r#"{"kind":"GiveAction","interactionPoint":0,"giveResult":{"paren":false}}"#);
+        let response = parse_one(
+            r#"{"kind":"GiveAction","interactionPoint":{"id":0,"range":[]},"giveResult":{"paren":false}}"#,
+        );
 
         let Response::GiveAction { give_result, .. } = response else {
             panic!("expected GiveAction");
