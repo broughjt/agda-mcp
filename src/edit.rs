@@ -113,10 +113,7 @@ mod tests {
     /// Build an interval from raw 1-based character positions; `line`/`col`
     /// are filled with dummy values since [`apply`] ignores them.
     fn interval(start_pos: u32, end_pos: u32) -> Interval {
-        Interval::new(
-            Position::new(start_pos, 0, 0),
-            Position::new(end_pos, 0, 0),
-        )
+        Interval::new(Position::new(start_pos, 0, 0), Position::new(end_pos, 0, 0))
     }
 
     #[test]
@@ -187,8 +184,7 @@ mod tests {
         let path = dir.path().join("Zero.agda");
         fs::write(&path, "abc").expect("seed file");
 
-        let error =
-            apply(&path, interval(0, 2), "x").expect_err("pos=0 should be rejected");
+        let error = apply(&path, interval(0, 2), "x").expect_err("pos=0 should be rejected");
         assert!(matches!(error, Error::InvalidPosition { pos: 0, .. }));
     }
 
@@ -198,12 +194,9 @@ mod tests {
         let path = dir.path().join("Inv.agda");
         fs::write(&path, "abcdef").expect("seed file");
 
-        let error = apply(&path, interval(5, 2), "x")
-            .expect_err("inverted range should be rejected");
-        assert!(matches!(
-            error,
-            Error::InvertedRange { start: 5, end: 2 }
-        ));
+        let error =
+            apply(&path, interval(5, 2), "x").expect_err("inverted range should be rejected");
+        assert!(matches!(error, Error::InvertedRange { start: 5, end: 2 }));
     }
 
     #[test]
