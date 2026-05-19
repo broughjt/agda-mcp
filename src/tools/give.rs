@@ -1,3 +1,4 @@
+use std::fmt;
 use std::mem;
 
 use schemars::JsonSchema;
@@ -142,6 +143,38 @@ pub struct GiveResponseError(pub Vec<Response>);
 pub struct GiveToolOutput {
     pub give: GiveResponse,
     pub reload: LoadResponse,
+}
+
+impl fmt::Display for GiveToolOutput {
+    /// Render a short human-readable summary: one line describing what
+    /// Agda did with `Cmd_give`, a blank line, then the post-reload
+    /// state (so the LLM sees current goals/errors regardless of which
+    /// branch the give took).
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.give {
+            GiveResponse::Accepted {
+                interaction_point,
+                give_result,
+            } => {
+                let id = interaction_point.id;
+                match give_result {
+                    GiveResult::String { expression } => {
+                        write!(formatter, "Gave `{expression}` to ?{id}.")?
+                    }
+                    GiveResult::Paren { paren: true } => {
+                        write!(formatter, "Gave parenthesised expression to ?{id}.")?
+                    }
+                    GiveResult::Paren { paren: false } => {
+                        write!(formatter, "Gave expression to ?{id}.")?
+                    }
+                }
+            }
+            GiveResponse::Rejected { error } => {
+                write!(formatter, "Agda rejected the give: {error}")?
+            }
+        }
+        write!(formatter, "\n\n{}", self.reload)
+    }
 }
 
 #[cfg(test)]

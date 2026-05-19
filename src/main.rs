@@ -11,7 +11,7 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use agda_mcp::server::ServerState;
-use agda_mcp::tools::{LoadRequest, LoadResponse};
+use agda_mcp::tools::{GiveRequest, GiveToolOutput, LoadRequest, LoadResponse};
 
 #[derive(Clone)]
 struct AgdaMcpServer {
@@ -58,12 +58,44 @@ impl AgdaMcpServer {
 
         Ok(result)
     }
+
+    #[tool(
+        description = "Give an expression to an interaction point in an Agda file. \
+                       Requires `load` to have run for the file first. On acceptance, the \
+                       tool rewrites the corresponding `{! ... !}` hole on disk and \
+                       automatically reloads, returning the authoritative post-edit goals \
+                       and errors in `reload`.",
+        output_schema = rmcp::handler::server::common::schema_for_output::<GiveToolOutput>()
+            .expect("GiveToolOutput should produce an object JSON schema")
+    )]
+    async fn give(
+        &self,
+        Parameters(params): Parameters<GiveRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let mut state = self.state.lock().await;
+        // Outer `?` surfaces protocol-fatal Agda failures. The inner Err is
+        // an edit failure (Agda accepted the give but we couldn't rewrite
+        // the file); we surface that as an MCP tool error rather than
+        // recording it in `GiveToolOutput`, since the structured output
+        // models successful-on-paper give results.
+        let output = state.give(&params).await?.map_err(|error| {
+            ErrorData::internal_error(format!("give edit failed: {error}"), None)
+        })?;
+
+        let mut result = CallToolResult::default();
+        result.content = vec![Content::text(output.to_string())];
+        result.structured_content =
+            Some(serde_json::to_value(&output).expect("GiveToolOutput serializes cleanly"));
+        result.is_error = Some(false);
+
+        Ok(result)
+    }
 }
 
 #[tool_handler(
     name = "agda-mcp",
     version = "0.1.0",
-    instructions = "MCP server for Agda. Call `load` with the path to an Agda file to type-check it and inspect interaction goals."
+    instructions = "MCP server for Agda. Call `load` with a path to type-check the file and inspect its interaction goals, then call `give` with a goal id and expression to fill the corresponding `{! ... !}` hole; `give` writes the edit to disk and reloads automatically, returning the updated goals and errors."
 )]
 impl ServerHandler for AgdaMcpServer {}
 
