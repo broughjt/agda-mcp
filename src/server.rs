@@ -5,7 +5,7 @@
 //! also lets integration tests drive the same code paths without standing up
 //! the JSON-RPC layer.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use rmcp::ErrorData;
 use thiserror::Error;
@@ -16,7 +16,11 @@ use crate::agda::{
     process::{self, AgdaProcess},
     response::Response,
 };
-use crate::tools::{LoadRequest, LoadResponse, LoadResponseError};
+use crate::edit;
+use crate::tools::{
+    GiveRequest, GiveResponse, GiveResponseError, GiveToolOutput, LoadRequest, LoadResponse,
+    LoadResponseError,
+};
 
 /// Backing state for the MCP server.
 #[derive(Debug)]
@@ -46,9 +50,71 @@ impl ServerState {
     /// Run an Agda `Cmd_load` for `params.path` and summarise the response.
     pub async fn load(&mut self, params: &LoadRequest) -> Result<LoadResponse, Error> {
         let current_file = absolute_path(&params.path);
+        self.load_canonical(&current_file).await
+    }
+
+    /// Run an Agda `Cmd_give` for `params`, apply the resulting edit to
+    /// the source file, and then reload.
+    ///
+    /// The outer `Result` reports protocol-fatal failures (parse errors,
+    /// dead Agda process); the inner `Result` reports edit failures where
+    /// Agda accepted the give but the file rewrite couldn't be applied.
+    /// In the edit-failure branch the function still issues a reload to
+    /// resync Agda's in-memory state with the (unchanged) file before
+    /// returning, since `Cmd_give` has already solved the meta in memory.
+    pub async fn give(
+        &mut self,
+        params: &GiveRequest,
+    ) -> Result<Result<GiveToolOutput, edit::Error>, Error> {
+        let current_file = absolute_path(&params.path);
 
         let responses = self
-            .send(&agda_command::Command::load(&current_file, &[]))
+            .send(&agda_command::Command::give(
+                &current_file,
+                agda_command::UseForce::WithoutForce,
+                params.goal_id,
+                &agda_command::NO_RANGE,
+                &params.expression,
+            ))
+            .await?;
+
+        let give = match GiveResponse::try_from(responses) {
+            Ok(give) => give,
+            Err(error) => {
+                self.shutdown.cancel();
+                return Err(Error::GiveResponse(error));
+            }
+        };
+
+        if let GiveResponse::Accepted {
+            interaction_point,
+            give_result,
+        } = &give
+        {
+            let Some(interval) = interaction_point.range.first().copied() else {
+                self.shutdown.cancel();
+                return Err(Error::GiveMissingRange);
+            };
+            let replacement = give_result.clone().replacement(&params.expression);
+
+            if let Err(error) = edit::apply(Path::new(&current_file), interval, &replacement) {
+                // Resync Agda with the unchanged file; discard the reload
+                // since the caller only sees the edit error in this branch.
+                let _ = self.load_canonical(&current_file).await?;
+                return Ok(Err(error));
+            }
+        }
+
+        let reload = self.load_canonical(&current_file).await?;
+        Ok(Ok(GiveToolOutput { give, reload }))
+    }
+
+    /// Issue `Cmd_load` for an already-canonicalised file path. Used by
+    /// [`Self::load`] directly and by [`Self::give`] for the post-edit
+    /// reload.
+    async fn load_canonical(&mut self, current_file: &str) -> Result<LoadResponse, Error> {
+        let responses = self
+            .send(&agda_command::Command::load(current_file, &[]))
             .await?;
 
         match LoadResponse::try_from(responses) {
@@ -105,6 +171,12 @@ pub enum Error {
 
     #[error("unexpected Agda response sequence for Cmd_load: {0}")]
     LoadResponse(#[from] LoadResponseError),
+
+    #[error("unexpected Agda response sequence for Cmd_give: {0}")]
+    GiveResponse(#[from] GiveResponseError),
+
+    #[error("Cmd_give response carried an empty interaction-point range")]
+    GiveMissingRange,
 }
 
 impl From<Error> for ErrorData {
@@ -132,6 +204,13 @@ impl From<Error> for ErrorData {
                 let data = serde_json::json!({
                     "kind": "agda_load_response_parse_failure",
                     "responses": load_error.0,
+                });
+                ErrorData::internal_error(error.to_string(), Some(data))
+            }
+            Error::GiveResponse(give_error) => {
+                let data = serde_json::json!({
+                    "kind": "agda_give_response_parse_failure",
+                    "responses": give_error.0,
                 });
                 ErrorData::internal_error(error.to_string(), Some(data))
             }

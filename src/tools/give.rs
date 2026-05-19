@@ -4,10 +4,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::agda::{
-    command::{Command, NO_RANGE, UseForce},
-    response::{GiveResult, Info, InteractionPoint, Response, Status},
-};
+use crate::agda::response::{GiveResult, Info, InteractionPoint, Response, Status};
+use crate::tools::LoadResponse;
 
 /// Parameters for the MCP `give` tool.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -24,37 +22,28 @@ pub struct GiveRequest {
     // TODO: Whether to use the command line flags here?
 }
 
-impl GiveRequest {
-    pub fn to_command(&self) -> Command<'_> {
-        Command::give(
-            &self.path,
-            UseForce::WithoutForce,
-            self.goal_id,
-            &NO_RANGE,
-            &self.expression,
-        )
-    }
-}
-
-/// Summary returned to the MCP client for a `give` call.
+/// Agda's response to `Cmd_give`. Models the success-or-rejection split
+/// at the type level: a `Cmd_give` either yields a [`GiveAction`] +
+/// updated goal state, or a [`DisplayInfo`] error.
 ///
-/// Goals/warnings emitted alongside `Cmd_give` describe Agda's in-memory
-/// state immediately after the give but before the edit is applied to
-/// disk. That snapshot is transient: a follow-up `load` re-derives goals
-/// from scratch. To avoid surfacing misleading state, only the
-/// give-specific outputs (and any errors) are kept; the caller is
-/// expected to reload to see the authoritative file state.
+/// [`GiveAction`]: crate::agda::response::Response::GiveAction
+/// [`DisplayInfo`]: crate::agda::response::Response::DisplayInfo
 #[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct GiveResponse {
-    /// The interaction point Agda confirms it acted on, including its
-    /// source range. `None` when the give failed.
-    pub interaction_point: Option<InteractionPoint>,
-    /// What Agda wants written back into the source file. `None` when the
-    /// give failed.
-    pub give_result: Option<GiveResult>,
-    /// Errors reported by Agda. Populated when Agda rejects the give
-    /// (parse error, type error, unknown interaction point).
-    pub errors: Vec<String>,
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum GiveResponse {
+    /// Agda accepted the expression and solved the meta.
+    Accepted {
+        /// The interaction point Agda confirms it acted on, including
+        /// its source range.
+        interaction_point: InteractionPoint,
+        /// What Agda wants written back into the source file.
+        give_result: GiveResult,
+    },
+    /// Agda rejected the expression (parse error, type error,
+    /// out-of-scope name, unknown interaction point). `Cmd_give` only
+    /// ever emits one `Info::Error`, so this is a single message rather
+    /// than a list.
+    Rejected { error: String },
 }
 
 impl TryFrom<Vec<Response>> for GiveResponse {
@@ -87,10 +76,9 @@ impl TryFrom<Vec<Response>> for GiveResponse {
                     },
                 );
 
-                Ok(GiveResponse {
-                    interaction_point: Some(interaction_point),
-                    give_result: Some(give_result),
-                    errors: Vec::new(),
+                Ok(GiveResponse::Accepted {
+                    interaction_point,
+                    give_result,
                 })
             }
             // Cmd_give errors carry no file-anchored range (the range refers
@@ -131,12 +119,7 @@ impl TryFrom<Vec<Response>> for GiveResponse {
                 },
             ] => {
                 let error = mem::take(&mut error.message);
-
-                Ok(GiveResponse {
-                    interaction_point: None,
-                    give_result: None,
-                    errors: vec![error],
-                })
+                Ok(GiveResponse::Rejected { error })
             }
             _ => Err(GiveResponseError(responses)),
         }
@@ -146,6 +129,20 @@ impl TryFrom<Vec<Response>> for GiveResponse {
 #[derive(Debug, Error)]
 #[error("unexpected Agda response sequence ({} responses)", .0.len())]
 pub struct GiveResponseError(pub Vec<Response>);
+
+/// What the MCP `give` tool returns: Agda's response to the `Cmd_give`
+/// followed by the authoritative post-edit state from the auto-reload.
+///
+/// `give` and `reload` are independent: `reload` reflects the file on
+/// disk after any edit was applied, while `give` describes only what
+/// happened during the `Cmd_give` itself. A rejected give still carries
+/// a meaningful `reload` because the LLM caller benefits from seeing
+/// current goals/errors regardless.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct GiveToolOutput {
+    pub give: GiveResponse,
+    pub reload: LoadResponse,
+}
 
 #[cfg(test)]
 mod tests {
@@ -191,37 +188,36 @@ mod tests {
         let responses = parse_responses(GIVE_SUCCESS_CLEARS_GOAL);
         let output = GiveResponse::try_from(responses).expect("should parse success sequence");
 
-        let point = output
-            .interaction_point
-            .as_ref()
-            .expect("success carries an interaction point");
-        assert_eq!(point.id, 0);
-        assert_eq!(point.range.len(), 1);
-
-        let give_result = output.give_result.as_ref().expect("success carries a result");
+        let GiveResponse::Accepted {
+            interaction_point,
+            give_result,
+        } = output
+        else {
+            panic!("expected Accepted, got {output:?}");
+        };
+        assert_eq!(interaction_point.id, 0);
+        assert_eq!(interaction_point.range.len(), 1);
         match give_result {
             GiveResult::String { expression } => assert_eq!(expression, "zero"),
             GiveResult::Paren { paren } => panic!("expected String result, got Paren({paren})"),
         }
-
-        assert!(output.errors.is_empty());
     }
 
     #[test]
     fn parses_success_with_remaining_goals() {
         // Even when `AllGoalsWarnings` reports a leftover `?1`, GiveResponse
-        // does not surface it. The caller is expected to reload to see
-        // post-edit goals.
+        // does not surface it. The caller is expected to consume the
+        // follow-up reload for post-edit goals.
         let responses = parse_responses(GIVE_SUCCESS_LEAVES_GOAL);
         let output = GiveResponse::try_from(responses).expect("should parse success sequence");
 
-        let given = output.interaction_point.as_ref().expect("interaction point");
-        assert_eq!(given.id, 0, "give acted on ?0");
-        assert!(
-            output.errors.is_empty(),
-            "remaining goals are not errors: {:?}",
-            output.errors
-        );
+        let GiveResponse::Accepted {
+            interaction_point, ..
+        } = output
+        else {
+            panic!("expected Accepted, got {output:?}");
+        };
+        assert_eq!(interaction_point.id, 0, "give acted on ?0");
     }
 
     #[test]
@@ -229,13 +225,12 @@ mod tests {
         let responses = parse_responses(GIVE_ERROR_NOT_IN_SCOPE);
         let output = GiveResponse::try_from(responses).expect("should parse error sequence");
 
-        assert!(output.interaction_point.is_none());
-        assert!(output.give_result.is_none());
-        assert_eq!(output.errors.len(), 1);
+        let GiveResponse::Rejected { error } = output else {
+            panic!("expected Rejected, got {output:?}");
+        };
         assert!(
-            output.errors[0].contains("[NotInScope]"),
-            "errors should carry Agda's diagnostic, got {:?}",
-            output.errors
+            error.contains("[NotInScope]"),
+            "error should carry Agda's diagnostic, got {error:?}"
         );
     }
 
@@ -255,8 +250,10 @@ mod tests {
         let responses = parse_responses(payload);
         let output = GiveResponse::try_from(responses).expect("should parse JumpToError variant");
 
-        assert_eq!(output.errors, vec!["some error with a range".to_owned()]);
-        assert!(output.interaction_point.is_none());
+        let GiveResponse::Rejected { error } = output else {
+            panic!("expected Rejected, got {output:?}");
+        };
+        assert_eq!(error, "some error with a range");
     }
 
     #[test]
