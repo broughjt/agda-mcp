@@ -1,4 +1,6 @@
 module Main (main) where
 
+import AgdaMCP (foo)
+
 main :: IO ()
-main = putStrLn "Hello, World!"
+main = putStrLn $ show $ foo 5
