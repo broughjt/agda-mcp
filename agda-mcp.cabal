@@ -13,7 +13,17 @@ executable agda-mcp
   main-is: Main.hs
   hs-source-dirs: app
   build-depends:
-      base >= 4.18 && < 5
+      base >= 4.18 && < 5,
+      Agda == 2.8.*,
+      aeson,
+      containers,
+      directory,
+      filepath,
+      mcp,
+      mcp-types,
+      mtl,
+      stm,
+      text
   default-language: GHC2021
   ghc-options:
       -Wall

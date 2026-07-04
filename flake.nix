@@ -36,6 +36,7 @@
             pkgs.fourmolu
             pkgs.hlint
             pkgs.ghcid
+            pkgs.zlib
           ];
         };
       }
