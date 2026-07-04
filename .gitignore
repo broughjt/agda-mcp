@@ -1,0 +1,9 @@
+dist-newstyle/
+.ghc.environment.*
+.direnv/
+*.hi
+*.o
+*.dyn_hi
+*.dyn_o
+
+.scratch/
