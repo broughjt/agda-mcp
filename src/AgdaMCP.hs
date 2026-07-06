@@ -25,7 +25,12 @@ import Agda.Interaction.Options (
   defaultOptions,
  )
 import Agda.Interaction.Response (Response)
-import Agda.TypeChecking.Monad (HighlightingLevel (..), HighlightingMethod (..), setCommandLineOptions, setInteractionOutputCallback)
+import Agda.TypeChecking.Monad (
+  HighlightingLevel (..),
+  HighlightingMethod (..),
+  setCommandLineOptions,
+  setInteractionOutputCallback,
+ )
 import Agda.TypeChecking.Monad.Base (runTCMTop)
 import Control.Concurrent (forkIO)
 import Control.Concurrent.Chan (Chan, newChan, readChan, writeChan)
@@ -37,6 +42,7 @@ import Control.Concurrent.MVar (
   takeMVar,
   withMVar,
  )
+import Control.Exception (SomeException, try)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (evalStateT, lift)
 import Data.IORef (atomicModifyIORef', modifyIORef', newIORef)
@@ -66,7 +72,7 @@ startWorker = do
             liftIO $ putMVar workerResponse (Right responses)
             workerLoop
   _ <- forkIO $ do
-    result <- runTCMTop $ do
+    result <- try @SomeException $ runTCMTop $ do
       setInteractionOutputCallback $ \r ->
         liftIO $ modifyIORef' collector (r :)
       queue <- liftIO $ initialiseCommandQueue $ readChan workerCommands
@@ -80,7 +86,8 @@ startWorker = do
           }
     case result of
       Left e -> putMVar workerResponse (Left (show e))
-      Right () -> pure ()
+      Right (Left e) -> putMVar workerResponse (Left (show e))
+      Right (Right ()) -> pure ()
   pure Worker {workerLock, workerCommands, workerResponse}
 
 sendCommand :: Worker -> Command -> IO (Either String [Response])

@@ -1,8 +1,9 @@
 cabal-version: 3.0
 name: agda-mcp
 version: 0.1.0.0
-synopsis: Haskell project
-description: A Haskell project.
+synopsis: MCP server for interactive Agda development
+description:
+  An MCP server that lets coding agents use Agda interactively.
 category: Development
 license: BSD-3-Clause
 author: Jackson Brough
