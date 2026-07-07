@@ -13,11 +13,18 @@ build-type: Simple
 library
   hs-source-dirs: src
   exposed-modules:
-    AgdaMCP
+    AgdaMCP.Commands
+    AgdaMCP.Server
+    AgdaMCP.Worker
   build-depends:
       Agda == 2.8.*,
+      aeson,
       base >= 4.18 && < 5,
-      mtl
+      containers,
+      mcp,
+      mcp-types,
+      mtl,
+      text
   default-language: GHC2021
   ghc-options:
       -Wall
@@ -28,16 +35,6 @@ executable agda-mcp
   build-depends:
       agda-mcp,
       base >= 4.18 && < 5
-      -- Agda == 2.8.*,
-      -- aeson,
-      -- containers,
-      -- directory,
-      -- filepath,
-      -- mcp,
-      -- mcp-types,
-      -- mtl,
-      -- stm,
-      -- text
   default-language: GHC2021
   ghc-options:
       -Wall
