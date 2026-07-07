@@ -13,7 +13,7 @@ build-type: Simple
 library
   hs-source-dirs: src
   exposed-modules:
-    AgdaMCP.Commands
+    AgdaMCP.Tools
     AgdaMCP.Server
     AgdaMCP.Worker
   build-depends:
