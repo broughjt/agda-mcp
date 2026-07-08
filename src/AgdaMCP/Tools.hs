@@ -25,7 +25,7 @@ import Data.Ord (Down (..), comparing)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding (encodeUtf8)
-import Data.Text.Lazy qualified as TextL
+import Data.Text.Lazy qualified as LazyText
 import System.AtomicWrite.Writer.ByteString (atomicWriteFile)
 
 import Agda.Interaction.Base (
@@ -384,7 +384,7 @@ giveCommand path goal expression =
 
 -- An edit directive resulting from the application of a give commands,
 -- consisting of the interaction id, the code-point span (0-indexed and
--- end-inclusive), and the expression text elaborated by Agda.
+-- end-exclusive), and the expression text elaborated by Agda.
 data Edit = Edit
   { editGoal :: InteractionId
   , editStart :: Int
@@ -425,36 +425,34 @@ resolveGive goal responses (Right s) =
 commit :: Worker -> FilePath -> [Edit] -> IO GiveResponse
 commit worker path edits =
   ( do
-      -- Read the source exactly as Agda's parser does, so our code-point offsets
-      -- line up with its `posPos`. The parser reads the file it parses through
-      -- `readTextFile` (Agda.Syntax.Parser.readFilePM, Parser.hs:89), which
-      -- strips a UTF-8 BOM and normalizes line endings; we call the same
-      -- function rather than copy it. It returns lazy Text; we keep the module
-      -- on strict Text.
-      source <- TextL.toStrict <$> readTextFile path
+      -- Read the source exactly as Agda's parser does, so our code-point
+      -- offsets line up with its `posPos`.
+      source <- LazyText.toStrict <$> readTextFile path
+      -- We try to check that each of the `editSpan`s correspond to actual
+      -- holes. See .scratch/GIVE_STALENESS.md.
       case find (not . spanIsHole . editSpan source) edits of
         Just stale -> resync (GiveStale stale)
         Nothing -> do
-          -- Write UTF-8 with LF endings (a CRLF file becomes LF, which is what
-          -- Agda saw anyway; its reader normalizes it back on the reload).
-          -- `atomicWriteFile` writes to a temp file in the same directory and
-          -- renames it into place, so a failed write can't truncate the real
-          -- file, and it preserves the original's permissions.
-          atomicWriteFile path (encodeUtf8 (applyEdits source edits))
+          -- Note: we write UTF-8 with LF endings regardless of platform. Agda's
+          -- reader (`readTextFile`) normalizes to LF internally, so the hole
+          -- span indices depend on this behavior. I just don't really care to
+          -- think about what the defensibly correct solution is here, so I'm
+          -- going to say "screw you Windows" and write LFs.
           resync (GiveApplied edits)
   )
-    -- The only exceptions the file I/O above can raise: ordinary IOExceptions
-    -- (missing file, permissions, disk full) and readTextFile's decoding
-    -- ReadException. A worker `Failure` from a reload is a different type, so it
-    -- still propagates as class 3.
+    -- Catch `IOException`s -- (missing file, permissions, disk full) and
+    -- `readTextFile`'s decoding `ReadException`.
     `catches` [ Handler (fromIOError :: IOException -> IO GiveResponse)
               , Handler (fromIOError :: ReadException -> IO GiveResponse)
               ]
  where
-  -- Every commit outcome ends by reloading: the successful path reports the
-  -- fresh goals; the no-op paths (stale, I/O failure) discard the in-memory
-  -- gives and resync Agda with the on-disk file.
-  resync mk = mk <$> load worker (LoadRequest path)
+  -- Every (non-exception) `commit` outcome ends by reloading. The happy path
+  -- uses this to report the fresh goals, while the two sad paths (stale, I/O
+  -- failure) discard the attempted gives and sync Agda's state with the
+  -- contents on disk.
+  resync :: (LoadResponse -> a) -> IO a
+  resync f = f <$> load worker (LoadRequest path)
+
   fromIOError :: (Exception e) => e -> IO GiveResponse
   fromIOError = resync . GiveIOError . Text.pack . displayException
 
@@ -462,6 +460,7 @@ editSpan :: Text -> Edit -> Text
 editSpan source edit =
   Text.take (editEnd edit - editStart edit) (Text.drop (editStart edit) source)
 
+-- TODO: Remove the `Text.strip`?
 spanIsHole :: Text -> Bool
 spanIsHole raw =
   stripped == "?"
@@ -532,16 +531,6 @@ parseGiveResponses goal responses = maybe (Left violation) Right (exchange respo
 
 renderGiveResponse :: GiveResponse -> Text
 renderGiveResponse (GiveApplied edits reloaded) =
-  renderGiveSucceeded edits (renderLoadResponse reloaded)
-renderGiveResponse (GiveRejected goal err priorCount reloaded) =
-  renderGiveFailed goal err priorCount (renderLoadResponse reloaded)
-renderGiveResponse (GiveStale edit reloaded) =
-  renderGiveStale edit (renderLoadResponse reloaded)
-renderGiveResponse (GiveIOError err reloaded) =
-  renderGiveIOError err (renderLoadResponse reloaded)
-
-renderGiveSucceeded :: [Edit] -> Text -> Text
-renderGiveSucceeded edits reloaded =
   "Gave "
     <> Text.pack (show (length edits))
     <> " goal(s):\n"
@@ -554,10 +543,8 @@ renderGiveSucceeded edits reloaded =
       | e <- edits
       ]
     <> "The file was updated on disk and reloaded; interaction ids may have changed.\n\n"
-    <> reloaded
-
-renderGiveFailed :: InteractionId -> Text -> Int -> Text -> Text
-renderGiveFailed goal err priorCount reloaded =
+    <> renderLoadResponse reloaded
+renderGiveResponse (GiveRejected goal err priorCount reloaded) =
   "Give failed for goal ?"
     <> Text.pack (show (interactionId goal))
     <> ":\n"
@@ -571,10 +558,8 @@ renderGiveFailed goal err priorCount reloaded =
            else "The file was left unchanged. "
        )
     <> "Reloaded to resync:\n\n"
-    <> reloaded
-
-renderGiveStale :: Edit -> Text -> Text
-renderGiveStale (Edit goal start end _) reloaded =
+    <> renderLoadResponse reloaded
+renderGiveResponse (GiveStale (Edit goal start end _) reloaded) =
   "Refused to edit: goal ?"
     <> Text.pack (show (interactionId goal))
     <> " no longer points at a hole (expected `?` or `{! !}` at characters "
@@ -583,14 +568,12 @@ renderGiveStale (Edit goal start end _) reloaded =
     <> Text.pack (show end)
     <> "). The file likely changed on disk since it was loaded. No changes were \
        \made; reloaded to resync:\n\n"
-    <> reloaded
-
-renderGiveIOError :: Text -> Text -> Text
-renderGiveIOError err reloaded =
+    <> renderLoadResponse reloaded
+renderGiveResponse (GiveIOError err reloaded) =
   "Could not access the file on disk:\n"
     <> err
     <> "\n\nNo changes were written. Reloaded to resync:\n\n"
-    <> reloaded
+    <> renderLoadResponse reloaded
 
 -- Helpers
 
