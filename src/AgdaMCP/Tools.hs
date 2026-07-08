@@ -70,6 +70,7 @@ loadTool worker =
   toolHandler
     "agda_load"
     ( Just
+        -- TODO:
         "Load and typecheck an Agda file. Reports the open goals \
         \(interaction points) on success, or the error if the file fails \
         \to typecheck. Prefer absolute paths; relative paths are resolved \
@@ -124,6 +125,7 @@ loadCommand (LoadRequest path) =
 
 renderLoadResponse :: LoadResponse -> Text
 renderLoadResponse (Loaded body ids) =
+  -- TODO:
   "Load succeeded. Open goals: "
     <> Text.pack (show (length ids))
     <> " (interaction ids "
@@ -217,6 +219,7 @@ giveTool worker =
   toolHandler
     "agda_give"
     ( Just
+        -- TODO:
         "Fill one or more goals of a loaded Agda file with expressions. Takes \
         \the file `path` and a list of `gives`, each a `goal` (interaction id, \
         \as reported by agda_load) and an `expression`. All gives are checked \
@@ -234,7 +237,7 @@ giveTool worker =
                 ( "path"
                 , object
                     [ "type" .= ("string" :: Text)
-                    , "description" .= ("Path to the loaded .agda file" :: Text)
+                    , "description" .= ("Path to a .agda file" :: Text)
                     ]
                 )
               ,
@@ -275,55 +278,59 @@ giveTool worker =
 
 data GiveRequest = GiveRequest FilePath [GiveItem]
 
-data GiveItem = GiveItem InteractionId String
+type GiveItem = (InteractionId, String)
 
--- A single applied give: the goal, the code-point span (0-based, end exclusive)
--- it occupied in the normalized source, and the expression Agda elaborated it
--- to (which is what we splice into the file).
+data GiveResponse
+  = Gave Int Int Text
+  | GiveFailed Text
+  deriving (Show)
+
+-- TODO: Does Aeson have macros or derives that do this for us?
+parseGiveArguments :: Maybe (Map Text Value) -> Either Text GiveRequest
+parseGiveArguments arguments = do
+  let arguments' = fromMaybe Map.empty arguments
+  path <- Text.unpack <$> parseTextArgument arguments' "path"
+  givesValue <-
+    maybe
+      (Left "Missing 'gives' argument: expected an array")
+      Right
+      (Map.lookup "gives" arguments')
+  items <- parseGiveItems givesValue
+  when (null items) $
+    Left "The 'gives' array must contain at least one {goal, expression} object"
+  when (hasDuplicates [g | (g, _) <- items]) $
+    Left "Duplicate goal ids in 'gives'; each goal may be given only once per call"
+  pure (GiveRequest path items)
+ where
+  parseGiveItems :: Value -> Either Text [GiveItem]
+  parseGiveItems (Aeson.Array items) = traverse parseGiveItem (toList items)
+  parseGiveItems _ = Left "'gives' must be an array of {goal, expression} objects"
+
+  parseGiveItem :: Value -> Either Text GiveItem
+  parseGiveItem (Aeson.Object fields) = do
+    goal <- case KeyMap.lookup "goal" fields of
+      Just value -> case Aeson.fromJSON value of
+        Aeson.Success n -> Right (InteractionId n)
+        Aeson.Error _ -> Left "A 'gives' entry has a non-integer 'goal'"
+      Nothing -> Left "A 'gives' entry is missing 'goal'"
+    expression <- case KeyMap.lookup "expression" fields of
+      Just (Aeson.String s) -> Right (Text.strip s)
+      Just _ -> Left "A 'gives' entry has a non-string 'expression'"
+      Nothing -> Left "A 'gives' entry is missing 'expression'"
+    when (Text.null expression) $
+      Left "A 'gives' entry has an empty 'expression'"
+    pure (goal, (Text.unpack expression))
+  parseGiveItem _ = Left "Each 'gives' entry must be a {goal, expression} object"
+
+-- An edit directive resulting from the application of a give commands,
+-- consisting of the interaction id, the code-point span (0-indexed and
+-- end-inclusive), and the expression text elaborated by Agda.
 data Edit = Edit
   { editGoal :: InteractionId
   , editStart :: Int
   , editEnd :: Int
   , editText :: Text
   }
-
-data GiveReply
-  = Gave Int Int Text
-  | GiveFailed Text
-  deriving (Show)
-
-parseGiveArguments :: Maybe (Map Text Value) -> Either Text GiveRequest
-parseGiveArguments arguments = do
-  let args = fromMaybe Map.empty arguments
-  path <- Text.unpack <$> parseTextArgument args "path"
-  givesValue <-
-    maybe (Left "Missing 'gives' argument: expected an array") Right (Map.lookup "gives" args)
-  items <- parseGiveItems givesValue
-  when (null items) $
-    Left "The 'gives' array must contain at least one goal/expression pair"
-  when (hasDuplicates [g | GiveItem g _ <- items]) $
-    Left "Duplicate goal ids in 'gives'; each goal may be given only once per call"
-  pure (GiveRequest path items)
-
-parseGiveItems :: Value -> Either Text [GiveItem]
-parseGiveItems (Aeson.Array items) = traverse parseGiveItem (toList items)
-parseGiveItems _ = Left "'gives' must be an array of {goal, expression} objects"
-
-parseGiveItem :: Value -> Either Text GiveItem
-parseGiveItem (Aeson.Object fields) = do
-  goal <- case KeyMap.lookup "goal" fields of
-    Just value -> case Aeson.fromJSON value of
-      Aeson.Success n -> Right (InteractionId n)
-      Aeson.Error _ -> Left "A 'gives' entry has a non-integer 'goal'"
-    Nothing -> Left "A 'gives' entry is missing 'goal'"
-  expression <- case KeyMap.lookup "expression" fields of
-    Just (Aeson.String s) -> Right (Text.strip s)
-    Just _ -> Left "A 'gives' entry has a non-string 'expression'"
-    Nothing -> Left "A 'gives' entry is missing 'expression'"
-  when (Text.null expression) $
-    Left "A 'gives' entry has an empty 'expression'"
-  pure (GiveItem goal (Text.unpack expression))
-parseGiveItem _ = Left "Each 'gives' entry must be a {goal, expression} object"
 
 -- Run each give against the current loaded state, accumulating the edits. The
 -- gives never touch the file, so every edit's span stays valid against the one
@@ -334,7 +341,7 @@ give :: Worker -> GiveRequest -> IO Text
 give worker (GiveRequest path items) = attempt [] items
  where
   attempt done [] = commit worker path (reverse done)
-  attempt done (GiveItem ii expression : rest) = do
+  attempt done ((ii, expression) : rest) = do
     reply <- runCommand worker (giveCommand path ii expression)
     case reply of
       GiveFailed err -> do
@@ -343,10 +350,11 @@ give worker (GiveRequest path items) = attempt [] items
       Gave start end text ->
         attempt (Edit ii start end text : done) rest
 
-giveCommand :: FilePath -> InteractionId -> String -> Command GiveReply
+giveCommand :: FilePath -> InteractionId -> String -> Command GiveResponse
 giveCommand path ii expression =
   Command
-    { commandIOTCM = IOTCM path None Direct (Cmd_give WithoutForce ii noRange expression)
+    { commandIOTCM =
+        IOTCM path None Direct (Cmd_give WithoutForce ii noRange expression)
     , commandParse = \responses ->
         case matchGive ii responses of
           Left violation -> pure (Left violation)
@@ -388,7 +396,8 @@ failed := DisplayInfo (Info_Error)       -- handleErr:216-242, as in matchLoad
           HighlightingInfo
           Status                         -- hardcoded sChecked=False (:239)
 -}
-matchGive :: InteractionId -> [Response] -> Either (ProtocolViolation Response) GiveMatch
+matchGive ::
+  InteractionId -> [Response] -> Either (ProtocolViolation Response) GiveMatch
 matchGive ii responses = maybe (Left violation) Right (exchange responses)
  where
   violation = ProtocolViolation "Cmd_give" responses
@@ -483,7 +492,8 @@ renderGiveSucceeded edits reloaded =
   "Gave "
     <> Text.pack (show (length edits))
     <> " goal(s):\n"
-    <> Text.concat ["  ?" <> showId (editGoal e) <> " := " <> editText e <> "\n" | e <- edits]
+    <> Text.concat
+      ["  ?" <> showId (editGoal e) <> " := " <> editText e <> "\n" | e <- edits]
     <> "The file was updated on disk and reloaded; interaction ids may have changed.\n\n"
     <> reloaded
 
@@ -495,11 +505,11 @@ renderGiveFailed ii err priorCount reloaded =
     <> err
     <> "\n\n"
     <> ( if priorCount > 0
-          then
-            "The file was left unchanged; the "
-              <> Text.pack (show priorCount)
-              <> " earlier give(s) in this call were discarded. "
-          else "The file was left unchanged. "
+           then
+             "The file was left unchanged; the "
+               <> Text.pack (show priorCount)
+               <> " earlier give(s) in this call were discarded. "
+           else "The file was left unchanged. "
        )
     <> "Reloaded to resync:\n\n"
     <> reloaded
@@ -533,7 +543,7 @@ parseTextArgument arguments key = case Map.lookup key arguments of
   Just (Aeson.String value) -> Right value
   _ -> Left ("Missing or invalid '" <> key <> "' argument: expected a string")
 
-hasDuplicates :: Ord a => [a] -> Bool
+hasDuplicates :: (Ord a) => [a] -> Bool
 hasDuplicates xs = length (nub xs) /= length xs
 
 failedTail :: (Info_Error -> a) -> [Response] -> Maybe a
