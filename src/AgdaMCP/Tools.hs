@@ -12,6 +12,7 @@ import Control.Exception (
   throwIO,
  )
 import Control.Monad (when)
+import Control.Monad.Except (ExceptT (..), runExceptT)
 import Control.Monad.IO.Class (liftIO)
 import Data.Aeson (Value, object, (.=))
 import Data.Aeson qualified as Aeson
@@ -71,6 +72,7 @@ import AgdaMCP.Worker (
   Worker,
   sendCommand,
  )
+import Data.Bifunctor (Bifunctor (first))
 
 -- Load
 
@@ -307,6 +309,9 @@ data GiveResponse
     GiveIOError Text LoadResponse
   deriving (Show)
 
+-- TODO: Merge with or pull out of GiveRejected
+data RejectedGive = RejectedGive InteractionId Text Int
+
 type GiveItem = (InteractionId, String)
 
 -- TODO: Does Aeson have macros or derives that do this for us?
@@ -349,23 +354,64 @@ parseGiveArguments arguments = do
     pure (goal, (Text.unpack expression))
   parseGiveItem _ = Left "Each 'gives' entry must be a {goal, expression} object"
 
--- Run each give against the current loaded state, accumulating the edits. The
--- gives never touch the file, so every edit's span stays valid against the one
--- source we read at commit time. If any give fails to typecheck we stop, roll
--- the in-flight in-memory gives back by reloading the (untouched) file, and
--- report the failure; the whole call is a no-op on disk.
+-- Run each give against the current loaded state in order, accumulating the
+-- edits. The gives don't touch the file yet, so every edit's span stays valid
+-- against the current source. If any give fails to typecheck, we stop, roll
+-- back the in-flight gives by reloading the (untouched) file, and report the
+-- failure. If each give is successful, we write the accumulated edits back to
+-- disk.
 give :: Worker -> GiveRequest -> IO GiveResponse
-give worker (GiveRequest path items) = attempt [] items
+give worker (GiveRequest path items) =
+  runExceptT (traverse runGive (zip [0 :: Int ..] items))
+    >>= either reject commit
  where
-  attempt done [] = commit worker path (reverse done)
-  attempt done ((goal, expression) : rest) = do
-    result <- runCommand worker (giveCommand path goal expression)
-    case result of
-      Left err -> do
-        reloaded <- load worker (LoadRequest path)
-        pure (GiveRejected goal err (length done) reloaded)
-      Right edit ->
-        attempt (edit : done) rest
+  runGive :: (Int, GiveItem) -> ExceptT RejectedGive IO Edit
+  runGive (priorCount, (goal, expression)) =
+    ExceptT $
+      first (flip (RejectedGive goal) priorCount)
+        <$> runCommand worker (giveCommand path goal expression)
+
+  -- TODO: Consequence of TODO above saying to merge `RejectedGive` with `GiveRejected`.
+  reject :: RejectedGive -> IO GiveResponse
+  reject (RejectedGive goal err priorCount) =
+    resync (GiveRejected goal err priorCount)
+
+  -- All gives succeeded. Read the source, confirm every recorded span still
+  -- holds a hole (if not, the file change under us since the last load, so
+  -- refuse rather than corrupt it), splice all the edits in, write, and reload.
+  commit :: [Edit] -> IO GiveResponse
+  commit edits =
+    ( do
+        -- Read the source with Agda's parser, so our edit offsets line up with
+        -- its `posPos`.
+        source <- LazyText.toStrict <$> readTextFile path
+        -- We try to check that each of the `editSpan`s correspond to actual
+        -- holes. See .scratch/GIVE_STALENESS.md.
+        case find (not . spanIsHole . editSpan source) edits of
+          Just stale -> resync (GiveStale stale)
+          Nothing -> do
+            -- Note: we write UTF-8 with LF endings regardless of platform.
+            -- Agda's reader (`readTextFile`) normalizes to LF internally, so
+            -- the hole span indices depend on this behavior. I just don't
+            -- really care to think about what the defensibly correct solution
+            -- is here, so I'm going to say "screw you Windows" and write LFs.
+            atomicWriteFile path (encodeUtf8 (applyEdits source edits))
+            resync (GiveApplied edits)
+    )
+      -- Catch `IOException`s (missing file, permissions, disk full) and
+      -- `readTextFile`'s decoding `ReadException`.
+      `catches` [ Handler (fromIOError :: IOException -> IO GiveResponse)
+                , Handler (fromIOError :: ReadException -> IO GiveResponse)
+                ]
+
+  -- Every `give` outcome ends by reloading. The happy path uses this to report
+  -- the fresh goals, while the sad paths discard any in-memory gives and sync
+  -- Agda's state with the contents on disk.
+  resync :: (LoadResponse -> a) -> IO a
+  resync f = f <$> load worker (LoadRequest path)
+
+  fromIOError :: (Exception e) => e -> IO GiveResponse
+  fromIOError = resync . GiveIOError . Text.pack . displayException
 
 -- Either a rendered type error (the give failed) or the edit to splice: the
 -- hole's span and the text Agda elaborated the expression to.
@@ -418,43 +464,6 @@ resolveGive goal responses (Right s) =
       )
   missing = Left (ProtocolViolation "Cmd_give" responses)
   offset position = fromIntegral (posPos position) - 1
-
--- All gives succeeded in memory. Read the source once, confirm every recorded
--- span still holds a hole (if not, the file changed under us since the load, so
--- refuse rather than corrupt it), splice all the edits, write, and reload.
-commit :: Worker -> FilePath -> [Edit] -> IO GiveResponse
-commit worker path edits =
-  ( do
-      -- Read the source exactly as Agda's parser does, so our code-point
-      -- offsets line up with its `posPos`.
-      source <- LazyText.toStrict <$> readTextFile path
-      -- We try to check that each of the `editSpan`s correspond to actual
-      -- holes. See .scratch/GIVE_STALENESS.md.
-      case find (not . spanIsHole . editSpan source) edits of
-        Just stale -> resync (GiveStale stale)
-        Nothing -> do
-          -- Note: we write UTF-8 with LF endings regardless of platform. Agda's
-          -- reader (`readTextFile`) normalizes to LF internally, so the hole
-          -- span indices depend on this behavior. I just don't really care to
-          -- think about what the defensibly correct solution is here, so I'm
-          -- going to say "screw you Windows" and write LFs.
-          resync (GiveApplied edits)
-  )
-    -- Catch `IOException`s -- (missing file, permissions, disk full) and
-    -- `readTextFile`'s decoding `ReadException`.
-    `catches` [ Handler (fromIOError :: IOException -> IO GiveResponse)
-              , Handler (fromIOError :: ReadException -> IO GiveResponse)
-              ]
- where
-  -- Every (non-exception) `commit` outcome ends by reloading. The happy path
-  -- uses this to report the fresh goals, while the two sad paths (stale, I/O
-  -- failure) discard the attempted gives and sync Agda's state with the
-  -- contents on disk.
-  resync :: (LoadResponse -> a) -> IO a
-  resync f = f <$> load worker (LoadRequest path)
-
-  fromIOError :: (Exception e) => e -> IO GiveResponse
-  fromIOError = resync . GiveIOError . Text.pack . displayException
 
 editSpan :: Text -> Edit -> Text
 editSpan source edit =
