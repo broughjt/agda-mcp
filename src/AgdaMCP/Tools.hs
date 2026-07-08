@@ -113,8 +113,9 @@ load worker request = runCommand worker (loadCommand request)
 
 parseLoadArguments :: Maybe (Map Text Value) -> Either Text LoadRequest
 parseLoadArguments arguments =
-  (LoadRequest . Text.unpack)
-    <$> parseTextArgument (fromMaybe Map.empty arguments) "path"
+  case Map.lookup "path" (fromMaybe Map.empty arguments) of
+    Just (Aeson.String path) -> Right (LoadRequest (Text.unpack path))
+    _ -> Left "Missing or invalid 'path' argument: expected a string"
 
 loadCommand :: LoadRequest -> Command LoadResponse
 loadCommand (LoadRequest path) =
@@ -272,24 +273,36 @@ giveTool worker =
     )
     ( either
         (pure . ProcessSuccess . toolTextError)
-        (liftIO . fmap (ProcessSuccess . toolTextResult . (: [])) . give worker)
+        ( liftIO
+            . fmap (ProcessSuccess . toolTextResult . (: []) . renderGiveResponse)
+            . give worker
+        )
         . parseGiveArguments
     )
 
 data GiveRequest = GiveRequest FilePath [GiveItem]
 
-type GiveItem = (InteractionId, String)
-
 data GiveResponse
-  = Gave Int Int Text
-  | GiveFailed Text
+  = -- Every give typechecked and its edit was spliced into the file.
+    GiveApplied [Edit] LoadResponse
+  | -- A give failed to typecheck, so the file was left untouched. Carries the
+    -- goal that failed, its rendered error, and how many earlier gives in the
+    -- same call were discarded.
+    GiveRejected InteractionId Text Int LoadResponse
+  | -- A goal's recorded span no longer holds a hole (the file changed on disk
+    -- since it was loaded), so the edit was refused and nothing was written.
+    GiveStale Edit LoadResponse
   deriving (Show)
+
+type GiveItem = (InteractionId, String)
 
 -- TODO: Does Aeson have macros or derives that do this for us?
 parseGiveArguments :: Maybe (Map Text Value) -> Either Text GiveRequest
 parseGiveArguments arguments = do
   let arguments' = fromMaybe Map.empty arguments
-  path <- Text.unpack <$> parseTextArgument arguments' "path"
+  path <- case Map.lookup "path" arguments' of
+    Just (Aeson.String p) -> Right (Text.unpack p)
+    _ -> Left "Missing or invalid 'path' argument: expected a string"
   givesValue <-
     maybe
       (Left "Missing 'gives' argument: expected an array")
@@ -298,7 +311,8 @@ parseGiveArguments arguments = do
   items <- parseGiveItems givesValue
   when (null items) $
     Left "The 'gives' array must contain at least one {goal, expression} object"
-  when (hasDuplicates [g | (g, _) <- items]) $
+  let goals = [g | (g, _) <- items]
+  when (length (nub goals) /= length goals) $
     Left "Duplicate goal ids in 'gives'; each goal may be given only once per call"
   pure (GiveRequest path items)
  where
@@ -322,6 +336,48 @@ parseGiveArguments arguments = do
     pure (goal, (Text.unpack expression))
   parseGiveItem _ = Left "Each 'gives' entry must be a {goal, expression} object"
 
+-- Run each give against the current loaded state, accumulating the edits. The
+-- gives never touch the file, so every edit's span stays valid against the one
+-- source we read at commit time. If any give fails to typecheck we stop, roll
+-- the in-flight in-memory gives back by reloading the (untouched) file, and
+-- report the failure; the whole call is a no-op on disk.
+give :: Worker -> GiveRequest -> IO GiveResponse
+give worker (GiveRequest path items) = attempt [] items
+ where
+  attempt done [] = commit worker path (reverse done)
+  attempt done ((goal, expression) : rest) = do
+    result <- runCommand worker (giveCommand path goal expression)
+    case result of
+      Left err -> do
+        reloaded <- load worker (LoadRequest path)
+        pure (GiveRejected goal err (length done) reloaded)
+      Right (start, end, text) ->
+        attempt (Edit goal start end text : done) rest
+
+-- Either a rendered type error (the give failed) or the elaborated span:
+-- the hole's 0-based, end-inclusive code-point offsets and the given text.
+giveCommand ::
+  FilePath -> InteractionId -> String -> Command (Either Text (Int, Int, Text))
+giveCommand path goal expression =
+  Command
+    { commandIOTCM =
+        IOTCM path None Direct (Cmd_give WithoutForce goal noRange expression)
+    , commandParse = \responses ->
+        case parseGiveResponses goal responses of
+          Left violation -> pure (Left violation)
+          Right (Left e) -> Right . Left . Text.pack <$> showInfoError e
+          Right (Right s) -> do
+            -- Agda never moves an interaction point's range, so this still
+            -- reports the hole's position in the originally loaded source.
+            interval <- rangeToInterval <$> getInteractionRange goal
+            pure $ case interval of
+              Just iv ->
+                Right (Right (offset (iStart iv), offset (iEnd iv), Text.pack s))
+              Nothing -> Left (ProtocolViolation "Cmd_give" responses)
+    }
+ where
+  offset position = fromIntegral (posPos position) - 1
+
 -- An edit directive resulting from the application of a give commands,
 -- consisting of the interaction id, the code-point span (0-indexed and
 -- end-inclusive), and the expression text elaborated by Agda.
@@ -331,113 +387,22 @@ data Edit = Edit
   , editEnd :: Int
   , editText :: Text
   }
-
--- Run each give against the current loaded state, accumulating the edits. The
--- gives never touch the file, so every edit's span stays valid against the one
--- source we read at commit time. If any give fails to typecheck we stop, roll
--- the in-flight in-memory gives back by reloading the (untouched) file, and
--- report the failure; the whole call is a no-op on disk.
-give :: Worker -> GiveRequest -> IO Text
-give worker (GiveRequest path items) = attempt [] items
- where
-  attempt done [] = commit worker path (reverse done)
-  attempt done ((ii, expression) : rest) = do
-    reply <- runCommand worker (giveCommand path ii expression)
-    case reply of
-      GiveFailed err -> do
-        reloaded <- reloadRendered worker path
-        pure (renderGiveFailed ii err (length done) reloaded)
-      Gave start end text ->
-        attempt (Edit ii start end text : done) rest
-
-giveCommand :: FilePath -> InteractionId -> String -> Command GiveResponse
-giveCommand path ii expression =
-  Command
-    { commandIOTCM =
-        IOTCM path None Direct (Cmd_give WithoutForce ii noRange expression)
-    , commandParse = \responses ->
-        case matchGive ii responses of
-          Left violation -> pure (Left violation)
-          Right (MatchFailed e) -> Right . GiveFailed . Text.pack <$> showInfoError e
-          Right (MatchGave s) -> do
-            -- Agda never moves an interaction point's range, so this still
-            -- reports the hole's position in the originally loaded source.
-            interval <- rangeToInterval <$> getInteractionRange ii
-            pure $ case interval of
-              Just iv ->
-                Right (Gave (offset (iStart iv)) (offset (iEnd iv)) (Text.pack s))
-              Nothing -> Left (ProtocolViolation "Cmd_give" responses)
-    }
- where
-  offset position = fromIntegral (posPos position) - 1
-
-data GiveMatch
-  = MatchGave String
-  | MatchFailed Info_Error
-
-{- The grammar of a Cmd_give response list, following the Agda 2.8.0 source:
-
-exchange := prelude? given
-          | prelude? failed
-
-prelude := Status ClearRunningInfo ClearHighlighting RunningInfo*
-        -- Only when the give targets a not-yet-loaded file: runInteraction runs
-        -- an implicit cmd_load' with a no-op continuation
-        -- (InteractionTop.hs:257-263, cmd_load':848-869), so a load prelude and
-        -- checking noise but no DisplayInfo and no InteractionPoints.
-
-given := GiveAction (ii, Give_String s)  -- give_gen:1021; noRange => Give_String (:1010)
-         Status                          -- give_gen ends with Cmd_metas => display_info (:1024)
-         DisplayInfo (Info_AllGoalsWarnings)  -- (:1145-1146); discarded, superseded by the reload
-         InteractionPoints               -- runInteraction:268-271 (updateInteractionPointsAfter Cmd_give)
-
-failed := DisplayInfo (Info_Error)       -- handleErr:216-242, as in matchLoad
-          JumpToError?                   -- with noRange, typically absent
-          HighlightingInfo
-          Status                         -- hardcoded sChecked=False (:239)
--}
-matchGive ::
-  InteractionId -> [Response] -> Either (ProtocolViolation Response) GiveMatch
-matchGive ii responses = maybe (Left violation) Right (exchange responses)
- where
-  violation = ProtocolViolation "Cmd_give" responses
-
-  exchange
-    ( Resp_Status status : Resp_ClearRunningInfo
-        : Resp_ClearHighlighting NotOnlyTokenBased
-        : rest
-      )
-      | not (sChecked status) = afterPrelude rest
-  exchange rest = afterPrelude rest
-
-  afterPrelude (Resp_RunningInfo {} : rest) = afterPrelude rest
-  afterPrelude rest = given rest <|> failed rest
-
-  given
-    ( Resp_GiveAction ii' (Give_String s)
-        : Resp_Status _
-        : Resp_DisplayInfo (Info_AllGoalsWarnings _ _)
-        : [Resp_InteractionPoints _]
-      )
-      | ii' == ii = Just (MatchGave s)
-  given _ = Nothing
-
-  failed = failedTail MatchFailed
+  deriving (Show)
 
 -- All gives succeeded in memory. Read the source once, confirm every recorded
 -- span still holds a hole (if not, the file changed under us since the load, so
 -- refuse rather than corrupt it), splice all the edits, write, and reload.
-commit :: Worker -> FilePath -> [Edit] -> IO Text
+commit :: Worker -> FilePath -> [Edit] -> IO GiveResponse
 commit worker path edits = do
   source <- readAgdaSource path
   case find (not . spanIsHole . editSpan source) edits of
     Just stale -> do
-      reloaded <- reloadRendered worker path
-      pure (renderGiveStale stale reloaded)
+      reloaded <- load worker (LoadRequest path)
+      pure (GiveStale stale reloaded)
     Nothing -> do
       writeAgdaSource path (applyEdits source edits)
-      reloaded <- reloadRendered worker path
-      pure (renderGiveSucceeded edits reloaded)
+      reloaded <- load worker (LoadRequest path)
+      pure (GiveApplied edits reloaded)
 
 editSpan :: Text -> Edit -> Text
 editSpan source edit =
@@ -484,8 +449,63 @@ normalizeLineEndings = Text.map convert . Text.replace "\x000D\n" "\n"
 writeAgdaSource :: FilePath -> Text -> IO ()
 writeAgdaSource path = BS.writeFile path . encodeUtf8
 
-reloadRendered :: Worker -> FilePath -> IO Text
-reloadRendered worker path = renderLoadResponse <$> load worker (LoadRequest path)
+{- The grammar of a Cmd_give response list, following the Agda 2.8.0 source:
+
+exchange := prelude? given
+          | prelude? failed
+
+prelude := Status ClearRunningInfo ClearHighlighting RunningInfo*
+        -- Appears only when the give targets a not-yet-loaded
+        -- file. `runInteraction` executes an implicit cmd_load' with a no-op
+        -- continuation (InteractionTop.hs:257-263, cmd_load':848-869).
+
+given := GiveAction (goal, Give_String s) -- give_gen:1021; noRange => Give_String (:1010)
+         Status                           -- give_gen ends with Cmd_metas => display_info (:1024)
+         DisplayInfo (Info_AllGoalsWarnings)  -- (:1145-1146); discarded, superseded by the reload
+         InteractionPoints                -- runInteraction:268-271 (updateInteractionPointsAfter Cmd_give)
+
+failed := DisplayInfo (Info_Error)       -- handleErr:216-242, as in matchLoad
+          JumpToError?                   -- with noRange, typically absent
+          HighlightingInfo
+          Status                         -- hardcoded sChecked=False (:239)
+-}
+parseGiveResponses ::
+  InteractionId ->
+  [Response] ->
+  Either (ProtocolViolation Response) (Either Info_Error String)
+parseGiveResponses goal responses = maybe (Left violation) Right (exchange responses)
+ where
+  violation = ProtocolViolation "Cmd_give" responses
+
+  exchange
+    ( Resp_Status status : Resp_ClearRunningInfo
+        : Resp_ClearHighlighting NotOnlyTokenBased
+        : rest
+      )
+      | not (sChecked status) = afterPrelude rest
+  exchange rest = afterPrelude rest
+
+  afterPrelude (Resp_RunningInfo {} : rest) = afterPrelude rest
+  afterPrelude rest = given rest <|> failed rest
+
+  given
+    ( Resp_GiveAction goal' (Give_String s)
+        : Resp_Status _
+        : Resp_DisplayInfo (Info_AllGoalsWarnings _ _)
+        : [Resp_InteractionPoints _]
+      )
+      | goal' == goal = Just (Right s)
+  given _ = Nothing
+
+  failed = failedTail Left
+
+renderGiveResponse :: GiveResponse -> Text
+renderGiveResponse (GiveApplied edits reloaded) =
+  renderGiveSucceeded edits (renderLoadResponse reloaded)
+renderGiveResponse (GiveRejected goal err priorCount reloaded) =
+  renderGiveFailed goal err priorCount (renderLoadResponse reloaded)
+renderGiveResponse (GiveStale edit reloaded) =
+  renderGiveStale edit (renderLoadResponse reloaded)
 
 renderGiveSucceeded :: [Edit] -> Text -> Text
 renderGiveSucceeded edits reloaded =
@@ -493,14 +513,20 @@ renderGiveSucceeded edits reloaded =
     <> Text.pack (show (length edits))
     <> " goal(s):\n"
     <> Text.concat
-      ["  ?" <> showId (editGoal e) <> " := " <> editText e <> "\n" | e <- edits]
+      [ "  ?"
+          <> Text.pack (show (interactionId (editGoal e)))
+          <> " := "
+          <> editText e
+          <> "\n"
+      | e <- edits
+      ]
     <> "The file was updated on disk and reloaded; interaction ids may have changed.\n\n"
     <> reloaded
 
 renderGiveFailed :: InteractionId -> Text -> Int -> Text -> Text
-renderGiveFailed ii err priorCount reloaded =
+renderGiveFailed goal err priorCount reloaded =
   "Give failed for goal ?"
-    <> showId ii
+    <> Text.pack (show (interactionId goal))
     <> ":\n"
     <> err
     <> "\n\n"
@@ -515,9 +541,9 @@ renderGiveFailed ii err priorCount reloaded =
     <> reloaded
 
 renderGiveStale :: Edit -> Text -> Text
-renderGiveStale (Edit ii start end _) reloaded =
+renderGiveStale (Edit goal start end _) reloaded =
   "Refused to edit: goal ?"
-    <> showId ii
+    <> Text.pack (show (interactionId goal))
     <> " no longer points at a hole (expected `?` or `{! !}` at characters "
     <> Text.pack (show start)
     <> "-"
@@ -525,9 +551,6 @@ renderGiveStale (Edit ii start end _) reloaded =
     <> "). The file likely changed on disk since it was loaded. No changes were \
        \made; reloaded to resync:\n\n"
     <> reloaded
-
-showId :: InteractionId -> Text
-showId = Text.pack . show . interactionId
 
 -- Helpers
 
@@ -537,14 +560,6 @@ showId = Text.pack . show . interactionId
 runCommand :: Worker -> Command r -> IO r
 runCommand worker command =
   sendCommand worker command >>= either throwIO pure
-
-parseTextArgument :: Map Text Value -> Text -> Either Text Text
-parseTextArgument arguments key = case Map.lookup key arguments of
-  Just (Aeson.String value) -> Right value
-  _ -> Left ("Missing or invalid '" <> key <> "' argument: expected a string")
-
-hasDuplicates :: (Ord a) => [a] -> Bool
-hasDuplicates xs = length (nub xs) /= length xs
 
 failedTail :: (Info_Error -> a) -> [Response] -> Maybe a
 failedTail wrap (Resp_DisplayInfo (Info_Error e) : rest) = case rest of
