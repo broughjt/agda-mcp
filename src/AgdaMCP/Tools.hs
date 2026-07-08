@@ -3,13 +3,19 @@
 module AgdaMCP.Tools (loadTool, giveTool) where
 
 import Control.Applicative ((<|>))
-import Control.Exception (throwIO)
+import Control.Exception (
+  Exception,
+  Handler (..),
+  IOException,
+  catches,
+  displayException,
+  throwIO,
+ )
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Aeson (Value, object, (.=))
 import Data.Aeson qualified as Aeson
 import Data.Aeson.KeyMap qualified as KeyMap
-import Data.ByteString qualified as BS
 import Data.Foldable (toList)
 import Data.List (find, intercalate, nub, sortBy)
 import Data.Map (Map)
@@ -20,6 +26,7 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding (encodeUtf8)
 import Data.Text.Lazy qualified as TextL
+import System.AtomicWrite.Writer.ByteString (atomicWriteFile)
 
 import Agda.Interaction.Base (
   IOTCM' (..),
@@ -48,7 +55,7 @@ import Agda.TypeChecking.Monad.Base (
  )
 import Agda.TypeChecking.Monad.MetaVars (getInteractionRange)
 import Agda.TypeChecking.Pretty.Warning (prettyTCWarnings)
-import Agda.Utils.IO.UTF8 (readTextFile)
+import Agda.Utils.IO.UTF8 (ReadException, readTextFile)
 import MCP.Server (
   InputSchema (..),
   ProcessResult (..),
@@ -294,6 +301,10 @@ data GiveResponse
   | -- A goal's recorded span no longer holds a hole (the file changed on disk
     -- since it was loaded), so the edit was refused and nothing was written.
     GiveStale Edit LoadResponse
+  | -- Reading or writing the file failed (deleted, permissions, disk full, ...).
+    -- Nothing was written -- the write is atomic, so a failed write leaves the
+    -- original intact. Carries the rendered I/O error.
+    GiveIOError Text LoadResponse
   deriving (Show)
 
 type GiveItem = (InteractionId, String)
@@ -412,23 +423,40 @@ resolveGive goal responses (Right s) =
 -- span still holds a hole (if not, the file changed under us since the load, so
 -- refuse rather than corrupt it), splice all the edits, write, and reload.
 commit :: Worker -> FilePath -> [Edit] -> IO GiveResponse
-commit worker path edits = do
-  -- Read the source exactly as Agda's parser does, so our code-point offsets
-  -- line up with its `posPos`. The parser reads the file it parses through
-  -- `readTextFile` (Agda.Syntax.Parser.readFilePM, Parser.hs:89), which strips a
-  -- UTF-8 BOM and normalizes line endings; we call the same function rather than
-  -- copy it. It returns lazy Text; we keep the module on strict Text.
-  source <- TextL.toStrict <$> readTextFile path
-  case find (not . spanIsHole . editSpan source) edits of
-    Just stale -> do
-      reloaded <- load worker (LoadRequest path)
-      pure (GiveStale stale reloaded)
-    Nothing -> do
-      -- Write UTF-8 with LF endings; a CRLF file is rewritten with LF, which is
-      -- what Agda saw anyway (its reader normalizes it back on the reload).
-      BS.writeFile path (encodeUtf8 (applyEdits source edits))
-      reloaded <- load worker (LoadRequest path)
-      pure (GiveApplied edits reloaded)
+commit worker path edits =
+  ( do
+      -- Read the source exactly as Agda's parser does, so our code-point offsets
+      -- line up with its `posPos`. The parser reads the file it parses through
+      -- `readTextFile` (Agda.Syntax.Parser.readFilePM, Parser.hs:89), which
+      -- strips a UTF-8 BOM and normalizes line endings; we call the same
+      -- function rather than copy it. It returns lazy Text; we keep the module
+      -- on strict Text.
+      source <- TextL.toStrict <$> readTextFile path
+      case find (not . spanIsHole . editSpan source) edits of
+        Just stale -> resync (GiveStale stale)
+        Nothing -> do
+          -- Write UTF-8 with LF endings (a CRLF file becomes LF, which is what
+          -- Agda saw anyway; its reader normalizes it back on the reload).
+          -- `atomicWriteFile` writes to a temp file in the same directory and
+          -- renames it into place, so a failed write can't truncate the real
+          -- file, and it preserves the original's permissions.
+          atomicWriteFile path (encodeUtf8 (applyEdits source edits))
+          resync (GiveApplied edits)
+  )
+    -- The only exceptions the file I/O above can raise: ordinary IOExceptions
+    -- (missing file, permissions, disk full) and readTextFile's decoding
+    -- ReadException. A worker `Failure` from a reload is a different type, so it
+    -- still propagates as class 3.
+    `catches` [ Handler (fromIOError :: IOException -> IO GiveResponse)
+              , Handler (fromIOError :: ReadException -> IO GiveResponse)
+              ]
+ where
+  -- Every commit outcome ends by reloading: the successful path reports the
+  -- fresh goals; the no-op paths (stale, I/O failure) discard the in-memory
+  -- gives and resync Agda with the on-disk file.
+  resync mk = mk <$> load worker (LoadRequest path)
+  fromIOError :: (Exception e) => e -> IO GiveResponse
+  fromIOError = resync . GiveIOError . Text.pack . displayException
 
 editSpan :: Text -> Edit -> Text
 editSpan source edit =
@@ -509,6 +537,8 @@ renderGiveResponse (GiveRejected goal err priorCount reloaded) =
   renderGiveFailed goal err priorCount (renderLoadResponse reloaded)
 renderGiveResponse (GiveStale edit reloaded) =
   renderGiveStale edit (renderLoadResponse reloaded)
+renderGiveResponse (GiveIOError err reloaded) =
+  renderGiveIOError err (renderLoadResponse reloaded)
 
 renderGiveSucceeded :: [Edit] -> Text -> Text
 renderGiveSucceeded edits reloaded =
@@ -553,6 +583,13 @@ renderGiveStale (Edit goal start end _) reloaded =
     <> Text.pack (show end)
     <> "). The file likely changed on disk since it was loaded. No changes were \
        \made; reloaded to resync:\n\n"
+    <> reloaded
+
+renderGiveIOError :: Text -> Text -> Text
+renderGiveIOError err reloaded =
+  "Could not access the file on disk:\n"
+    <> err
+    <> "\n\nNo changes were written. Reloaded to resync:\n\n"
     <> reloaded
 
 -- Helpers
