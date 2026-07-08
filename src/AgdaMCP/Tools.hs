@@ -18,7 +18,8 @@ import Data.Maybe (fromMaybe)
 import Data.Ord (Down (..), comparing)
 import Data.Text (Text)
 import Data.Text qualified as Text
-import Data.Text.Encoding (decodeUtf8, encodeUtf8)
+import Data.Text.Encoding (encodeUtf8)
+import Data.Text.Lazy qualified as TextL
 
 import Agda.Interaction.Base (
   IOTCM' (..),
@@ -47,6 +48,7 @@ import Agda.TypeChecking.Monad.Base (
  )
 import Agda.TypeChecking.Monad.MetaVars (getInteractionRange)
 import Agda.TypeChecking.Pretty.Warning (prettyTCWarnings)
+import Agda.Utils.IO.UTF8 (readTextFile)
 import MCP.Server (
   InputSchema (..),
   ProcessResult (..),
@@ -351,32 +353,23 @@ give worker (GiveRequest path items) = attempt [] items
       Left err -> do
         reloaded <- load worker (LoadRequest path)
         pure (GiveRejected goal err (length done) reloaded)
-      Right (start, end, text) ->
-        attempt (Edit goal start end text : done) rest
+      Right edit ->
+        attempt (edit : done) rest
 
--- Either a rendered type error (the give failed) or the elaborated span:
--- the hole's 0-based, end-inclusive code-point offsets and the given text.
+-- Either a rendered type error (the give failed) or the edit to splice: the
+-- hole's span and the text Agda elaborated the expression to.
 giveCommand ::
-  FilePath -> InteractionId -> String -> Command (Either Text (Int, Int, Text))
+  FilePath -> InteractionId -> String -> Command (Either Text Edit)
 giveCommand path goal expression =
   Command
     { commandIOTCM =
         IOTCM path None Direct (Cmd_give WithoutForce goal noRange expression)
     , commandParse = \responses ->
-        case parseGiveResponses goal responses of
-          Left violation -> pure (Left violation)
-          Right (Left e) -> Right . Left . Text.pack <$> showInfoError e
-          Right (Right s) -> do
-            -- Agda never moves an interaction point's range, so this still
-            -- reports the hole's position in the originally loaded source.
-            interval <- rangeToInterval <$> getInteractionRange goal
-            pure $ case interval of
-              Just iv ->
-                Right (Right (offset (iStart iv), offset (iEnd iv), Text.pack s))
-              Nothing -> Left (ProtocolViolation "Cmd_give" responses)
+        either
+          (pure . Left)
+          (resolveGive goal responses)
+          (parseGiveResponses goal responses)
     }
- where
-  offset position = fromIntegral (posPos position) - 1
 
 -- An edit directive resulting from the application of a give commands,
 -- consisting of the interaction id, the code-point span (0-indexed and
@@ -389,18 +382,51 @@ data Edit = Edit
   }
   deriving (Show)
 
+resolveGive ::
+  InteractionId ->
+  [Response] ->
+  Either Info_Error String ->
+  TCM (Either (ProtocolViolation Response) (Either Text Edit))
+resolveGive _ _ (Left e) = Right . Left . Text.pack <$> showInfoError e
+resolveGive goal responses (Right s) =
+  maybe
+    missing
+    gave
+    . rangeToInterval
+    <$> getInteractionRange goal
+ where
+  gave interval =
+    Right
+      ( Right
+          ( Edit
+              goal
+              (offset (iStart interval))
+              (offset (iEnd interval))
+              (Text.pack s)
+          )
+      )
+  missing = Left (ProtocolViolation "Cmd_give" responses)
+  offset position = fromIntegral (posPos position) - 1
+
 -- All gives succeeded in memory. Read the source once, confirm every recorded
 -- span still holds a hole (if not, the file changed under us since the load, so
 -- refuse rather than corrupt it), splice all the edits, write, and reload.
 commit :: Worker -> FilePath -> [Edit] -> IO GiveResponse
 commit worker path edits = do
-  source <- readAgdaSource path
+  -- Read the source exactly as Agda's parser does, so our code-point offsets
+  -- line up with its `posPos`. The parser reads the file it parses through
+  -- `readTextFile` (Agda.Syntax.Parser.readFilePM, Parser.hs:89), which strips a
+  -- UTF-8 BOM and normalizes line endings; we call the same function rather than
+  -- copy it. It returns lazy Text; we keep the module on strict Text.
+  source <- TextL.toStrict <$> readTextFile path
   case find (not . spanIsHole . editSpan source) edits of
     Just stale -> do
       reloaded <- load worker (LoadRequest path)
       pure (GiveStale stale reloaded)
     Nothing -> do
-      writeAgdaSource path (applyEdits source edits)
+      -- Write UTF-8 with LF endings; a CRLF file is rewritten with LF, which is
+      -- what Agda saw anyway (its reader normalizes it back on the reload).
+      BS.writeFile path (encodeUtf8 (applyEdits source edits))
       reloaded <- load worker (LoadRequest path)
       pure (GiveApplied edits reloaded)
 
@@ -425,29 +451,6 @@ applyEdits source edits =
     let (before, rest) = Text.splitAt start text
         after = Text.drop (end - start) rest
      in before <> replacement <> after
-
--- Read the source exactly as Agda does, so our code-point offsets line up with
--- its `posPos`: strip a UTF-8 BOM off the bytes, then normalize line endings
--- (Agda.Utils.IO.UTF8.readTextFile / convertLineEndings).
-readAgdaSource :: FilePath -> IO Text
-readAgdaSource path = normalizeLineEndings . decodeUtf8 . stripBom <$> BS.readFile path
- where
-  stripBom bytes = fromMaybe bytes (BS.stripPrefix (BS.pack [0xEF, 0xBB, 0xBF]) bytes)
-
-normalizeLineEndings :: Text -> Text
-normalizeLineEndings = Text.map convert . Text.replace "\x000D\n" "\n"
- where
-  convert '\x000D' = '\n' -- CR
-  convert '\x000C' = '\n' -- FF
-  convert '\x0085' = '\n' -- NEXT LINE
-  convert '\x2028' = '\n' -- LINE SEPARATOR
-  convert '\x2029' = '\n' -- PARAGRAPH SEPARATOR
-  convert c = c
-
--- Writes UTF-8 with LF endings (the normalized text); a CRLF file is rewritten
--- with LF, which is what Agda saw anyway.
-writeAgdaSource :: FilePath -> Text -> IO ()
-writeAgdaSource path = BS.writeFile path . encodeUtf8
 
 {- The grammar of a Cmd_give response list, following the Agda 2.8.0 source:
 
