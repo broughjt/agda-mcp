@@ -6,14 +6,11 @@ module AgdaMCP.Tools.Load (
   HiddenMetavariable (..),
   LoadRequest (..),
   LoadResponse (..),
-  NonFatalError (..),
-  Warning (..),
   load,
   loadTool,
   renderLoadResponse,
 ) where
 
-import Control.Applicative (liftA3)
 import Control.Monad (when)
 import Control.Monad.Except (ExceptT, runExceptT, throwError)
 import Control.Monad.IO.Class (liftIO)
@@ -23,7 +20,6 @@ import Data.Aeson qualified as Aeson
 import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Maybe (fromMaybe)
-import Data.Set (Set)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import MCP.Server (
@@ -44,8 +40,6 @@ import Agda.Interaction.Output (OutputConstraint)
 import Agda.Interaction.Response (
   DisplayInfo_boot (..),
   Goals,
-  Info_Error,
-  Info_Error_boot (..),
   Response,
   Response_boot (..),
   Status (..),
@@ -55,15 +49,13 @@ import Agda.Syntax.Abstract.Pretty (prettyATop)
 import Agda.Syntax.Common (InteractionId (..))
 import Agda.Syntax.Common.Aspect (TokenBased (..))
 import Agda.Syntax.Common.Pretty (render)
-import Agda.Syntax.Position (getRange)
 import Agda.Syntax.Position qualified
-import Agda.TypeChecking.Errors (getAllWarningsOfTCErr, renderError)
 import Agda.TypeChecking.Monad (TCM)
 import Agda.TypeChecking.Monad.Base (
   HighlightingLevel (..),
   HighlightingMethod (..),
   NamedMeta (..),
-  TCWarning (tcWarningRange),
+  TCErr,
   WarningsAndNonFatalErrors (..),
  )
 import Agda.TypeChecking.Monad.MetaVars (
@@ -72,8 +64,6 @@ import Agda.TypeChecking.Monad.MetaVars (
   withInteractionId,
   withMetaId,
  )
-import Agda.TypeChecking.Pretty (prettyTCM)
-import Agda.TypeChecking.Pretty.Warning (filterTCWarnings)
 import Agda.Utils.FileName (AbsolutePath, absolute)
 
 import AgdaMCP.Position (
@@ -82,7 +72,17 @@ import AgdaMCP.Position (
   renderSpan,
   toSpan,
  )
-import AgdaMCP.Tools.Common (failedTail, runCommand)
+import AgdaMCP.Tools.Common (
+  AgdaError,
+  NonFatalError (..),
+  Warning (..),
+  failedTail,
+  locatedWarnings,
+  renderAgdaError,
+  resolveError,
+  runCommand,
+  section,
+ )
 import AgdaMCP.Worker (
   Command (..),
   ProtocolViolation (ProtocolViolation),
@@ -128,7 +128,7 @@ data LoadRequest = LoadRequest FilePath
 
 data LoadResponse
   = Loaded [Goal] [HiddenMetavariable] [Warning] [NonFatalError]
-  | LoadFailed Text (Maybe Span) [Warning]
+  | LoadFailed AgdaError
   | LoadStale
   deriving (Show)
 
@@ -157,12 +157,6 @@ data HiddenMetavariable = HiddenMetavariable
   , hiddenMetavariableSpan :: Maybe Span
   , hiddenMetavariableShape :: GoalShape
   }
-  deriving (Show)
-
-newtype Warning = Warning (Maybe Span, Text)
-  deriving (Show)
-
-newtype NonFatalError = NonFatalError (Maybe Span, Text)
   deriving (Show)
 
 load :: Worker -> LoadRequest -> IO LoadResponse
@@ -197,20 +191,11 @@ renderLoadResponse (Loaded goals hiddenMetavariables warnings errors) =
       , section "Non-fatal errors:" [e | NonFatalError (_, e) <- errors]
       , section "Warnings:" [w | Warning (_, w) <- warnings]
       ]
-renderLoadResponse (LoadFailed message _ warnings) =
-  Text.intercalate "\n" $
-    concat
-      [ ["Load failed:", message]
-      , section "Warnings:" [w | Warning (_, w) <- warnings]
-      ]
+renderLoadResponse (LoadFailed err) =
+  Text.intercalate "\n" ("Load failed:" : renderAgdaError err)
 renderLoadResponse LoadStale =
   "The file changed on disk while Agda was checking it, so the result \
   \was discarded. Please load the file again."
-
--- A titled block of lines, omitted entirely when there are no items.
-section :: Text -> [Text] -> [Text]
-section _ [] = []
-section title items = "" : title : items
 
 renderGoal :: Goal -> Text
 renderGoal (Goal ii sp shape) =
@@ -229,7 +214,7 @@ renderShape name GoalSort = "Sort " <> name
 
 data LoadResponse'
   = LoadGoals Goals WarningsAndNonFatalErrors [InteractionId]
-  | LoadError Info_Error
+  | LoadError TCErr
   | LoadNotRegistered
 
 {- The grammar of a Cmd_load response list, following the Agda 2.8.0 source:
@@ -319,18 +304,7 @@ resolveLoad path responses response = do
         Loaded goals hiddenMetavariables
           <$> (map Warning <$> locatedWarnings path' (tcWarnings warnings))
           <*> (map NonFatalError <$> locatedWarnings path' (nonFatalErrors warnings))
-    LoadError (Info_GenericError err) ->
-      Right
-        <$> liftA3
-          LoadFailed
-          (Text.pack <$> renderError err)
-          (pure (fileSpan path' (getRange err)))
-          (map Warning <$> (getAllWarningsOfTCErr err >>= locatedWarnings path'))
-    -- The other `Info_Error` constructors cannot come from `Cmd_load`:
-    -- `Info_CompilationError` only from Cmd_compile (InteractionTop.hs:491),
-    -- `Info_Highlighting{Parse,ScopeCheck}Error` only from Cmd_highlight
-    -- (:631-633).
-    LoadError _ -> pure (Left violation)
+    LoadError err -> Right . LoadFailed <$> resolveError path' err
     LoadNotRegistered -> pure (Right LoadStale)
  where
   violation = ProtocolViolation "Cmd_load" responses
@@ -382,14 +356,3 @@ resolveLoad path responses response = do
     renderedName metavariable =
       Text.pack . render
         <$> lift (withMetaId (nmid metavariable) $ prettyATop metavariable)
-
-  -- Apply Agda's own warning filtering (removes unsolved-constraint warnings in
-  -- the case that there are no "interesting" constraints), then pair each
-  -- rendered warning with its span.
-  locatedWarnings :: AbsolutePath -> Set TCWarning -> TCM [(Maybe Span, Text)]
-  locatedWarnings path' warnings =
-    filterTCWarnings warnings >>= traverse locate
-   where
-    locate warning =
-      ((,) (fileSpan path' (tcWarningRange warning)) . Text.pack . render)
-        <$> prettyTCM warning

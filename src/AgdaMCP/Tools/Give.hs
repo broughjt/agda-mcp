@@ -42,11 +42,9 @@ import Agda.Interaction.Base (
   Interaction' (Cmd_give),
   UseForce (WithoutForce),
  )
-import Agda.Interaction.EmacsTop (showInfoError)
 import Agda.Interaction.Response (
   DisplayInfo_boot (..),
   GiveResult (..),
-  Info_Error,
   Response,
   Response_boot (..),
   Status (..),
@@ -59,8 +57,10 @@ import Agda.TypeChecking.Monad (TCM)
 import Agda.TypeChecking.Monad.Base (
   HighlightingLevel (..),
   HighlightingMethod (..),
+  TCErr,
  )
 import Agda.TypeChecking.Monad.MetaVars (getInteractionRange)
+import Agda.Utils.FileName (absolute)
 import Agda.Utils.IO.UTF8 (ReadException, readTextFile)
 
 import AgdaMCP.Position (
@@ -72,7 +72,13 @@ import AgdaMCP.Position (
   spanText,
   toSpan,
  )
-import AgdaMCP.Tools.Common (failedTail, runCommand)
+import AgdaMCP.Tools.Common (
+  AgdaError,
+  failedTail,
+  renderAgdaError,
+  resolveError,
+  runCommand,
+ )
 import AgdaMCP.Tools.Load (
   LoadRequest (..),
   LoadResponse,
@@ -152,24 +158,36 @@ giveTool worker =
 
 data GiveRequest = GiveRequest FilePath [GiveItem]
 
-data GiveResponse
-  = -- Every give typechecked and its edit was spliced into the file.
-    GiveApplied [Edit] LoadResponse
-  | -- A give failed to typecheck, so the file was left untouched. Carries the
-    -- goal that failed, its rendered error, and how many earlier gives in the
-    -- same call were discarded.
-    GiveRejected InteractionId Text Int LoadResponse
-  | -- A goal's recorded span no longer holds a hole (the file changed on disk
-    -- since it was loaded), so the edit was refused and nothing was written.
-    GiveStale Edit LoadResponse
-  | -- Reading or writing the file failed (deleted, permissions, disk full, ...).
-    -- Nothing was written -- the write is atomic, so a failed write leaves the
-    -- original intact. Carries the rendered I/O error.
-    GiveIOError Text LoadResponse
+-- Every `give` outcome ends by reloading (see `resync`), so the response
+-- pairs the outcome with the fresh load result.
+data GiveResponse = GiveResponse
+  { giveOutcome :: GiveOutcome
+  , giveReload :: LoadResponse
+  }
   deriving (Show)
 
--- TODO: Merge with or pull out of GiveRejected
-data RejectedGive = RejectedGive InteractionId Text Int
+data GiveOutcome
+  = -- Every give typechecked and its edit was spliced into the file.
+    GiveApplied [Edit]
+  | -- A give failed to typecheck, so the file was left untouched.
+    GiveRejected RejectedGive
+  | -- A goal's recorded span no longer holds a hole (the file changed on disk
+    -- since it was loaded), so the edit was refused and nothing was written.
+    GiveStale Edit
+  | -- Reading or writing the file failed (deleted, permissions, disk full, ...).
+    -- The write is atomic, so a failed write leaves the original
+    -- intact. Carries the rendered I/O error.
+    GiveIOError Text
+  deriving (Show)
+
+-- A give that failed to typecheck: the goal, its error, and how many earlier
+-- gives in the same call were discarded (by the resync reload).
+data RejectedGive = RejectedGive
+  { rejectedGoal :: InteractionId
+  , rejectedError :: AgdaError
+  , rejectedDiscarded :: Int
+  }
+  deriving (Show)
 
 type GiveItem = (InteractionId, String)
 
@@ -222,18 +240,13 @@ parseGiveArguments arguments = do
 give :: Worker -> GiveRequest -> IO GiveResponse
 give worker (GiveRequest path items) =
   runExceptT (traverse runGive (zip [0 :: Int ..] items))
-    >>= either reject commit
+    >>= either (resync . GiveRejected) commit
  where
   runGive :: (Int, GiveItem) -> ExceptT RejectedGive IO Edit
   runGive (priorCount, (goal, expression)) =
     ExceptT $
-      first (flip (RejectedGive goal) priorCount)
+      first (\err -> RejectedGive goal err priorCount)
         <$> runCommand worker (giveCommand path goal expression)
-
-  -- TODO: Consequence of TODO above saying to merge `RejectedGive` with `GiveRejected`.
-  reject :: RejectedGive -> IO GiveResponse
-  reject (RejectedGive goal err priorCount) =
-    resync (GiveRejected goal err priorCount)
 
   -- All gives succeeded. Read the source, confirm every recorded span still
   -- holds a hole (if not, the file change under us since the last load, so
@@ -266,24 +279,25 @@ give worker (GiveRequest path items) =
   -- Every `give` outcome ends by reloading. The happy path uses this to report
   -- the fresh goals, while the sad paths discard any in-memory gives and sync
   -- Agda's state with the contents on disk.
-  resync :: (LoadResponse -> a) -> IO a
-  resync f = f <$> load worker (LoadRequest path)
+  resync :: GiveOutcome -> IO GiveResponse
+  resync outcome = GiveResponse outcome <$> load worker (LoadRequest path)
 
   fromIOError :: (Exception e) => e -> IO GiveResponse
   fromIOError = resync . GiveIOError . Text.pack . displayException
 
--- Either a rendered type error (the give failed) or the edit to splice: the
--- hole's span and the text Agda elaborated the expression to.
 giveCommand ::
-  FilePath -> InteractionId -> String -> Command (Either Text Edit)
+  FilePath -> InteractionId -> String -> Command (Either AgdaError Edit)
 giveCommand path goal expression =
   Command
     { commandIOTCM =
+        -- TODO: Expose `UseForce` (the Emacs `C-u` give, skipping the safety
+        -- checks) as an optional tool argument. Follow-up; wants its own
+        -- thinking about when agents should force.
         IOTCM path None Direct (Cmd_give WithoutForce goal noRange expression)
     , commandParse = \responses ->
         either
           (pure . Left)
-          (resolveGive goal responses)
+          (resolveGive path goal responses)
           (parseGiveResponses goal responses)
     }
 
@@ -298,12 +312,22 @@ data Edit = Edit
   deriving (Show)
 
 resolveGive ::
+  FilePath ->
   InteractionId ->
   [Response] ->
-  Either Info_Error String ->
-  TCM (Either (ProtocolViolation Response) (Either Text Edit))
-resolveGive _ _ (Left e) = Right . Left . Text.pack <$> showInfoError e
-resolveGive goal responses (Right s) =
+  Either TCErr String ->
+  TCM (Either (ProtocolViolation Response) (Either AgdaError Edit))
+resolveGive path _ _ (Left e) =
+  -- TODO: Attach the hole's span to the failure. The error's own span is rarely
+  -- in the file (with `rng = noRange`, the expression is parsed from `startPos
+  -- Nothing`, so its positions carry no file), but the hole's span would locate
+  -- the failed goal for the agent. It must use a non-throwing lookup --
+  -- `BiMap.lookup goal <$> useR stInteractionPoints` -- because
+  -- `getInteractionRange` throws a `TCErr` for a bogus goal id, which would
+  -- escape `commandParse` and kill the worker (turning agent misuse into
+  -- process death, forbidden by the failure taxonomy).
+  Right . Left <$> (liftIO (absolute path) >>= flip resolveError e)
+resolveGive _ goal responses (Right s) =
   maybe
     missing
     gave
@@ -358,7 +382,7 @@ failed := DisplayInfo (Info_Error)       -- handleErr:216-242, as in matchLoad
 parseGiveResponses ::
   InteractionId ->
   [Response] ->
-  Either (ProtocolViolation Response) (Either Info_Error String)
+  Either (ProtocolViolation Response) (Either TCErr String)
 parseGiveResponses goal responses = maybe (Left violation) Right (exchange responses)
  where
   violation = ProtocolViolation "Cmd_give" responses
@@ -386,7 +410,11 @@ parseGiveResponses goal responses = maybe (Left violation) Right (exchange respo
   failed = failedTail Left
 
 renderGiveResponse :: GiveResponse -> Text
-renderGiveResponse (GiveApplied edits reloaded) =
+renderGiveResponse (GiveResponse outcome reloaded) =
+  renderGiveOutcome outcome <> "\n\n" <> renderLoadResponse reloaded
+
+renderGiveOutcome :: GiveOutcome -> Text
+renderGiveOutcome (GiveApplied edits) =
   "Gave "
     <> Text.pack (show (length edits))
     <> " goal(s):\n"
@@ -398,33 +426,29 @@ renderGiveResponse (GiveApplied edits reloaded) =
           <> "\n"
       | e <- edits
       ]
-    <> "The file was updated on disk and reloaded; interaction ids may have changed.\n\n"
-    <> renderLoadResponse reloaded
-renderGiveResponse (GiveRejected goal err priorCount reloaded) =
+    <> "The file was updated on disk and reloaded; interaction ids may have changed."
+renderGiveOutcome (GiveRejected (RejectedGive goal err discarded)) =
   "Give failed for goal ?"
     <> Text.pack (show (interactionId goal))
     <> ":\n"
-    <> err
+    <> Text.intercalate "\n" (renderAgdaError err)
     <> "\n\n"
-    <> ( if priorCount > 0
+    <> ( if discarded > 0
            then
              "The file was left unchanged; the "
-               <> Text.pack (show priorCount)
+               <> Text.pack (show discarded)
                <> " earlier give(s) in this call were discarded. "
            else "The file was left unchanged. "
        )
-    <> "Reloaded to resync:\n\n"
-    <> renderLoadResponse reloaded
-renderGiveResponse (GiveStale edit reloaded) =
+    <> "Reloaded to resync:"
+renderGiveOutcome (GiveStale edit) =
   "Refused to edit: goal ?"
     <> Text.pack (show (interactionId (editGoal edit)))
     <> " no longer points at a hole (expected `?` or `{! !}` at "
     <> renderSpan (editSpan edit)
     <> "). The file likely changed on disk since it was loaded. No changes were \
-       \made; reloaded to resync:\n\n"
-    <> renderLoadResponse reloaded
-renderGiveResponse (GiveIOError err reloaded) =
+       \made; reloaded to resync:"
+renderGiveOutcome (GiveIOError err) =
   "Could not access the file on disk:\n"
     <> err
-    <> "\n\nNo changes were written. Reloaded to resync:\n\n"
-    <> renderLoadResponse reloaded
+    <> "\n\nNo changes were written. Reloaded to resync:"
