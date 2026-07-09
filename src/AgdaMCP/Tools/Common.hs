@@ -64,6 +64,10 @@ type instance MCPHandlerUser = ()
 -- killing the process. We deliberately catch it nowhere.
 withSession :: SessionM a -> MCPServerT a
 withSession action = do
+  -- Side note: I think the shape of `withSession` is an instance of a more
+  -- general pattern of doing a stateful computation on a projection of a larger
+  -- state. Looking around, I think this may have something to do with Haskell's
+  -- lenses and the `zoom` operation.
   state <- get
   (result, session) <- liftIO $ runStateT action (mcp_handler_state state)
   put state {mcp_handler_state = session}
