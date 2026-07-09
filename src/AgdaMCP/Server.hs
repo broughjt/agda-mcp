@@ -1,24 +1,16 @@
 {-# LANGUAGE DisambiguateRecordFields #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeFamilies #-}
--- MCPHandlerState/MCPHandlerUser are open type families the mcp library
--- requires every application to instantiate; the instances are necessarily
--- orphans (the library's own example does the same).
-{-# OPTIONS_GHC -Wno-orphans #-}
 
 module AgdaMCP.Server (runServer) where
 
 import MCP.Server
 import System.IO (BufferMode (..), hSetBuffering, stderr, stdin, stdout)
 
+import AgdaMCP.Session (Session)
 import AgdaMCP.Tools (giveTool, loadTool)
-import AgdaMCP.Worker (Worker)
 
-type instance MCPHandlerState = ()
-type instance MCPHandlerUser = ()
-
-runServer :: Worker -> IO ()
-runServer worker = do
+runServer :: Session -> IO ()
+runServer session = do
   hSetBuffering stderr LineBuffering
   let implementation = Implementation "agda-mcp" "0.1.0.0" (Just "Agda MCP Server")
       instructions =
@@ -34,10 +26,10 @@ runServer worker = do
           , completions = Nothing
           , experimental = Nothing
           }
-      handlers = withToolHandlers [loadTool worker, giveTool worker] defaultProcessHandlers
+      handlers = withToolHandlers [loadTool, giveTool] defaultProcessHandlers
   serveStdio stdin stdout $
     initMCPServerState
-      ()
+      session
       Nothing
       Nothing
       capabilities

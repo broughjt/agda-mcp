@@ -72,12 +72,18 @@ import AgdaMCP.Position (
   spanText,
   toSpan,
  )
+import AgdaMCP.Session (
+  Command (..),
+  ProtocolViolation (ProtocolViolation),
+  SessionM,
+  runCommandM,
+ )
 import AgdaMCP.Tools.Common (
   AgdaError,
   failedTail,
   renderAgdaError,
   resolveError,
-  runCommand,
+  withSession,
  )
 import AgdaMCP.Tools.Load (
   LoadRequest (..),
@@ -85,14 +91,9 @@ import AgdaMCP.Tools.Load (
   load,
   renderLoadResponse,
  )
-import AgdaMCP.Worker (
-  Command (..),
-  ProtocolViolation (ProtocolViolation),
-  Worker,
- )
 
-giveTool :: Worker -> ToolHandler
-giveTool worker =
+giveTool :: ToolHandler
+giveTool =
   toolHandler
     "agda_give"
     ( Just
@@ -149,9 +150,9 @@ giveTool worker =
     )
     ( either
         (pure . ProcessSuccess . toolTextError)
-        ( liftIO
-            . fmap (ProcessSuccess . toolTextResult . (: []) . renderGiveResponse)
-            . give worker
+        ( fmap (ProcessSuccess . toolTextResult . (: []) . renderGiveResponse)
+            . withSession
+            . give
         )
         . parseGiveArguments
     )
@@ -237,21 +238,21 @@ parseGiveArguments arguments = do
 -- back the in-flight gives by reloading the (untouched) file, and report the
 -- failure. If each give is successful, we write the accumulated edits back to
 -- disk.
-give :: Worker -> GiveRequest -> IO GiveResponse
-give worker (GiveRequest path items) =
+give :: GiveRequest -> SessionM GiveResponse
+give (GiveRequest path items) =
   runExceptT (traverse runGive (zip [0 :: Int ..] items))
-    >>= either (resync . GiveRejected) commit
+    >>= either (resync . GiveRejected) (\edits -> liftIO (commit edits) >>= resync)
  where
-  runGive :: (Int, GiveItem) -> ExceptT RejectedGive IO Edit
+  runGive :: (Int, GiveItem) -> ExceptT RejectedGive SessionM Edit
   runGive (priorCount, (goal, expression)) =
     ExceptT $
       first (\err -> RejectedGive goal err priorCount)
-        <$> runCommand worker (giveCommand path goal expression)
+        <$> runCommandM (giveCommand path goal expression)
 
   -- All gives succeeded. Read the source, confirm every recorded span still
   -- holds a hole (if not, the file change under us since the last load, so
-  -- refuse rather than corrupt it), splice all the edits in, write, and reload.
-  commit :: [Edit] -> IO GiveResponse
+  -- refuse rather than corrupt it), splice all the edits in, and write.
+  commit :: [Edit] -> IO GiveOutcome
   commit edits =
     ( do
         -- Read the source with Agda's parser, so our edit offsets line up with
@@ -260,7 +261,7 @@ give worker (GiveRequest path items) =
         -- We try to check that each of the `editSpan`s correspond to actual
         -- holes. See .scratch/GIVE_STALENESS.md.
         case find (not . spanIsHole . spanText source . editSpan) edits of
-          Just stale -> resync (GiveStale stale)
+          Just stale -> pure (GiveStale stale)
           Nothing -> do
             -- Note: we write UTF-8 with LF endings regardless of platform.
             -- Agda's reader (`readTextFile`) normalizes to LF internally, so
@@ -268,22 +269,22 @@ give worker (GiveRequest path items) =
             -- really care to think about what the defensibly correct solution
             -- is here, so I'm going to say "screw you Windows" and write LFs.
             atomicWriteFile path (encodeUtf8 (applyEdits source edits))
-            resync (GiveApplied edits)
+            pure (GiveApplied edits)
     )
       -- Catch `IOException`s (missing file, permissions, disk full) and
       -- `readTextFile`'s decoding `ReadException`.
-      `catches` [ Handler (fromIOError :: IOException -> IO GiveResponse)
-                , Handler (fromIOError :: ReadException -> IO GiveResponse)
+      `catches` [ Handler (fromIOError :: IOException -> IO GiveOutcome)
+                , Handler (fromIOError :: ReadException -> IO GiveOutcome)
                 ]
 
   -- Every `give` outcome ends by reloading. The happy path uses this to report
   -- the fresh goals, while the sad paths discard any in-memory gives and sync
   -- Agda's state with the contents on disk.
-  resync :: GiveOutcome -> IO GiveResponse
-  resync outcome = GiveResponse outcome <$> load worker (LoadRequest path)
+  resync :: GiveOutcome -> SessionM GiveResponse
+  resync outcome = GiveResponse outcome <$> load (LoadRequest path)
 
-  fromIOError :: (Exception e) => e -> IO GiveResponse
-  fromIOError = resync . GiveIOError . Text.pack . displayException
+  fromIOError :: (Exception e) => e -> IO GiveOutcome
+  fromIOError = pure . GiveIOError . Text.pack . displayException
 
 giveCommand ::
   FilePath -> InteractionId -> String -> Command (Either AgdaError Edit)

@@ -1,4 +1,11 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeFamilies #-}
+-- MCPHandlerState/MCPHandlerUser are open type families the mcp library
+-- requires every application to instantiate; the instances are necessarily
+-- orphans (the library's own example does the same). They live here rather
+-- than in AgdaMCP.Server because the tool handlers below this module need
+-- `MCPHandlerState = Session` in scope to access the session.
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 module AgdaMCP.Tools.Common (
   AgdaError (..),
@@ -8,14 +15,21 @@ module AgdaMCP.Tools.Common (
   locatedWarnings,
   renderAgdaError,
   resolveError,
-  runCommand,
   section,
+  withSession,
 ) where
 
-import Control.Exception (throwIO)
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad.State (get, put, runStateT)
 import Data.Set (Set)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import MCP.Server (
+  MCPHandlerState,
+  MCPHandlerUser,
+  MCPServerState (..),
+  MCPServerT,
+ )
 
 import Agda.Interaction.Response (
   DisplayInfo_boot (..),
@@ -35,18 +49,25 @@ import Agda.TypeChecking.Pretty.Warning (filterTCWarnings)
 import Agda.Utils.FileName (AbsolutePath)
 
 import AgdaMCP.Position (Span, fileSpan)
-import AgdaMCP.Worker (
-  Command,
-  Worker,
-  sendCommand,
- )
+import AgdaMCP.Session (Session, SessionM)
 
--- A `Failure` is a bug in agda-mcp, not a runtime exception we should
--- recover. We throw it here at the tool-handler boundary and deliberately catch
--- it nowhere. This causes the process to die and the dump the error to stderr.
-runCommand :: Worker -> Command r -> IO r
-runCommand worker command =
-  sendCommand worker command >>= either throwIO pure
+type instance MCPHandlerState = Session
+type instance MCPHandlerUser = ()
+
+-- Run a session action against the session stored in the MCP server state,
+-- storing the successor session back. The transports never run two handlers
+-- concurrently (stdio is a serial loop; HTTP runs each handler inside
+-- `modifyMVar` over the whole server state), so this get/run/put is atomic.
+--
+-- A `ProtocolViolation` thrown mid-action (a bug in agda-mcp; see
+-- `AgdaMCP.Session`) skips the put and propagates out of the handler,
+-- killing the process. We deliberately catch it nowhere.
+withSession :: SessionM a -> MCPServerT a
+withSession action = do
+  state <- get
+  (result, session) <- liftIO $ runStateT action (mcp_handler_state state)
+  put state {mcp_handler_state = session}
+  pure result
 
 -- A failed Agda command, consisting of the rendered error text, a span in the
 -- loaded file (if indeed the error occurred there, `Nothing` otherwise), and a

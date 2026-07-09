@@ -72,6 +72,12 @@ import AgdaMCP.Position (
   renderSpan,
   toSpan,
  )
+import AgdaMCP.Session (
+  Command (..),
+  ProtocolViolation (ProtocolViolation),
+  SessionM,
+  runCommandM,
+ )
 import AgdaMCP.Tools.Common (
   AgdaError,
   NonFatalError (..),
@@ -80,17 +86,12 @@ import AgdaMCP.Tools.Common (
   locatedWarnings,
   renderAgdaError,
   resolveError,
-  runCommand,
   section,
- )
-import AgdaMCP.Worker (
-  Command (..),
-  ProtocolViolation (ProtocolViolation),
-  Worker,
+  withSession,
  )
 
-loadTool :: Worker -> ToolHandler
-loadTool worker =
+loadTool :: ToolHandler
+loadTool =
   toolHandler
     "agda_load"
     ( Just
@@ -117,9 +118,9 @@ loadTool worker =
     )
     ( either
         (pure . ProcessSuccess . toolTextError)
-        ( liftIO
-            . fmap (ProcessSuccess . toolTextResult . (: []) . renderLoadResponse)
-            . load worker
+        ( fmap (ProcessSuccess . toolTextResult . (: []) . renderLoadResponse)
+            . withSession
+            . load
         )
         . parseLoadArguments
     )
@@ -159,8 +160,8 @@ data HiddenMetavariable = HiddenMetavariable
   }
   deriving (Show)
 
-load :: Worker -> LoadRequest -> IO LoadResponse
-load worker request = runCommand worker (loadCommand request)
+load :: LoadRequest -> SessionM LoadResponse
+load = runCommandM . loadCommand
 
 parseLoadArguments :: Maybe (Map Text Value) -> Either Text LoadRequest
 parseLoadArguments arguments =

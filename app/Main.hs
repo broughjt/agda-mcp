@@ -1,7 +1,7 @@
 module Main (main) where
 
 import AgdaMCP.Server (runServer)
-import AgdaMCP.Worker (startWorker)
+import AgdaMCP.Session (newSession)
 
 main :: IO ()
-main = startWorker >>= runServer
+main = newSession >>= runServer

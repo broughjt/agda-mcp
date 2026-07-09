@@ -14,12 +14,12 @@ library
   hs-source-dirs: src
   exposed-modules:
     AgdaMCP.Position
+    AgdaMCP.Session
     AgdaMCP.Tools
     AgdaMCP.Tools.Common
     AgdaMCP.Tools.Give
     AgdaMCP.Tools.Load
     AgdaMCP.Server
-    AgdaMCP.Worker
   build-depends:
       Agda == 2.8.*,
       aeson,
@@ -30,6 +30,7 @@ library
       mcp,
       mcp-types,
       mtl,
+      stm,
       text
   default-language: GHC2021
   ghc-options:
