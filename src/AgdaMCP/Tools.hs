@@ -2,7 +2,7 @@
 
 module AgdaMCP.Tools (loadTool, giveTool) where
 
-import Control.Applicative ((<|>))
+import Control.Applicative (liftA3, (<|>))
 import Control.Exception (
   Exception,
   Handler (..),
@@ -11,18 +11,21 @@ import Control.Exception (
   displayException,
   throwIO,
  )
-import Control.Monad (when)
-import Control.Monad.Except (ExceptT (..), runExceptT)
+import Control.Monad (guard, when)
+import Control.Monad.Except (ExceptT (..), runExceptT, throwError)
 import Control.Monad.IO.Class (liftIO)
+import Control.Monad.State (lift)
 import Data.Aeson (Value, object, (.=))
 import Data.Aeson qualified as Aeson
 import Data.Aeson.KeyMap qualified as KeyMap
+import Data.Bifunctor (Bifunctor (first))
 import Data.Foldable (toList)
-import Data.List (find, intercalate, nub, sortBy)
+import Data.List (find, nub, sortBy)
 import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.Ord (Down (..), comparing)
+import Data.Set (Set)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding (encodeUtf8)
@@ -32,31 +35,49 @@ import System.AtomicWrite.Writer.ByteString (atomicWriteFile)
 import Agda.Interaction.Base (
   IOTCM' (..),
   Interaction' (Cmd_give, Cmd_load),
+  OutputConstraint_boot (..),
   UseForce (WithoutForce),
  )
-import Agda.Interaction.EmacsTop (showGoals, showInfoError)
+import Agda.Interaction.EmacsTop (showInfoError)
+import Agda.Interaction.Output (OutputConstraint)
 import Agda.Interaction.Response (
   DisplayInfo_boot (..),
   GiveResult (..),
   Goals,
   Info_Error,
+  Info_Error_boot (..),
   RemoveTokenBasedHighlighting (..),
   Response,
   Response_boot (..),
   Status (..),
  )
+import Agda.Syntax.Abstract (Expr)
+import Agda.Syntax.Abstract.Pretty (prettyATop)
 import Agda.Syntax.Common (InteractionId (..))
 import Agda.Syntax.Common.Aspect (TokenBased (..))
-import Agda.Syntax.Position (iEnd, iStart, noRange, posPos, rangeToInterval)
+import Agda.Syntax.Common.Pretty (render)
+import Agda.Syntax.Position (getRange, noRange)
+import Agda.Syntax.Position qualified
+import Agda.TypeChecking.Errors (getAllWarningsOfTCErr, renderError)
 import Agda.TypeChecking.Monad (TCM)
 import Agda.TypeChecking.Monad.Base (
   HighlightingLevel (..),
   HighlightingMethod (..),
+  NamedMeta (..),
+  TCWarning (tcWarningRange),
   WarningsAndNonFatalErrors (..),
  )
-import Agda.TypeChecking.Monad.MetaVars (getInteractionRange)
-import Agda.TypeChecking.Pretty.Warning (prettyTCWarnings)
+import Agda.TypeChecking.Monad.MetaVars (
+  getInteractionRange,
+  getMetaRange,
+  withInteractionId,
+  withMetaId,
+ )
+import Agda.TypeChecking.Pretty (prettyTCM)
+import Agda.TypeChecking.Pretty.Warning (filterTCWarnings)
+import Agda.Utils.FileName (AbsolutePath, absolute)
 import Agda.Utils.IO.UTF8 (ReadException, readTextFile)
+import Agda.Utils.Maybe.Strict qualified as Strict
 import MCP.Server (
   InputSchema (..),
   ProcessResult (..),
@@ -72,7 +93,6 @@ import AgdaMCP.Worker (
   Worker,
   sendCommand,
  )
-import Data.Bifunctor (Bifunctor (first))
 
 -- Load
 
@@ -114,9 +134,42 @@ loadTool worker =
 data LoadRequest = LoadRequest FilePath
 
 data LoadResponse
-  = Loaded Text [InteractionId]
-  | LoadFailed Text
+  = Loaded [Goal] [HiddenMetavariable] [Warning] [NonFatalError]
+  | LoadFailed Text (Maybe Span) [Warning]
   | LoadStale
+  deriving (Show)
+
+-- A goal (visible interaction metavariable) of the loaded file.
+data Goal = Goal
+  { goalId :: InteractionId
+  , goalSpan :: Span
+  , goalShape :: GoalShape
+  }
+  deriving (Show)
+
+-- There are only two shapes goals and hidden metavariables can take: either
+-- `OfType` for a typing judgment or `JustSort` for `IsSort`. The other
+-- constructors of `OutputConstraint` are produced for `Cmd_constraints`, never
+-- for goals.
+data GoalShape
+  = GoalOfType Text
+  | GoalSort
+  deriving (Show)
+
+-- An unsolved implicit ("hidden") metavariable reported alongside the goals,
+-- consisting of a rendered name, a span location (when in the loaded file), and
+-- a `GoalShape`.
+data HiddenMetavariable = HiddenMetavariable
+  { hiddenMetavariableName :: Text
+  , hiddenMetavariableSpan :: Maybe Span
+  , hiddenMetavariableShape :: GoalShape
+  }
+  deriving (Show)
+
+newtype Warning = Warning (Maybe Span, Text)
+  deriving (Show)
+
+newtype NonFatalError = NonFatalError (Maybe Span, Text)
   deriving (Show)
 
 load :: Worker -> LoadRequest -> IO LoadResponse
@@ -132,22 +185,54 @@ loadCommand :: LoadRequest -> Command LoadResponse
 loadCommand (LoadRequest path) =
   Command
     { commandIOTCM = IOTCM path None Direct (Cmd_load path [])
-    , commandParse = traverse toLoadResponse . parseLoadResponses
+    , commandParse = \responses ->
+        either
+          (pure . Left)
+          (resolveLoad path responses)
+          (parseLoadResponses responses)
     }
 
 renderLoadResponse :: LoadResponse -> Text
-renderLoadResponse (Loaded body ids) =
-  -- TODO:
-  "Load succeeded. Open goals: "
-    <> Text.pack (show (length ids))
-    <> " (interaction ids "
-    <> Text.pack (show (map interactionId ids))
-    <> ").\n"
-    <> body
-renderLoadResponse (LoadFailed e) = "Load failed:\n" <> e
+renderLoadResponse (Loaded goals hiddenMetavariables warnings errors) =
+  Text.intercalate "\n" $
+    concat
+      [ ["Load succeeded. Open goals: " <> Text.pack (show (length goals)) <> "."]
+      , map renderGoal goals
+      , section
+          "Unsolved hidden metas:"
+          (map renderHiddenMetavariable hiddenMetavariables)
+      , section "Non-fatal errors:" [e | NonFatalError (_, e) <- errors]
+      , section "Warnings:" [w | Warning (_, w) <- warnings]
+      ]
+renderLoadResponse (LoadFailed message _ warnings) =
+  Text.intercalate "\n" $
+    concat
+      [ ["Load failed:", message]
+      , section "Warnings:" [w | Warning (_, w) <- warnings]
+      ]
 renderLoadResponse LoadStale =
   "The file changed on disk while Agda was checking it, so the result \
   \was discarded. Please load the file again."
+
+-- A titled block of lines, omitted entirely when there are no items.
+section :: Text -> [Text] -> [Text]
+section _ [] = []
+section title items = "" : title : items
+
+renderGoal :: Goal -> Text
+renderGoal (Goal ii sp shape) =
+  renderShape ("?" <> Text.pack (show (interactionId ii))) shape
+    <> "  (at "
+    <> renderSpan sp
+    <> ")"
+
+renderHiddenMetavariable :: HiddenMetavariable -> Text
+renderHiddenMetavariable (HiddenMetavariable name sp shape) =
+  renderShape name shape <> maybe "" (\s -> "  (at " <> renderSpan s <> ")") sp
+
+renderShape :: Text -> GoalShape -> Text
+renderShape name (GoalOfType ty) = name <> " : " <> ty
+renderShape name GoalSort = "Sort " <> name
 
 data LoadResponse'
   = LoadGoals Goals WarningsAndNonFatalErrors [InteractionId]
@@ -210,19 +295,120 @@ parseLoadResponses responses = maybe (Left violation) Right (exchange responses)
 
   failed = failedTail LoadError
 
-toLoadResponse :: LoadResponse' -> TCM LoadResponse
-toLoadResponse (LoadGoals goals warnings ids) =
-  renderBody
-    <$> sequenceA
-      [ showGoals goals
-      , prettyTCWarnings (nonFatalErrors warnings)
-      , prettyTCWarnings (tcWarnings warnings)
-      ]
+-- Extract everything the pure `LoadResponse` needs from the type-checking
+-- monad: rendered goal types (in each goal's scope), interaction ranges, and
+-- rendered warnings. This runs on the worker right after the command
+-- executed, when the TCState still matches the exchange.
+
+-- Using the TCM, convert a `LoadResponse'` to a `LoadResponse`. We collect the rendered goal types
+-- TODO:
+resolveLoad ::
+  FilePath ->
+  [Response] ->
+  LoadResponse' ->
+  TCM (Either (ProtocolViolation Response) LoadResponse)
+resolveLoad path responses response = do
+  path' <- liftIO (absolute path)
+  case response of
+    LoadGoals (visible, hidden) warnings ids -> runExceptT $ do
+      goals <- traverse toGoal visible
+      -- Check the goals against the `InteractionPoints` response. Both derive
+      -- from the same store (`stInteractionPoints`), read moments apart with
+      -- nothing in between that could modify it: the response carries every
+      -- registered point (cmd_load' stores `sortInteractionPoints =<<
+      -- getInteractionPoints`, :909-916, emitted at runInteraction :267-271),
+      -- while the goals come from `Cmd_metas` via `getInteractionIdsAndMetas`
+      -- (BasicOps.hs:929-931), which reads the same store but drops points
+      -- marked solved or lacking a meta (MetaVars.hs:622-625). So the goal ids
+      -- must be a subset of the response's ids. Equality would be too strong: a
+      -- fresh load cannot produce solved points (only give/refine set
+      -- `ipSolved`, and cmd_load' resets state first), but points that never
+      -- got connected to a metavariable are not provably impossible, so extra
+      -- response ids are allowed.
+      when (any ((`notElem` ids) . goalId) goals) $
+        throwError violation
+
+      hiddenMetavariables <- traverse (toHiddenMetavariable path') hidden
+      lift $
+        Loaded goals hiddenMetavariables
+          <$> (map Warning <$> locatedWarnings path' (tcWarnings warnings))
+          <*> (map NonFatalError <$> locatedWarnings path' (nonFatalErrors warnings))
+    LoadError (Info_GenericError err) ->
+      Right
+        <$> liftA3
+          LoadFailed
+          (Text.pack <$> renderError err)
+          (pure (fileSpan path' (getRange err)))
+          (map Warning <$> (getAllWarningsOfTCErr err >>= locatedWarnings path'))
+    -- TODO: Should this check be shared by `failedTail`?
+    --
+    -- The other `Info_Error` constructors cannot come from `Cmd_load`:
+    -- `Info_CompilationError` only from Cmd_compile (InteractionTop.hs:491),
+    -- `Info_Highlighting{Parse,ScopeCheck}Error` only from Cmd_highlight
+    -- (:631-633).
+    LoadError _ -> pure (Left violation)
+    LoadNotRegistered -> pure (Right LoadStale)
  where
-  renderBody parts =
-    Loaded (Text.pack (intercalate "\n" (filter (not . null) parts))) ids
-toLoadResponse (LoadError e) = LoadFailed . Text.pack <$> showInfoError e
-toLoadResponse LoadNotRegistered = pure LoadStale
+  violation = ProtocolViolation "Cmd_load" responses
+
+  toGoal ::
+    OutputConstraint Expr InteractionId ->
+    ExceptT (ProtocolViolation Response) TCM Goal
+  toGoal (OfType i ty) =
+    -- Render in the interaction point's scope, as the Emacs and JSON
+    -- frontends both do (showGoals, BasicOps.hs:830-836; JSONTop.hs:309).
+    Goal i
+      <$> spanOf i
+      <*> ( GoalOfType . Text.pack . render
+              <$> lift (withInteractionId i $ prettyATop ty)
+          )
+  toGoal (JustSort i) = flip (Goal i) GoalSort <$> spanOf i
+  -- Unreachable; see the `GoalShape` note.
+  toGoal _ = throwError violation
+
+  spanOf :: InteractionId -> ExceptT (ProtocolViolation Response) TCM Span
+  spanOf i =
+    lift (getInteractionRange i)
+      >>= maybe
+        -- Assertion: interaction ids have ranges
+        (throwError violation)
+        (pure . toSpan)
+        . Agda.Syntax.Position.rangeToInterval
+
+  toHiddenMetavariable ::
+    AbsolutePath ->
+    OutputConstraint Expr NamedMeta ->
+    ExceptT (ProtocolViolation Response) TCM HiddenMetavariable
+  toHiddenMetavariable file constraint = case constraint of
+    OfType metavariable ty ->
+      hiddenMetavariable metavariable $
+        GoalOfType . Text.pack . render
+          <$> lift (withMetaId (nmid metavariable) $ prettyATop ty)
+    JustSort metavariable ->
+      hiddenMetavariable metavariable (pure GoalSort)
+    -- Unreachable per the `GoalShape` note.
+    _ -> throwError violation
+   where
+    hiddenMetavariable metavariable shape =
+      HiddenMetavariable
+        <$> renderedName metavariable
+        <*> (fileSpan file <$> lift (getMetaRange (nmid metavariable)))
+        <*> shape
+
+    renderedName metavariable =
+      Text.pack . render
+        <$> lift (withMetaId (nmid metavariable) $ prettyATop metavariable)
+
+  -- Apply Agda's own warning filtering (removes unsolved-constraint warnings in
+  -- the case that there are no "interesting" constraints), then pair each
+  -- rendered warning with its span.
+  locatedWarnings :: AbsolutePath -> Set TCWarning -> TCM [(Maybe Span, Text)]
+  locatedWarnings path' warnings =
+    filterTCWarnings warnings >>= traverse locate
+   where
+    locate warning =
+      ((,) (fileSpan path' (tcWarningRange warning)) . Text.pack . render)
+        <$> prettyTCM warning
 
 -- Give
 
@@ -387,7 +573,7 @@ give worker (GiveRequest path items) =
         source <- LazyText.toStrict <$> readTextFile path
         -- We try to check that each of the `editSpan`s correspond to actual
         -- holes. See .scratch/GIVE_STALENESS.md.
-        case find (not . spanIsHole . editSpan source) edits of
+        case find (not . spanIsHole . spanText source . editSpan) edits of
           Just stale -> resync (GiveStale stale)
           Nothing -> do
             -- Note: we write UTF-8 with LF endings regardless of platform.
@@ -428,13 +614,12 @@ giveCommand path goal expression =
           (parseGiveResponses goal responses)
     }
 
--- An edit directive resulting from the application of a give commands,
--- consisting of the interaction id, the code-point span (0-indexed and
--- end-exclusive), and the expression text elaborated by Agda.
+-- An edit directive resulting from the application of a give command,
+-- consisting of the interaction id, the hole's span, and the expression text
+-- elaborated by Agda.
 data Edit = Edit
   { editGoal :: InteractionId
-  , editStart :: Int
-  , editEnd :: Int
+  , editSpan :: Span
   , editText :: Text
   }
   deriving (Show)
@@ -449,25 +634,11 @@ resolveGive goal responses (Right s) =
   maybe
     missing
     gave
-    . rangeToInterval
+    . Agda.Syntax.Position.rangeToInterval
     <$> getInteractionRange goal
  where
-  gave interval =
-    Right
-      ( Right
-          ( Edit
-              goal
-              (offset (iStart interval))
-              (offset (iEnd interval))
-              (Text.pack s)
-          )
-      )
+  gave interval = Right (Right (Edit goal (toSpan interval) (Text.pack s)))
   missing = Left (ProtocolViolation "Cmd_give" responses)
-  offset position = fromIntegral (posPos position) - 1
-
-editSpan :: Text -> Edit -> Text
-editSpan source edit =
-  Text.take (editEnd edit - editStart edit) (Text.drop (editStart edit) source)
 
 -- TODO: Remove the `Text.strip`?
 spanIsHole :: Text -> Bool
@@ -481,12 +652,15 @@ spanIsHole raw =
 -- an edit only shifts text after it, and holes never overlap.
 applyEdits :: Text -> [Edit] -> Text
 applyEdits source edits =
-  foldl' splice source (sortBy (comparing (Down . editStart)) edits)
+  foldl'
+    splice
+    source
+    (sortBy (comparing (Down . positionOffset . spanStart . editSpan)) edits)
  where
-  splice text (Edit _ start end replacement) =
-    let (before, rest) = Text.splitAt start text
-        after = Text.drop (end - start) rest
-     in before <> replacement <> after
+  splice text edit =
+    let (before, rest) = Text.splitAt (positionOffset (spanStart (editSpan edit))) text
+        after = Text.drop (spanLength (editSpan edit)) rest
+     in before <> editText edit <> after
 
 {- The grammar of a Cmd_give response list, following the Agda 2.8.0 source:
 
@@ -499,7 +673,7 @@ prelude := Status ClearRunningInfo ClearHighlighting RunningInfo*
         -- continuation (InteractionTop.hs:257-263, cmd_load':848-869).
 
 given := GiveAction (goal, Give_String s) -- give_gen:1021; noRange => Give_String (:1010)
-         Status                           -- give_gen ends with Cmd_metas => display_info (:1024)
+         Status                           -- give_gen ends with `Cmd_metas` => display_info (:1024)
          DisplayInfo (Info_AllGoalsWarnings)  -- (:1145-1146); discarded, superseded by the reload
          InteractionPoints                -- runInteraction:268-271 (updateInteractionPointsAfter Cmd_give)
 
@@ -568,13 +742,11 @@ renderGiveResponse (GiveRejected goal err priorCount reloaded) =
        )
     <> "Reloaded to resync:\n\n"
     <> renderLoadResponse reloaded
-renderGiveResponse (GiveStale (Edit goal start end _) reloaded) =
+renderGiveResponse (GiveStale edit reloaded) =
   "Refused to edit: goal ?"
-    <> Text.pack (show (interactionId goal))
-    <> " no longer points at a hole (expected `?` or `{! !}` at characters "
-    <> Text.pack (show start)
-    <> "-"
-    <> Text.pack (show end)
+    <> Text.pack (show (interactionId (editGoal edit)))
+    <> " no longer points at a hole (expected `?` or `{! !}` at "
+    <> renderSpan (editSpan edit)
     <> "). The file likely changed on disk since it was loaded. No changes were \
        \made; reloaded to resync:\n\n"
     <> renderLoadResponse reloaded
@@ -583,6 +755,65 @@ renderGiveResponse (GiveIOError err reloaded) =
     <> err
     <> "\n\nNo changes were written. Reloaded to resync:\n\n"
     <> renderLoadResponse reloaded
+
+-- Positions
+
+-- A position in the loaded file, as both a 0-based code-point offset into the
+-- Agda-normalized source text (what `applyEdits` splices with; see the note
+-- in `commit` about normalization) and the 1-based line/column that Agda
+-- prints. Agda's `posPos` is 1-based, hence the shift in `toPos`.
+data Position = Position
+  { positionOffset :: Int
+  , positionLine :: Int
+  , positionColumn :: Int
+  }
+  deriving (Show)
+
+-- A contiguous part of the loaded file: start inclusive, end exclusive.
+data Span = Span
+  { spanStart :: Position
+  , spanEnd :: Position
+  }
+  deriving (Show)
+
+toPosition :: Agda.Syntax.Position.PositionWithoutFile -> Position
+toPosition p =
+  Position
+    { positionOffset = fromIntegral (Agda.Syntax.Position.posPos p) - 1
+    , positionLine = fromIntegral (Agda.Syntax.Position.posLine p)
+    , positionColumn = fromIntegral (Agda.Syntax.Position.posCol p)
+    }
+
+toSpan :: Agda.Syntax.Position.IntervalWithoutFile -> Span
+toSpan i =
+  Span
+    (toPosition (Agda.Syntax.Position.iStart i))
+    (toPosition (Agda.Syntax.Position.iEnd i))
+
+-- A `Span` is only meaningful against a loaded file, so ranges that lie
+-- elsewhere (warnings can point into imported modules) or have no interval
+-- convert to `Nothing`.
+fileSpan :: AbsolutePath -> Agda.Syntax.Position.Range -> Maybe Span
+fileSpan p r = do
+  rangeFile <- Strict.toLazy (Agda.Syntax.Position.rangeFile r)
+  guard (Agda.Syntax.Position.rangeFilePath rangeFile == p)
+  toSpan <$> Agda.Syntax.Position.rangeToInterval r
+
+spanText :: Text -> Span -> Text
+spanText t s =
+  Text.take
+    (spanLength s)
+    (Text.drop (positionOffset (spanStart s)) t)
+
+spanLength :: Span -> Int
+spanLength s = positionOffset (spanEnd s) - positionOffset (spanStart s)
+
+renderSpan :: Span -> Text
+renderSpan s = renderPosition (spanStart s) <> "-" <> renderPosition (spanEnd s)
+
+renderPosition :: Position -> Text
+renderPosition (Position _ l c) =
+  Text.pack (show l) <> ":" <> Text.pack (show c)
 
 -- Helpers
 
