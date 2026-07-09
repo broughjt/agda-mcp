@@ -1,19 +1,20 @@
 module AgdaMCP.Session (
-  Command (..),
   ProtocolViolation (..),
   Session,
   SessionM,
+  fromProtocolResult,
+  liftTCM,
   newSession,
-  runCommand,
-  runCommandM,
+  runInteractionM,
 ) where
 
 import Agda.Interaction.Base (
   CommandQueue (..),
   CommandState (..),
-  IOTCM' (..),
+  IOTCM,
   initCommandState,
  )
+import Agda.Interaction.Command (CommandM)
 import Agda.Interaction.InteractionTop (
   handleCommand_,
   runInteraction,
@@ -26,7 +27,6 @@ import Agda.Interaction.Options (
   defaultOptions,
  )
 import Agda.Interaction.Response (Response)
-import Agda.Syntax.Position (Range)
 import Agda.TypeChecking.Monad (
   TCM,
   setCommandLineOptions,
@@ -42,17 +42,9 @@ import Control.Concurrent.STM.TChan (newTChanIO)
 import Control.Concurrent.STM.TVar (newTVarIO)
 import Control.Exception (Exception, throwIO)
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad.State (StateT (..), evalStateT, lift)
+import Control.Monad.State (StateT (..), evalStateT, lift, runStateT)
 import Data.Aeson (Value)
-import Data.Bitraversable (bitraverse)
 import Data.IORef (modifyIORef', newIORef, readIORef)
-
--- A command paired with the parser for its list of responses. We do it this way
--- because the parser needs to run in the typechecking monad.
-data Command r = Command
-  { commandIOTCM :: IOTCM' Range
-  , commandParse :: [Response] -> TCM (Either (ProtocolViolation Response) r)
-  }
 
 -- The list of responses didn't match our mental model of the given command.
 data ProtocolViolation a = ProtocolViolation
@@ -61,16 +53,16 @@ data ProtocolViolation a = ProtocolViolation
   }
   deriving (Foldable, Functor, Show, Traversable)
 
--- A protocol violation is a bug in agda-mcp. `runCommand` throws it and we
+-- A protocol violation is a bug in agda-mcp. `fromProtocolResult` throws it and we
 -- deliberately catch it nowhere: it propagates out of the tool handler,
 -- through the transport loop, and kills the process with the encoded
 -- exchange dumped to stderr.
 instance Exception (ProtocolViolation Value)
 
 -- An Agda session as a value, consisting of the type-checker state paired with
--- the interaction-level command state. Each `runCommand` threads them through
--- one `runTCM`, in the same way Agda's own REPL loop does per command
--- (`maybeAbort`, InteractionTop.hs:305-322).
+-- the interaction-level command state. `liftCommandM` threads them through one
+-- `runTCM`, in the same way Agda's own REPL loop does per command (`maybeAbort`,
+-- InteractionTop.hs:305-322).
 data Session = Session TCState CommandState
 
 type SessionM = StateT Session IO
@@ -93,36 +85,41 @@ newSession = do
         }
   pure (Session tcState commandState)
 
--- Interpret one command against the session, returning the parsed result and
--- the successor session. The output callback and its collector are fresh per
--- call (the callback stored in the resulting TCState closes over this call's
--- collector, but the next call overwrites it before running anything). The
--- parser runs inside the same `runTCM`, so it sees the post-command TCState.
---
--- A `ProtocolViolation` is thrown, not returned (see its Exception
--- instance). Since the successor session is only produced on success, the
--- caller's retained session after a violation is the pre-command one.
+-- Lift Agda's interaction monad into a session computation, threading both
+-- pieces of persistent state through the action.
+liftCommandM :: CommandM a -> SessionM a
+liftCommandM action = StateT $ \(Session tcState commandState) ->
+  ( \((result, commandState'), tcState') ->
+      (result, Session tcState' commandState')
+  )
+    <$> runTCM initEnv tcState (runStateT action commandState)
 
--- Interpret one command against the session, returning the parsed result and
--- the next session.
---
--- The output callback
-runCommand :: Command r -> Session -> IO (r, Session)
-runCommand command (Session tcState commandState) = do
-  collector <- newIORef []
-  ((result, commandState'), tcState') <-
-    runTCM initEnv tcState $
-      flip runStateT commandState $ do
-        lift $ setInteractionOutputCallback $ \r ->
-          liftIO $ modifyIORef' collector (r :)
-        runInteraction $ const $ commandIOTCM command
-        responses <- liftIO $ reverse <$> readIORef collector
-        parsed <- lift $ commandParse command responses
-        -- TODO: Use regular pretty printing (`ofPrettyTCM`) instead of JSON
-        -- version?
-        -- TODO: Should the bitraverse be `firstA` or something?
-        lift $ bitraverse (traverse encodeTCM) pure parsed
-  either throwIO (\r -> pure (r, Session tcState' commandState')) result
+-- Lift a plain type-checking computation. It can inspect and update the
+-- session's TCState while leaving its CommandState unchanged.
+liftTCM :: TCM a -> SessionM a
+liftTCM = liftCommandM . lift
 
-runCommandM :: Command r -> SessionM r
-runCommandM = StateT . runCommand
+-- Run one typed interaction command and collect every response it emits. The
+-- callback and collector are fresh per call. The callback stored in the
+-- resulting TCState closes over this call's collector, but the next call
+-- overwrites it before running anything.
+runInteractionM :: IOTCM -> SessionM [Response]
+runInteractionM command = do
+  collector <- liftIO $ newIORef []
+  liftCommandM $ do
+    lift $ setInteractionOutputCallback $ \response ->
+      liftIO $ modifyIORef' collector (response :)
+    runInteraction command
+  liftIO $ reverse <$> readIORef collector
+
+-- Eliminate the result of a response parser or resolver. A mismatch is
+-- encoded while the post-command TCState is current, then thrown uncaught as
+-- a bug in agda-mcp.
+fromProtocolResult ::
+  Either (ProtocolViolation Response) a -> SessionM a
+fromProtocolResult = either throwProtocolViolation pure
+ where
+  throwProtocolViolation violation =
+    -- TODO: Use regular pretty printing (`ofPrettyTCM`) instead of JSON
+    -- version?
+    liftTCM (traverse encodeTCM violation) >>= liftIO . throwIO

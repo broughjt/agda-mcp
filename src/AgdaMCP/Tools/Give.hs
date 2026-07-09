@@ -73,10 +73,11 @@ import AgdaMCP.Position (
   toSpan,
  )
 import AgdaMCP.Session (
-  Command (..),
   ProtocolViolation (ProtocolViolation),
   SessionM,
-  runCommandM,
+  fromProtocolResult,
+  liftTCM,
+  runInteractionM,
  )
 import AgdaMCP.Tools.Common (
   AgdaError,
@@ -247,7 +248,7 @@ give (GiveRequest path items) =
   runGive (priorCount, (goal, expression)) =
     ExceptT $
       first (\err -> RejectedGive goal err priorCount)
-        <$> runCommandM (giveCommand path goal expression)
+        <$> giveSingle path goal expression
 
   -- All gives succeeded. Read the source, confirm every recorded span still
   -- holds a hole (if not, the file change under us since the last load, so
@@ -286,21 +287,19 @@ give (GiveRequest path items) =
   fromIOError :: (Exception e) => e -> IO GiveOutcome
   fromIOError = pure . GiveIOError . Text.pack . displayException
 
-giveCommand ::
-  FilePath -> InteractionId -> String -> Command (Either AgdaError Edit)
-giveCommand path goal expression =
-  Command
-    { commandIOTCM =
+giveSingle ::
+  FilePath -> InteractionId -> String -> SessionM (Either AgdaError Edit)
+giveSingle path goal expression = do
+  responses <-
+    runInteractionM $
+      const $
         -- TODO: Expose `UseForce` (the Emacs `C-u` give, skipping the safety
         -- checks) as an optional tool argument. Follow-up; wants its own
         -- thinking about when agents should force.
         IOTCM path None Direct (Cmd_give WithoutForce goal noRange expression)
-    , commandParse = \responses ->
-        either
-          (pure . Left)
-          (resolveGive path goal responses)
-          (parseGiveResponses goal responses)
-    }
+  parsed <- fromProtocolResult $ parseGiveResponses goal responses
+  resolved <- liftTCM $ resolveGive path goal responses parsed
+  fromProtocolResult resolved
 
 -- An edit directive resulting from the application of a give command,
 -- consisting of the interaction id, the hole's span, and the expression text
@@ -325,7 +324,7 @@ resolveGive path _ _ (Left e) =
   -- the failed goal for the agent. It must use a non-throwing lookup --
   -- `BiMap.lookup goal <$> useR stInteractionPoints` -- because
   -- `getInteractionRange` throws a `TCErr` for a bogus goal id, which would
-  -- escape `commandParse` and kill the worker (turning agent misuse into
+  -- escape response resolution and kill the process (turning agent misuse into
   -- process death, forbidden by the failure taxonomy).
   Right . Left <$> (liftIO (absolute path) >>= flip resolveError e)
 resolveGive _ goal responses (Right s) =

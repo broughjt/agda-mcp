@@ -73,10 +73,11 @@ import AgdaMCP.Position (
   toSpan,
  )
 import AgdaMCP.Session (
-  Command (..),
   ProtocolViolation (ProtocolViolation),
   SessionM,
-  runCommandM,
+  fromProtocolResult,
+  liftTCM,
+  runInteractionM,
  )
 import AgdaMCP.Tools.Common (
   AgdaError,
@@ -161,24 +162,20 @@ data HiddenMetavariable = HiddenMetavariable
   deriving (Show)
 
 load :: LoadRequest -> SessionM LoadResponse
-load = runCommandM . loadCommand
+load (LoadRequest path) = do
+  responses <-
+    runInteractionM $
+      const $
+        IOTCM path None Direct (Cmd_load path [])
+  parsed <- fromProtocolResult $ parseLoadResponses responses
+  resolved <- liftTCM $ resolveLoad path responses parsed
+  fromProtocolResult resolved
 
 parseLoadArguments :: Maybe (Map Text Value) -> Either Text LoadRequest
 parseLoadArguments arguments =
   case Map.lookup "path" (fromMaybe Map.empty arguments) of
     Just (Aeson.String path) -> Right (LoadRequest (Text.unpack path))
     _ -> Left "Missing or invalid 'path' argument: expected a string"
-
-loadCommand :: LoadRequest -> Command LoadResponse
-loadCommand (LoadRequest path) =
-  Command
-    { commandIOTCM = IOTCM path None Direct (Cmd_load path [])
-    , commandParse = \responses ->
-        either
-          (pure . Left)
-          (resolveLoad path responses)
-          (parseLoadResponses responses)
-    }
 
 renderLoadResponse :: LoadResponse -> Text
 renderLoadResponse (Loaded goals hiddenMetavariables warnings errors) =
