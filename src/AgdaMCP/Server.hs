@@ -11,7 +11,8 @@ module AgdaMCP.Server (runServer) where
 import MCP.Server
 import System.IO (BufferMode (..), hSetBuffering, stderr, stdin, stdout)
 
-import AgdaMCP.Tools (giveTool, loadTool)
+import AgdaMCP.Tools.Give (giveTool)
+import AgdaMCP.Tools.Load (loadTool)
 import AgdaMCP.Worker (Worker)
 
 type instance MCPHandlerState = ()

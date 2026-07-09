@@ -14,6 +14,8 @@ library
   hs-source-dirs: src
   exposed-modules:
     AgdaMCP.Tools
+    AgdaMCP.Tools.Give
+    AgdaMCP.Tools.Load
     AgdaMCP.Server
     AgdaMCP.Worker
   build-depends:
