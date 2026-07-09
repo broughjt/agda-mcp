@@ -312,19 +312,12 @@ resolveLoad path responses response = do
   case response of
     LoadGoals (visible, hidden) warnings ids -> runExceptT $ do
       goals <- traverse toGoal visible
-      -- Check the goals against the `InteractionPoints` response. Both derive
-      -- from the same store (`stInteractionPoints`), read moments apart with
-      -- nothing in between that could modify it: the response carries every
-      -- registered point (cmd_load' stores `sortInteractionPoints =<<
-      -- getInteractionPoints`, :909-916, emitted at runInteraction :267-271),
-      -- while the goals come from `Cmd_metas` via `getInteractionIdsAndMetas`
-      -- (BasicOps.hs:929-931), which reads the same store but drops points
-      -- marked solved or lacking a meta (MetaVars.hs:622-625). So the goal ids
-      -- must be a subset of the response's ids. Equality would be too strong: a
-      -- fresh load cannot produce solved points (only give/refine set
-      -- `ipSolved`, and cmd_load' resets state first), but points that never
-      -- got connected to a metavariable are not provably impossible, so extra
-      -- response ids are allowed.
+
+      -- The `goals` and interaction ids from `Resp_InteractionPoints` read the
+      -- same `stIteractionPoints` moments apart, but
+      -- `getInteractionIdsAndMetas` drops solved points and points without
+      -- metavariables, so we check that our goal ids in `goals` are a subset of
+      -- the points in `ids` (drawn from `Resp_InteractionPoints`).
       when (any ((`notElem` ids) . goalId) goals) $
         throwError violation
 
