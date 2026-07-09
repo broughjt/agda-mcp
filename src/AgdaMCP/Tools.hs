@@ -333,8 +333,6 @@ resolveLoad path responses response = do
           (Text.pack <$> renderError err)
           (pure (fileSpan path' (getRange err)))
           (map Warning <$> (getAllWarningsOfTCErr err >>= locatedWarnings path'))
-    -- TODO: Should this check be shared by `failedTail`?
-    --
     -- The other `Info_Error` constructors cannot come from `Cmd_load`:
     -- `Info_CompilationError` only from Cmd_compile (InteractionTop.hs:491),
     -- `Info_Highlighting{Parse,ScopeCheck}Error` only from Cmd_highlight
