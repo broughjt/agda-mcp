@@ -63,17 +63,16 @@ import Agda.TypeChecking.Monad.Base (
 import Agda.TypeChecking.Monad.MetaVars (getInteractionRange)
 import Agda.Utils.IO.UTF8 (ReadException, readTextFile)
 
-import AgdaMCP.Tools (
+import AgdaMCP.Position (
   Span,
-  failedTail,
   positionOffset,
   renderSpan,
-  runCommand,
   spanLength,
   spanStart,
   spanText,
   toSpan,
  )
+import AgdaMCP.Tools.Common (failedTail, runCommand)
 import AgdaMCP.Tools.Load (
   LoadRequest (..),
   LoadResponse,

@@ -13,7 +13,9 @@ build-type: Simple
 library
   hs-source-dirs: src
   exposed-modules:
+    AgdaMCP.Position
     AgdaMCP.Tools
+    AgdaMCP.Tools.Common
     AgdaMCP.Tools.Give
     AgdaMCP.Tools.Load
     AgdaMCP.Server

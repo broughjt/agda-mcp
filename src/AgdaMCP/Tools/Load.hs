@@ -76,14 +76,13 @@ import Agda.TypeChecking.Pretty (prettyTCM)
 import Agda.TypeChecking.Pretty.Warning (filterTCWarnings)
 import Agda.Utils.FileName (AbsolutePath, absolute)
 
-import AgdaMCP.Tools (
+import AgdaMCP.Position (
   Span,
-  failedTail,
   fileSpan,
   renderSpan,
-  runCommand,
   toSpan,
  )
+import AgdaMCP.Tools.Common (failedTail, runCommand)
 import AgdaMCP.Worker (
   Command (..),
   ProtocolViolation (ProtocolViolation),
