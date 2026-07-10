@@ -94,7 +94,7 @@ import AgdaMCP.Tools.Common (
 loadTool :: ToolHandler
 loadTool =
   toolHandler
-    "agda_load"
+    "load"
     ( Just
         -- TODO:
         "Load and typecheck an Agda file. Reports the open goals \

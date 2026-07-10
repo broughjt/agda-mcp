@@ -14,8 +14,8 @@ runServer session = do
   hSetBuffering stderr LineBuffering
   let implementation = Implementation "agda-mcp" "0.1.0.0" (Just "Agda MCP Server")
       instructions =
-        "Interact with Agda: agda_load loads and typechecks a file, \
-        \reporting its goals or errors; agda_give fills one or more goals \
+        "Interact with Agda: `load` loads and typechecks a file, \
+        \reporting its goals or errors; `give` fills one or more goals \
         \with expressions, updating the file on disk and reloading."
       capabilities =
         ServerCapabilities

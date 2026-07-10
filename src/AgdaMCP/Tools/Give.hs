@@ -96,12 +96,12 @@ import AgdaMCP.Tools.Load (
 giveTool :: ToolHandler
 giveTool =
   toolHandler
-    "agda_give"
+    "give"
     ( Just
         -- TODO:
         "Fill one or more goals of a loaded Agda file with expressions. Takes \
         \the file `path` and a list of `gives`, each a `goal` (interaction id, \
-        \as reported by agda_load) and an `expression`. All gives are checked \
+        \as reported by `load`) and an `expression`. All gives are checked \
         \against the currently loaded state, then applied to the file together \
         \and the file is reloaded. If any give fails to typecheck the whole \
         \call is a no-op (the file is left unchanged). After a successful call \
