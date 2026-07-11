@@ -94,11 +94,7 @@ loadTool =
   toolHandler
     "load"
     ( Just
-        -- TODO:
-        "Load and typecheck an Agda file. Reports the open goals \
-        \(interaction points) on success, or the error if the file fails \
-        \to typecheck. Prefer absolute paths; relative paths are resolved \
-        \against the server's working directory."
+        "Load and typecheck an Agda source file. Reports open goals, unsolved hidden metavariables, non-fatal errors, and warnings on success, or the Agda error if checking fails. Relative paths are resolved against the server process's working directory; prefer an absolute path when that directory may be ambiguous."
     )
     ( InputSchema
         "object"
@@ -108,7 +104,10 @@ loadTool =
                 ( "path"
                 , object
                     [ "type" .= ("string" :: Text)
-                    , "description" .= ("Path to the Agda file to load" :: Text)
+                    , "description"
+                        .= ( "Path to an Agda source file (.agda, but also literate formats such as .lagda.md, .lagda.tex, .lagda.typ, etc). Relative paths are resolved against the server process's working directory." ::
+                               Text
+                           )
                     ]
                 )
               ]

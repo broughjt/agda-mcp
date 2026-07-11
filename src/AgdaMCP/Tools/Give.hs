@@ -110,15 +110,7 @@ giveTool =
   toolHandler
     "give"
     ( Just
-        -- TODO:
-        "Fill one or more goals of a loaded Agda file with expressions. Takes \
-        \the file `path` and a list of `gives`, each a `goal` (interaction id, \
-        \as reported by `load`) and an `expression`. All gives are checked \
-        \against the currently loaded state, then applied to the file together \
-        \and the file is reloaded. If any give fails to typecheck the whole \
-        \call is a no-op (the file is left unchanged). After a successful call \
-        \the interaction ids are renumbered by the reload, so read the new \
-        \goals from the result before giving again."
+        "Fill one or more goals in an Agda source file. Takes the file `path` and a non-empty list of `gives`, each containing a goal interaction ID and an expression. Gives are checked in order as an atomic batch: if one is rejected, subsequent gives are skipped and no source edits are written. Before writing, the server verifies that every recorded span still contains a hole. If the file changed, it refuses all edits. Every checked outcome is followed by a reload to resync. Interaction IDs may change, so use the goals in the fresh result. Successful gives write Agda’s elaborated, pretty-printed expressions, which may differ from the submitted text. The result reports both when they differ. Relative paths are resolved against the server process’s working directory. Prefer an absolute path when that directory may be ambiguous."
     )
     ( InputSchema
         "object"
@@ -128,7 +120,10 @@ giveTool =
                 ( "path"
                 , object
                     [ "type" .= ("string" :: Text)
-                    , "description" .= ("Path to an Agda file" :: Text)
+                    , "description"
+                        .= ( "Path to an Agda source file, including literate Agda files. Relative paths are resolved against the server process's working directory." ::
+                               Text
+                           )
                     ]
                 )
               ,
@@ -136,7 +131,9 @@ giveTool =
                 , object
                     [ "type" .= ("array" :: Text)
                     , "description"
-                        .= ("The goals to fill and the expressions to fill them with" :: Text)
+                        .= ( "A non-empty, all-or-nothing batch of goals to fill and expressions to fill them with" ::
+                               Text
+                           )
                     , "items"
                         .= object
                           [ "type" .= ("object" :: Text)
@@ -145,12 +142,16 @@ giveTool =
                                 [ "goal"
                                     .= object
                                       [ "type" .= ("integer" :: Text)
-                                      , "description" .= ("The interaction id of the goal" :: Text)
+                                      , "description"
+                                          .= ("The target goal's interaction ID (`?N`) from a load result" :: Text)
                                       ]
                                 , "expression"
                                     .= object
                                       [ "type" .= ("string" :: Text)
-                                      , "description" .= ("The expression to give" :: Text)
+                                      , "description"
+                                          .= ( "The Agda expression to check and fill the goal with" ::
+                                                 Text
+                                             )
                                       ]
                                 ]
                           , "required" .= (["goal", "expression"] :: [Text])
