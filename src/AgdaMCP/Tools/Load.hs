@@ -178,8 +178,8 @@ renderLoadResponse :: LoadResponse -> Text
 renderLoadResponse (Loaded goals hiddenMetavariables warnings errors) =
   Text.intercalate "\n\n" $
     concat
-      [ case goals of
-          [] | null hiddenMetavariables -> ["Load succeeded (no goals)."]
+      [ [loadedHeader goals hiddenMetavariables warnings errors]
+      , case goals of
           [] -> []
           _ -> [Text.intercalate "\n" (map renderGoal goals)]
       , loadSection
@@ -195,6 +195,31 @@ renderLoadResponse (LoadFailed (AgdaError message _ warnings)) =
 renderLoadResponse LoadStale =
   "The file changed on disk while Agda was checking it, so the result \
   \was discarded. Please load the file again."
+
+-- A one-line summary of everything the sections below report. "Succeeded"
+-- would overclaim in the presence of non-fatal errors (the module may still
+-- fail when imported, e.g. `SafeFlagPostulate`), so those demote the verb to
+-- "completed" and are counted in the verb phrase rather than the list.
+loadedHeader ::
+  [Goal] -> [HiddenMetavariable] -> [Warning] -> [NonFatalError] -> Text
+loadedHeader goals hiddenMetavariables warnings errors =
+  verb <> ": " <> Text.intercalate ", " counts <> "."
+ where
+  verb = case errors of
+    [] -> "Load succeeded"
+    _ -> "Load completed with " <> counted "non-fatal error" (length errors)
+  counts =
+    concat
+      [ [if null goals then "no goals" else counted "goal" (length goals)]
+      , [ counted "unsolved metavariable" (length hiddenMetavariables)
+        | not (null hiddenMetavariables)
+        ]
+      , [counted "warning" (length warnings) | not (null warnings)]
+      ]
+
+counted :: Text -> Int -> Text
+counted noun n =
+  Text.pack (show n) <> " " <> noun <> (if n == 1 then "" else "s")
 
 loadSection :: Text -> [Text] -> [Text]
 loadSection _ [] = []

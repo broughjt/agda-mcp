@@ -55,7 +55,7 @@ appliedTests =
           @?= "Applied 1 give:\n\n\
               \?0 := zero (at 8:12-16)\n\n\
               \File updated and reloaded; interaction IDs may have changed.\n\n\
-              \Load succeeded (no goals)."
+              \Load succeeded: no goals."
     , testCase "applied batch followed by a reload with a remaining goal" $
         renderGiveResponse
           ( GiveResponse
@@ -90,6 +90,7 @@ appliedTests =
               \  written:   induction p\n\
               \  (at 21:4-9)\n\n\
               \File updated and reloaded; interaction IDs may have changed.\n\n\
+              \Load succeeded: 1 goal.\n\n\
               \?0 : P x (at 25:8-13)"
     , testCase "applied give with a multiline elaborated expression" $
         renderGiveResponse
@@ -110,7 +111,7 @@ appliedTests =
               \    x\n\
               \  (at 30:8-13)\n\n\
               \File updated and reloaded; interaction IDs may have changed.\n\n\
-              \Load succeeded (no goals)."
+              \Load succeeded: no goals."
     , testCase "applied give followed by a stale reload" $
         renderGiveResponse
           ( GiveResponse
@@ -170,6 +171,7 @@ rejectedTests =
               \𝟏 !=< true ＝ true\n\
               \when checking that the expression ⋆ has type true ＝ true\n\n\
               \No file changes were made. Reloaded to resync:\n\n\
+              \Load succeeded: 2 goals.\n\n\
               \?0 : false ＝ false (at 75:29-34)\n\
               \?1 : true ＝ true (at 76:27-32)"
     , testCase "later give rejected with warnings and earlier gives discarded" $
@@ -203,7 +205,7 @@ rejectedTests =
               \First warning\n\
               \Second warning\n\n\
               \No file changes were made; 1 earlier give in this call was discarded. Reloaded to resync:\n\n\
-              \Load succeeded (no goals).\n\n\
+              \Load succeeded: no goals, 1 warning.\n\n\
               \Warnings:\n\n\
               \Reload warning"
     , testCase "bogus goal rejected without a target span" $
@@ -227,7 +229,7 @@ rejectedTests =
               \Expression error (locations are relative to the submitted expression):\n\n\
               \No such interaction point: 99\n\n\
               \No file changes were made; 2 earlier gives in this call were discarded. Reloaded to resync:\n\n\
-              \Load succeeded (no goals)."
+              \Load succeeded: no goals."
     , testCase "implicit load error uses its file span" $
         renderGiveResponse
           ( GiveResponse
@@ -290,6 +292,7 @@ staleTests =
           @?= "Edit refused for ?0 at 75:29-34.\n\n\
               \The target no longer contains a hole, so the file may have changed since it was loaded. No changes were made.\n\n\
               \Reloaded to resync:\n\n\
+              \Load succeeded: 1 goal.\n\n\
               \?0 : false ＝ false (at 76:29-34)"
     ]
 

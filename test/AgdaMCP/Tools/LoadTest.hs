@@ -36,7 +36,7 @@ successTests =
     "successful loads"
     [ testCase "no open goals" $
         renderLoadResponse (Loaded [] [] [] [])
-          @?= "Load succeeded (no goals)."
+          @?= "Load succeeded: no goals."
     , testCase "one typed goal" $
         renderLoadResponse
           ( Loaded
@@ -49,7 +49,8 @@ successTests =
               []
               []
           )
-          @?= "?0 : Nat (at 8:12-16)"
+          @?= "Load succeeded: 1 goal.\n\n\
+              \?0 : Nat (at 8:12-16)"
     , testCase "multiple goals" $
         renderLoadResponse
           ( Loaded
@@ -66,7 +67,8 @@ successTests =
               []
               []
           )
-          @?= "?0 : false ＝ false (at 75:29-34)\n\
+          @?= "Load succeeded: 2 goals.\n\n\
+              \?0 : false ＝ false (at 75:29-34)\n\
               \?1 : true ＝ true (at 76:27-32)"
     , testCase "sort goal" $
         renderLoadResponse
@@ -80,7 +82,8 @@ successTests =
               []
               []
           )
-          @?= "Sort ?3 (at 4:7-8)"
+          @?= "Load succeeded: 1 goal.\n\n\
+              \Sort ?3 (at 4:7-8)"
     , testCase "hidden typed metavariable with a source span" $
         renderLoadResponse
           ( Loaded
@@ -93,12 +96,14 @@ successTests =
               []
               []
           )
-          @?= "Unsolved hidden metas:\n\n\
+          @?= "Load succeeded: no goals, 1 unsolved metavariable.\n\n\
+              \Unsolved hidden metas:\n\n\
               \_A_12 : Set (at 3:5-6)"
     , testCase "hidden sort metavariable without a source span" $
         renderLoadResponse
           (Loaded [] [HiddenMetavariable "_a_7" Nothing GoalSort] [] [])
-          @?= "Unsolved hidden metas:\n\n\
+          @?= "Load succeeded: no goals, 1 unsolved metavariable.\n\n\
+              \Unsolved hidden metas:\n\n\
               \Sort _a_7"
     , testCase "non-fatal errors" $
         renderLoadResponse
@@ -113,7 +118,7 @@ successTests =
               , NonFatalError (Nothing, "second non-fatal error")
               ]
           )
-          @?= "Load succeeded (no goals).\n\n\
+          @?= "Load completed with 2 non-fatal errors: no goals.\n\n\
               \Non-fatal errors:\n\n\
               \first non-fatal error\n\
               \second non-fatal error"
@@ -130,7 +135,7 @@ successTests =
               ]
               []
           )
-          @?= "Load succeeded (no goals).\n\n\
+          @?= "Load succeeded: no goals, 2 warnings.\n\n\
               \Warnings:\n\n\
               \Unreachable clause\n\
               \Import has unsolved metas"
@@ -146,7 +151,9 @@ successTests =
               [Warning (Nothing, "warning text")]
               [NonFatalError (Nothing, "non-fatal error text")]
           )
-          @?= "?2 : A (at 20:4-9)\n\n\
+          @?= "Load completed with 1 non-fatal error: \
+              \1 goal, 1 unsolved metavariable, 1 warning.\n\n\
+              \?2 : A (at 20:4-9)\n\n\
               \Unsolved hidden metas:\n\n\
               \_B_4 : Set₁\n\n\
               \Non-fatal errors:\n\n\
@@ -165,7 +172,8 @@ successTests =
               [Warning (Nothing, "warning heading\nwarning detail")]
               []
           )
-          @?= "?4 : A\n\
+          @?= "Load succeeded: 1 goal, 1 warning.\n\n\
+              \?4 : A\n\
               \  → B (at 30:8-13)\n\n\
               \Warnings:\n\n\
               \warning heading\n\
