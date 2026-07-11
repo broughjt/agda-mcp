@@ -70,7 +70,13 @@ spanLength :: Span -> Int
 spanLength s = positionOffset (spanEnd s) - positionOffset (spanStart s)
 
 renderSpan :: Span -> Text
-renderSpan s = renderPosition (spanStart s) <> "-" <> renderPosition (spanEnd s)
+renderSpan s
+  | positionLine start == positionLine end =
+      renderPosition start <> "-" <> Text.pack (show (positionColumn end))
+  | otherwise = renderPosition start <> "-" <> renderPosition end
+ where
+  start = spanStart s
+  end = spanEnd s
 
 renderPosition :: Position -> Text
 renderPosition (Position _ l c) =

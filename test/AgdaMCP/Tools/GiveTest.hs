@@ -53,7 +53,7 @@ appliedTests =
               (Loaded [] [] [] [])
           )
           @?= "Applied 1 give:\n\n\
-              \?0 := zero (at 8:12-8:16)\n\n\
+              \?0 := zero (at 8:12-16)\n\n\
               \File updated and reloaded; interaction IDs may have changed.\n\n\
               \Load succeeded (no goals)."
     , testCase "applied batch followed by a reload with a remaining goal" $
@@ -84,13 +84,13 @@ appliedTests =
               )
           )
           @?= "Applied 2 gives:\n\n\
-              \?0 := reflexive (at 20:4-20:9)\n\
+              \?0 := reflexive (at 20:4-9)\n\
               \?1:\n\
               \  submitted: Identity.induction p\n\
               \  written:   induction p\n\
-              \  (at 21:4-21:9)\n\n\
+              \  (at 21:4-9)\n\n\
               \File updated and reloaded; interaction IDs may have changed.\n\n\
-              \?0 : P x (at 25:8-25:13)"
+              \?0 : P x (at 25:8-13)"
     , testCase "applied give with a multiline elaborated expression" $
         renderGiveResponse
           ( GiveResponse
@@ -108,7 +108,7 @@ appliedTests =
               \?4 :=\n\
               \  λ x →\n\
               \    x\n\
-              \  (at 30:8-30:13)\n\n\
+              \  (at 30:8-13)\n\n\
               \File updated and reloaded; interaction IDs may have changed.\n\n\
               \Load succeeded (no goals)."
     , testCase "applied give followed by a stale reload" $
@@ -125,7 +125,7 @@ appliedTests =
               LoadStale
           )
           @?= "Applied 1 give:\n\n\
-              \?0 := zero (at 8:12-8:16)\n\n\
+              \?0 := zero (at 8:12-16)\n\n\
               \File updated and reloaded; interaction IDs may have changed.\n\n\
               \The file changed on disk while Agda was checking it, so the result was discarded. Please load the file again."
     ]
@@ -164,14 +164,14 @@ rejectedTests =
                   []
               )
           )
-          @?= "Give rejected for ?1 (at 76:27-76:32).\n\n\
+          @?= "Give rejected for ?1 (at 76:27-32).\n\n\
               \Expression error (locations are relative to the submitted expression):\n\n\
               \1.1-2: error: [UnequalTerms]\n\
               \𝟏 !=< true ＝ true\n\
               \when checking that the expression ⋆ has type true ＝ true\n\n\
               \No file changes were made. Reloaded to resync:\n\n\
-              \?0 : false ＝ false (at 75:29-75:34)\n\
-              \?1 : true ＝ true (at 76:27-76:32)"
+              \?0 : false ＝ false (at 75:29-34)\n\
+              \?1 : true ＝ true (at 76:27-32)"
     , testCase "later give rejected with warnings and earlier gives discarded" $
         renderGiveResponse
           ( GiveResponse
@@ -196,7 +196,7 @@ rejectedTests =
                   []
               )
           )
-          @?= "Give rejected for ?3 (at 40:7-40:12).\n\n\
+          @?= "Give rejected for ?3 (at 40:7-12).\n\n\
               \Expression error (locations are relative to the submitted expression):\n\n\
               \1.1-5: error: Not in scope: nope\n\n\
               \Warnings:\n\n\
@@ -252,7 +252,7 @@ rejectedTests =
               )
           )
           @?= "Give rejected for ?0.\n\n\
-              \Agda error at 3:1-3:4:\n\n\
+              \Agda error at 3:1-4:\n\n\
               \Example.agda:3,1-4\n\
               \Not in scope: bad\n\n\
               \No file changes were made. Reloaded to resync:\n\n\
@@ -287,10 +287,10 @@ staleTests =
                   []
               )
           )
-          @?= "Edit refused for ?0 at 75:29-75:34.\n\n\
+          @?= "Edit refused for ?0 at 75:29-34.\n\n\
               \The target no longer contains a hole, so the file may have changed since it was loaded. No changes were made.\n\n\
               \Reloaded to resync:\n\n\
-              \?0 : false ＝ false (at 76:29-76:34)"
+              \?0 : false ＝ false (at 76:29-34)"
     ]
 
 ioErrorTests :: TestTree

@@ -49,7 +49,7 @@ successTests =
               []
               []
           )
-          @?= "?0 : Nat (at 8:12-8:16)"
+          @?= "?0 : Nat (at 8:12-16)"
     , testCase "multiple goals" $
         renderLoadResponse
           ( Loaded
@@ -66,8 +66,8 @@ successTests =
               []
               []
           )
-          @?= "?0 : false ＝ false (at 75:29-75:34)\n\
-              \?1 : true ＝ true (at 76:27-76:32)"
+          @?= "?0 : false ＝ false (at 75:29-34)\n\
+              \?1 : true ＝ true (at 76:27-32)"
     , testCase "sort goal" $
         renderLoadResponse
           ( Loaded
@@ -80,7 +80,7 @@ successTests =
               []
               []
           )
-          @?= "Sort ?3 (at 4:7-4:8)"
+          @?= "Sort ?3 (at 4:7-8)"
     , testCase "hidden typed metavariable with a source span" $
         renderLoadResponse
           ( Loaded
@@ -94,7 +94,7 @@ successTests =
               []
           )
           @?= "Unsolved hidden metas:\n\n\
-              \_A_12 : Set (at 3:5-3:6)"
+              \_A_12 : Set (at 3:5-6)"
     , testCase "hidden sort metavariable without a source span" $
         renderLoadResponse
           (Loaded [] [HiddenMetavariable "_a_7" Nothing GoalSort] [] [])
@@ -146,7 +146,7 @@ successTests =
               [Warning (Nothing, "warning text")]
               [NonFatalError (Nothing, "non-fatal error text")]
           )
-          @?= "?2 : A (at 20:4-20:9)\n\n\
+          @?= "?2 : A (at 20:4-9)\n\n\
               \Unsolved hidden metas:\n\n\
               \_B_4 : Set₁\n\n\
               \Non-fatal errors:\n\n\
@@ -166,7 +166,7 @@ successTests =
               []
           )
           @?= "?4 : A\n\
-              \  → B (at 30:8-30:13)\n\n\
+              \  → B (at 30:8-13)\n\n\
               \Warnings:\n\n\
               \warning heading\n\
               \warning detail"

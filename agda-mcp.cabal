@@ -57,6 +57,7 @@ test-suite agda-mcp-test
   main-is: Main.hs
   hs-source-dirs: test
   other-modules:
+    AgdaMCP.PositionTest
     AgdaMCP.Tools.GiveTest
     AgdaMCP.Tools.LoadTest
   build-depends:
