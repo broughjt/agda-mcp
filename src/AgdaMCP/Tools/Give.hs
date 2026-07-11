@@ -62,10 +62,13 @@ import Agda.Syntax.Position (noRange)
 import Agda.Syntax.Position qualified
 import Agda.TypeChecking.Monad (TCM)
 import Agda.TypeChecking.Monad.Base (
+  Closure (clValue),
   HighlightingLevel (..),
   HighlightingMethod (..),
+  InteractionError (NoSuchInteractionPoint),
   InteractionPoint (ipRange),
-  TCErr,
+  TCErr (TypeError),
+  TypeError (InteractionError),
   stInteractionPoints,
   useR,
  )
@@ -186,6 +189,10 @@ data GiveOutcome
     GiveApplied [Edit]
   | -- A give failed to typecheck, so the file was left untouched.
     GiveRejected RejectedGive
+  | -- A give named an interaction ID that doesn't exist in the loaded file
+    -- (Agda's `NoSuchInteractionPoint`), so no expression was ever checked.
+    -- Carries the goal and how many earlier gives in the call were discarded.
+    GiveUnknownGoal InteractionId Int
   | -- A goal's recorded span no longer holds a hole (the file changed on disk
     -- since it was loaded), so the edit was refused and nothing was written.
     GiveStale Edit
@@ -194,6 +201,13 @@ data GiveOutcome
     -- intact. Carries the rendered I/O error.
     GiveIOError Text
   deriving (Show)
+
+-- A single give Agda did not apply: either the goal's interaction ID doesn't
+-- exist (nothing was checked), or checking the expression failed (with the
+-- hole span when the interaction point exists, and the error).
+data GiveFailure
+  = UnknownGoal
+  | GiveFailed (Maybe Span) AgdaError
 
 -- A give that failed to typecheck: the goal, its hole span when the interaction
 -- point still exists, its error, and how many earlier gives in the same call
@@ -257,13 +271,17 @@ parseGiveArguments arguments = do
 give :: GiveRequest -> SessionM GiveResponse
 give (GiveRequest path items) =
   runExceptT (traverse runGive (zip [0 :: Int ..] items))
-    >>= either (resync . GiveRejected) (\edits -> liftIO (commit edits) >>= resync)
+    >>= either resync (\edits -> liftIO (commit edits) >>= resync)
  where
-  runGive :: (Int, GiveItem) -> ExceptT RejectedGive SessionM Edit
+  runGive :: (Int, GiveItem) -> ExceptT GiveOutcome SessionM Edit
   runGive (priorCount, (goal, expression)) =
     ExceptT $
-      first (\(holeSpan, err) -> RejectedGive goal holeSpan err priorCount)
-        <$> giveSingle path goal expression
+      first (fromFailure goal priorCount) <$> giveSingle path goal expression
+
+  fromFailure :: InteractionId -> Int -> GiveFailure -> GiveOutcome
+  fromFailure goal priorCount UnknownGoal = GiveUnknownGoal goal priorCount
+  fromFailure goal priorCount (GiveFailed holeSpan err) =
+    GiveRejected (RejectedGive goal holeSpan err priorCount)
 
   -- All gives succeeded. Read the source, confirm every recorded span still
   -- holds a hole (if not, the file change under us since the last load, so
@@ -306,7 +324,7 @@ giveSingle ::
   FilePath ->
   InteractionId ->
   String ->
-  SessionM (Either (Maybe Span, AgdaError) Edit)
+  SessionM (Either GiveFailure Edit)
 giveSingle path goal expression = do
   responses <-
     runInteractionM $
@@ -340,14 +358,22 @@ resolveGive ::
   TCM
     ( Either
         (ProtocolViolation Response)
-        (Either (Maybe Span, AgdaError) Edit)
+        (Either GiveFailure Edit)
     )
-resolveGive path goal _ _ (Left e) = do
-  path' <- liftIO (absolute path)
-  interactionPoints <- useR stInteractionPoints
-  let holeSpan = BiMap.lookup goal interactionPoints >>= fileSpan path' . ipRange
-  err <- resolveError path' e
-  pure (Right (Left (holeSpan, err)))
+resolveGive path goal _ _ (Left e)
+  -- A give for a non-existent interaction ID fails `give_gen`'s first failable
+  -- operation, `lookupInteractionPoint` (MetaVars.hs:638-640), with this
+  -- dedicated constructor. Match it before rendering so it isn't mistakenly
+  -- reported as an error in the submitted expression.
+  | TypeError _ _ closure <- e
+  , InteractionError (NoSuchInteractionPoint _) <- clValue closure =
+      pure (Right (Left UnknownGoal))
+  | otherwise = do
+      path' <- liftIO (absolute path)
+      interactionPoints <- useR stInteractionPoints
+      let holeSpan = BiMap.lookup goal interactionPoints >>= fileSpan path' . ipRange
+      err <- resolveError path' e
+      pure (Right (Left (GiveFailed holeSpan err)))
 resolveGive _ goal submitted responses (Right s) =
   maybe
     missing
@@ -457,6 +483,13 @@ renderGiveOutcome (GiveRejected (RejectedGive goal holeSpan err discarded)) =
     <> "\n\n"
     <> renderRejectedError err
     <> "\n\n"
+    <> renderDiscarded discarded
+    <> " Reloaded to resync:"
+renderGiveOutcome (GiveUnknownGoal goal discarded) =
+  "No such goal ?"
+    <> Text.pack (show (interactionId goal))
+    <> " in the loaded file. Goal IDs renumber after every edit or reload; \
+       \use the IDs from the fresh list below.\n\n"
     <> renderDiscarded discarded
     <> " Reloaded to resync:"
 renderGiveOutcome (GiveStale edit) =

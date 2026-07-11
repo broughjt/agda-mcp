@@ -14,7 +14,7 @@ import AgdaMCP.Tools.Common (
  )
 import AgdaMCP.Tools.Give (
   Edit (Edit),
-  GiveOutcome (GiveApplied, GiveIOError, GiveRejected, GiveStale),
+  GiveOutcome (GiveApplied, GiveIOError, GiveRejected, GiveStale, GiveUnknownGoal),
   GiveResponse (GiveResponse),
   RejectedGive (RejectedGive),
   renderGiveResponse,
@@ -31,6 +31,7 @@ tests =
     "renderGiveResponse"
     [ appliedTests
     , rejectedTests
+    , unknownGoalTests
     , staleTests
     , ioErrorTests
     ]
@@ -208,28 +209,6 @@ rejectedTests =
               \Load succeeded: no goals, 1 warning.\n\n\
               \Warnings:\n\n\
               \Reload warning"
-    , testCase "bogus goal rejected without a target span" $
-        renderGiveResponse
-          ( GiveResponse
-              ( GiveRejected
-                  ( RejectedGive
-                      (InteractionId 99)
-                      Nothing
-                      ( AgdaError
-                          "No such interaction point: 99"
-                          Nothing
-                          []
-                      )
-                      2
-                  )
-              )
-              (Loaded [] [] [] [])
-          )
-          @?= "Give rejected for ?99.\n\n\
-              \Expression error (locations are relative to the submitted expression):\n\n\
-              \No such interaction point: 99\n\n\
-              \No file changes were made; 2 earlier gives in this call were discarded. Reloaded to resync:\n\n\
-              \Load succeeded: no goals."
     , testCase "implicit load error uses its file span" $
         renderGiveResponse
           ( GiveResponse
@@ -289,6 +268,42 @@ rejectedTests =
               \Load failed:\n\n\
               \Example.agda:3,1-4\n\
               \Not in scope: bad"
+    ]
+
+unknownGoalTests :: TestTree
+unknownGoalTests =
+  testGroup
+    "unknown goals"
+    [ testCase "unknown goal followed by the fresh goal list" $
+        renderGiveResponse
+          ( GiveResponse
+              (GiveUnknownGoal (InteractionId 9) 0)
+              ( Loaded
+                  [ Goal
+                      (InteractionId 0)
+                      (Span (Position 0 75 29) (Position 5 75 34))
+                      (GoalOfType "false ＝ false")
+                  ]
+                  []
+                  []
+                  []
+              )
+          )
+          @?= "No such goal ?9 in the loaded file. Goal IDs renumber after \
+              \every edit or reload; use the IDs from the fresh list below.\n\n\
+              \No file changes were made. Reloaded to resync:\n\n\
+              \Load succeeded: 1 goal.\n\n\
+              \?0 : false ＝ false (at 75:29-34)"
+    , testCase "unknown goal with earlier gives discarded" $
+        renderGiveResponse
+          ( GiveResponse
+              (GiveUnknownGoal (InteractionId 99) 2)
+              (Loaded [] [] [] [])
+          )
+          @?= "No such goal ?99 in the loaded file. Goal IDs renumber after \
+              \every edit or reload; use the IDs from the fresh list below.\n\n\
+              \No file changes were made; 2 earlier gives in this call were discarded. Reloaded to resync:\n\n\
+              \Load succeeded: no goals."
     ]
 
 staleTests :: TestTree
