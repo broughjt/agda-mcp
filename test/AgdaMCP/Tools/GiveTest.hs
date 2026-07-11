@@ -257,6 +257,34 @@ rejectedTests =
               \Agda error at 3:1-4:\n\n\
               \Example.agda:3,1-4\n\
               \Not in scope: bad\n\n\
+              \No file changes were made. Reloaded to resync: \
+              \load failed with the same error."
+    , testCase "reload failure with a different error renders in full" $
+        renderGiveResponse
+          ( GiveResponse
+              ( GiveRejected
+                  ( RejectedGive
+                      (InteractionId 0)
+                      Nothing
+                      ( AgdaError
+                          "1.1-5: error: Not in scope: nope"
+                          Nothing
+                          []
+                      )
+                      0
+                  )
+              )
+              ( LoadFailed
+                  ( AgdaError
+                      "Example.agda:3,1-4\nNot in scope: bad"
+                      (Just (Span (Position 10 3 1) (Position 13 3 4)))
+                      []
+                  )
+              )
+          )
+          @?= "Give rejected for ?0.\n\n\
+              \Expression error (locations are relative to the submitted expression):\n\n\
+              \1.1-5: error: Not in scope: nope\n\n\
               \No file changes were made. Reloaded to resync:\n\n\
               \Load failed:\n\n\
               \Example.agda:3,1-4\n\

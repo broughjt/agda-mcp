@@ -100,7 +100,7 @@ import AgdaMCP.Tools.Common (
  )
 import AgdaMCP.Tools.Load (
   LoadRequest (..),
-  LoadResponse,
+  LoadResponse (LoadFailed),
   load,
   renderLoadResponse,
  )
@@ -432,6 +432,12 @@ parseGiveResponses goal responses = maybe (Left violation) Right (exchange respo
   failed = failedTail Left
 
 renderGiveResponse :: GiveResponse -> Text
+-- When a give was rejected by its implicit load, the resync reload fails with
+-- the same error. Repeating it verbatim is redundant, so we detect this case
+-- and more concise version.
+renderGiveResponse (GiveResponse outcome@(GiveRejected rejected) (LoadFailed reloadError))
+  | rejectedError rejected == reloadError =
+      renderGiveOutcome outcome <> " load failed with the same error."
 renderGiveResponse (GiveResponse outcome reloaded) =
   renderGiveOutcome outcome <> "\n\n" <> renderLoadResponse reloaded
 

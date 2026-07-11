@@ -81,10 +81,10 @@ data AgdaError = AgdaError
   , agdaErrorSpan :: Maybe Span
   , agdaErrorWarnings :: [Warning]
   }
-  deriving (Show)
+  deriving (Eq, Show)
 
 newtype Warning = Warning (Maybe Span, Text)
-  deriving (Show)
+  deriving (Eq, Show)
 
 newtype NonFatalError = NonFatalError (Maybe Span, Text)
   deriving (Show)

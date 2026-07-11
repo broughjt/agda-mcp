@@ -28,14 +28,14 @@ data Position = Position
   , positionLine :: Int
   , positionColumn :: Int
   }
-  deriving (Show)
+  deriving (Eq, Show)
 
 -- A contiguous part of the loaded file: start inclusive, end exclusive.
 data Span = Span
   { spanStart :: Position
   , spanEnd :: Position
   }
-  deriving (Show)
+  deriving (Eq, Show)
 
 toPosition :: Agda.Syntax.Position.PositionWithoutFile -> Position
 toPosition p =
