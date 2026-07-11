@@ -64,14 +64,19 @@ import Agda.TypeChecking.Monad (TCM)
 import Agda.TypeChecking.Monad.Base (
   HighlightingLevel (..),
   HighlightingMethod (..),
+  InteractionPoint (ipRange),
   TCErr,
+  stInteractionPoints,
+  useR,
  )
 import Agda.TypeChecking.Monad.MetaVars (getInteractionRange)
+import Agda.Utils.BiMap qualified as BiMap
 import Agda.Utils.FileName (absolute)
 import Agda.Utils.IO.UTF8 (ReadException, readTextFile)
 
 import AgdaMCP.Position (
   Span,
+  fileSpan,
   positionOffset,
   renderSpan,
   spanLength,
@@ -87,9 +92,9 @@ import AgdaMCP.Session (
   runInteractionM,
  )
 import AgdaMCP.Tools.Common (
-  AgdaError,
+  AgdaError (AgdaError),
+  Warning (Warning),
   failedTail,
-  renderAgdaError,
   resolveError,
   withSession,
  )
@@ -189,10 +194,12 @@ data GiveOutcome
     GiveIOError Text
   deriving (Show)
 
--- A give that failed to typecheck: the goal, its error, and how many earlier
--- gives in the same call were discarded (by the resync reload).
+-- A give that failed to typecheck: the goal, its hole span when the interaction
+-- point still exists, its error, and how many earlier gives in the same call
+-- were discarded (by the resync reload).
 data RejectedGive = RejectedGive
   { rejectedGoal :: InteractionId
+  , rejectedSpan :: Maybe Span
   , rejectedError :: AgdaError
   , rejectedDiscarded :: Int
   }
@@ -254,7 +261,7 @@ give (GiveRequest path items) =
   runGive :: (Int, GiveItem) -> ExceptT RejectedGive SessionM Edit
   runGive (priorCount, (goal, expression)) =
     ExceptT $
-      first (\err -> RejectedGive goal err priorCount)
+      first (\(holeSpan, err) -> RejectedGive goal holeSpan err priorCount)
         <$> giveSingle path goal expression
 
   -- All gives succeeded. Read the source, confirm every recorded span still
@@ -295,7 +302,10 @@ give (GiveRequest path items) =
   fromIOError = pure . GiveIOError . Text.pack . displayException
 
 giveSingle ::
-  FilePath -> InteractionId -> String -> SessionM (Either AgdaError Edit)
+  FilePath ->
+  InteractionId ->
+  String ->
+  SessionM (Either (Maybe Span, AgdaError) Edit)
 giveSingle path goal expression = do
   responses <-
     runInteractionM $
@@ -305,15 +315,17 @@ giveSingle path goal expression = do
         -- thinking about when agents should force.
         IOTCM path None Direct (Cmd_give WithoutForce goal noRange expression)
   parsed <- fromProtocolResult $ parseGiveResponses goal responses
-  resolved <- liftTCM $ resolveGive path goal responses parsed
+  resolved <-
+    liftTCM $ resolveGive path goal (Text.pack expression) responses parsed
   fromProtocolResult resolved
 
 -- An edit directive resulting from the application of a give command,
--- consisting of the interaction id, the hole's span, and the expression text
--- elaborated by Agda.
+-- consisting of the interaction id, the hole's span, the submitted expression,
+-- and the expression text elaborated by Agda and written to disk.
 data Edit = Edit
   { editGoal :: InteractionId
   , editSpan :: Span
+  , editSubmitted :: Text
   , editText :: Text
   }
   deriving (Show)
@@ -321,27 +333,29 @@ data Edit = Edit
 resolveGive ::
   FilePath ->
   InteractionId ->
+  Text ->
   [Response] ->
   Either TCErr String ->
-  TCM (Either (ProtocolViolation Response) (Either AgdaError Edit))
-resolveGive path _ _ (Left e) =
-  -- TODO: Attach the hole's span to the failure. The error's own span is rarely
-  -- in the file (with `rng = noRange`, the expression is parsed from `startPos
-  -- Nothing`, so its positions carry no file), but the hole's span would locate
-  -- the failed goal for the agent. It must use a non-throwing lookup --
-  -- `BiMap.lookup goal <$> useR stInteractionPoints` -- because
-  -- `getInteractionRange` throws a `TCErr` for a bogus goal id, which would
-  -- escape response resolution and kill the process (turning agent misuse into
-  -- process death, forbidden by the failure taxonomy).
-  Right . Left <$> (liftIO (absolute path) >>= flip resolveError e)
-resolveGive _ goal responses (Right s) =
+  TCM
+    ( Either
+        (ProtocolViolation Response)
+        (Either (Maybe Span, AgdaError) Edit)
+    )
+resolveGive path goal _ _ (Left e) = do
+  path' <- liftIO (absolute path)
+  interactionPoints <- useR stInteractionPoints
+  let holeSpan = BiMap.lookup goal interactionPoints >>= fileSpan path' . ipRange
+  err <- resolveError path' e
+  pure (Right (Left (holeSpan, err)))
+resolveGive _ goal submitted responses (Right s) =
   maybe
     missing
     gave
     . Agda.Syntax.Position.rangeToInterval
     <$> getInteractionRange goal
  where
-  gave interval = Right (Right (Edit goal (toSpan interval) (Text.pack s)))
+  gave interval =
+    Right (Right (Edit goal (toSpan interval) submitted (Text.pack s)))
   missing = Left (ProtocolViolation "Cmd_give" responses)
 
 -- TODO: Remove the `Text.strip`?
@@ -422,40 +436,98 @@ renderGiveResponse (GiveResponse outcome reloaded) =
 
 renderGiveOutcome :: GiveOutcome -> Text
 renderGiveOutcome (GiveApplied edits) =
-  "Gave "
-    <> Text.pack (show (length edits))
-    <> " goal(s):\n"
-    <> Text.concat
-      [ "  ?"
-          <> Text.pack (show (interactionId (editGoal e)))
-          <> " := "
-          <> editText e
-          <> "\n"
-      | e <- edits
-      ]
-    <> "The file was updated on disk and reloaded; interaction ids may have changed."
-renderGiveOutcome (GiveRejected (RejectedGive goal err discarded)) =
-  "Give failed for goal ?"
+  "Applied "
+    <> count
+    <> (if length edits == 1 then " give:\n\n" else " gives:\n\n")
+    <> Text.intercalate "\n" (map renderAppliedEdit edits)
+    <> "\n\nFile updated and reloaded; interaction IDs may have changed."
+ where
+  count = Text.pack (show (length edits))
+renderGiveOutcome (GiveRejected (RejectedGive goal holeSpan err discarded)) =
+  "Give rejected for ?"
     <> Text.pack (show (interactionId goal))
-    <> ":\n"
-    <> Text.intercalate "\n" (renderAgdaError err)
+    <> maybe "." (\s -> " (at " <> renderSpan s <> ").") holeSpan
     <> "\n\n"
-    <> ( if discarded > 0
-           then
-             "The file was left unchanged; the "
-               <> Text.pack (show discarded)
-               <> " earlier give(s) in this call were discarded. "
-           else "The file was left unchanged. "
-       )
-    <> "Reloaded to resync:"
+    <> renderRejectedError err
+    <> "\n\n"
+    <> renderDiscarded discarded
+    <> " Reloaded to resync:"
 renderGiveOutcome (GiveStale edit) =
-  "Refused to edit: goal ?"
+  "Edit refused for ?"
     <> Text.pack (show (interactionId (editGoal edit)))
-    <> " no longer points at a hole (expected `?` or `{! !}` at "
+    <> " at "
     <> renderSpan (editSpan edit)
-    <> "). The file likely changed on disk since it was loaded. No changes were \
-       \made; reloaded to resync:"
+    <> ".\n\nThe target no longer contains a hole, so the file may have changed \
+       \since it was loaded. No changes were made.\n\nReloaded to resync:"
 renderGiveOutcome (GiveIOError err) =
-  "Could not access the file on disk:\n"
+  "Could not access the file on disk:\n\n"
     <> err
-    <> "\n\nNo changes were written. Reloaded to resync:"
+    <> "\n\nNo changes were written.\n\nReloaded to resync:"
+
+renderAppliedEdit :: Edit -> Text
+renderAppliedEdit edit
+  | submitted == written =
+      header
+        <> if "\n" `Text.isInfixOf` written
+          then
+            " :=\n"
+              <> indent 2 written
+              <> "\n  (at "
+              <> renderSpan (editSpan edit)
+              <> ")"
+          else
+            " := "
+              <> written
+              <> " (at "
+              <> renderSpan (editSpan edit)
+              <> ")"
+  | otherwise =
+      Text.intercalate
+        "\n"
+        [ header <> ":"
+        , renderExpression "submitted" submitted
+        , renderExpression "written" written
+        , "  (at " <> renderSpan (editSpan edit) <> ")"
+        ]
+ where
+  header = "?" <> Text.pack (show (interactionId (editGoal edit)))
+  submitted = editSubmitted edit
+  written = editText edit
+
+renderExpression :: Text -> Text -> Text
+renderExpression label expression
+  | "\n" `Text.isInfixOf` expression =
+      "  " <> label <> ":\n" <> indent 4 expression
+  | otherwise =
+      "  "
+        <> label
+        <> ":"
+        <> Text.replicate (10 - Text.length label) " "
+        <> expression
+
+indent :: Int -> Text -> Text
+indent width text =
+  let prefix = Text.replicate width " "
+   in prefix <> Text.replace "\n" ("\n" <> prefix) text
+
+renderRejectedError :: AgdaError -> Text
+renderRejectedError (AgdaError message errorSpan warnings) =
+  Text.intercalate "\n\n" $
+    [ maybe
+        "Expression error (locations are relative to the submitted expression):"
+        (\s -> "Agda error at " <> renderSpan s <> ":")
+        errorSpan
+    , message
+    ]
+      <> case warnings of
+        [] -> []
+        _ -> ["Warnings:\n\n" <> Text.intercalate "\n" [w | Warning (_, w) <- warnings]]
+
+renderDiscarded :: Int -> Text
+renderDiscarded 0 = "No file changes were made."
+renderDiscarded 1 =
+  "No file changes were made; 1 earlier give in this call was discarded."
+renderDiscarded count =
+  "No file changes were made; "
+    <> Text.pack (show count)
+    <> " earlier gives in this call were discarded."
