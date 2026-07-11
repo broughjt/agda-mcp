@@ -108,7 +108,7 @@ loadTool =
                 ( "path"
                 , object
                     [ "type" .= ("string" :: Text)
-                    , "description" .= ("Path to the .agda file to load" :: Text)
+                    , "description" .= ("Path to the Agda file to load" :: Text)
                     ]
                 )
               ]

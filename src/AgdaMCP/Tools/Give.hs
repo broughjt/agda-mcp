@@ -128,7 +128,7 @@ giveTool =
                 ( "path"
                 , object
                     [ "type" .= ("string" :: Text)
-                    , "description" .= ("Path to a .agda file" :: Text)
+                    , "description" .= ("Path to an Agda file" :: Text)
                     ]
                 )
               ,
