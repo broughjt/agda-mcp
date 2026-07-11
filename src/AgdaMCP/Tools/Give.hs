@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module AgdaMCP.Tools.Give (
+  BatchPosition (..),
   Edit (..),
   GiveOutcome (..),
   GiveResponse (..),
@@ -191,8 +192,7 @@ data GiveOutcome
     GiveRejected RejectedGive
   | -- A give named an interaction ID that doesn't exist in the loaded file
     -- (Agda's `NoSuchInteractionPoint`), so no expression was ever checked.
-    -- Carries the goal and how many earlier gives in the call were discarded.
-    GiveUnknownGoal InteractionId Int
+    GiveUnknownGoal InteractionId BatchPosition
   | -- A goal's recorded span no longer holds a hole (the file changed on disk
     -- since it was loaded), so the edit was refused and nothing was written.
     GiveStale Edit
@@ -210,13 +210,21 @@ data GiveFailure
   | GiveFailed (Maybe Span) AgdaError
 
 -- A give that failed to typecheck: the goal, its hole span when the interaction
--- point still exists, its error, and how many earlier gives in the same call
--- were discarded (by the resync reload).
+-- point still exists, its error, and where it sat in the batch.
 data RejectedGive = RejectedGive
   { rejectedGoal :: InteractionId
   , rejectedSpan :: Maybe Span
   , rejectedError :: AgdaError
-  , rejectedDiscarded :: Int
+  , rejectedBatch :: BatchPosition
+  }
+  deriving (Show)
+
+-- Where a failing give sat in its batch: earlier gives had already been
+-- checked and are discarded by the resync reload; later gives were skipped
+-- without being checked.
+data BatchPosition = BatchPosition
+  { batchDiscarded :: Int
+  , batchSkipped :: Int
   }
   deriving (Show)
 
@@ -274,14 +282,15 @@ give (GiveRequest path items) =
     >>= either resync (\edits -> liftIO (commit edits) >>= resync)
  where
   runGive :: (Int, GiveItem) -> ExceptT GiveOutcome SessionM Edit
-  runGive (priorCount, (goal, expression)) =
+  runGive (index, (goal, expression)) =
     ExceptT $
-      first (fromFailure goal priorCount) <$> giveSingle path goal expression
+      first (fromFailure goal (BatchPosition index (length items - index - 1)))
+        <$> giveSingle path goal expression
 
-  fromFailure :: InteractionId -> Int -> GiveFailure -> GiveOutcome
-  fromFailure goal priorCount UnknownGoal = GiveUnknownGoal goal priorCount
-  fromFailure goal priorCount (GiveFailed holeSpan err) =
-    GiveRejected (RejectedGive goal holeSpan err priorCount)
+  fromFailure :: InteractionId -> BatchPosition -> GiveFailure -> GiveOutcome
+  fromFailure goal batch UnknownGoal = GiveUnknownGoal goal batch
+  fromFailure goal batch (GiveFailed holeSpan err) =
+    GiveRejected (RejectedGive goal holeSpan err batch)
 
   -- All gives succeeded. Read the source, confirm every recorded span still
   -- holds a hole (if not, the file change under us since the last load, so
@@ -476,21 +485,21 @@ renderGiveOutcome (GiveApplied edits) =
     <> "\n\nFile updated and reloaded; interaction IDs may have changed."
  where
   count = Text.pack (show (length edits))
-renderGiveOutcome (GiveRejected (RejectedGive goal holeSpan err discarded)) =
+renderGiveOutcome (GiveRejected (RejectedGive goal holeSpan err batch)) =
   "Give rejected for ?"
     <> Text.pack (show (interactionId goal))
     <> maybe "." (\s -> " (at " <> renderSpan s <> ").") holeSpan
     <> "\n\n"
     <> renderRejectedError err
     <> "\n\n"
-    <> renderDiscarded discarded
+    <> renderUnapplied batch
     <> " Reloaded to resync:"
-renderGiveOutcome (GiveUnknownGoal goal discarded) =
+renderGiveOutcome (GiveUnknownGoal goal batch) =
   "No such goal ?"
     <> Text.pack (show (interactionId goal))
     <> " in the loaded file. Goal IDs renumber after every edit or reload; \
        \use the IDs from the fresh list below.\n\n"
-    <> renderDiscarded discarded
+    <> renderUnapplied batch
     <> " Reloaded to resync:"
 renderGiveOutcome (GiveStale edit) =
   "Edit refused for ?"
@@ -504,6 +513,8 @@ renderGiveOutcome (GiveIOError err) =
     <> err
     <> "\n\nNo changes were written.\n\nReloaded to resync:"
 
+-- The span labels read "was at", since they point to the hole in the file as it
+-- was before this call's edits were applied.
 renderAppliedEdit :: Edit -> Text
 renderAppliedEdit edit
   | submitted == written =
@@ -512,13 +523,13 @@ renderAppliedEdit edit
           then
             " :=\n"
               <> indent 2 written
-              <> "\n  (at "
+              <> "\n  (was at "
               <> renderSpan (editSpan edit)
               <> ")"
           else
             " := "
               <> written
-              <> " (at "
+              <> " (was at "
               <> renderSpan (editSpan edit)
               <> ")"
   | otherwise =
@@ -527,7 +538,7 @@ renderAppliedEdit edit
         [ header <> ":"
         , renderExpression "submitted" submitted
         , renderExpression "written" written
-        , "  (at " <> renderSpan (editSpan edit) <> ")"
+        , "  (was at " <> renderSpan (editSpan edit) <> ")"
         ]
  where
   header = "?" <> Text.pack (show (interactionId (editGoal edit)))
@@ -563,11 +574,30 @@ renderRejectedError (AgdaError message errorSpan warnings) =
         [] -> []
         _ -> ["Warnings:\n\n" <> Text.intercalate "\n" [w | Warning (_, w) <- warnings]]
 
-renderDiscarded :: Int -> Text
-renderDiscarded 0 = "No file changes were made."
-renderDiscarded 1 =
-  "No file changes were made; 1 earlier give in this call was discarded."
-renderDiscarded count =
+-- e.g. "No file changes were made; 1 earlier give in this call was discarded
+-- and 2 later gives were skipped."
+renderUnapplied :: BatchPosition -> Text
+renderUnapplied (BatchPosition 0 0) = "No file changes were made."
+renderUnapplied (BatchPosition discarded skipped) =
   "No file changes were made; "
-    <> Text.pack (show count)
-    <> " earlier gives in this call were discarded."
+    <> Text.intercalate " and " (discardedClause <> skippedClause)
+    <> "."
+ where
+  -- "in this call" reads once, on the first clause present.
+  discardedClause =
+    [ gives discarded "earlier" <> " in this call " <> was discarded <> " discarded"
+    | discarded > 0
+    ]
+  skippedClause =
+    [ gives skipped "later"
+        <> (if discarded > 0 then " " else " in this call ")
+        <> was skipped
+        <> " skipped"
+    | skipped > 0
+    ]
+  gives n position =
+    Text.pack (show n)
+      <> " "
+      <> position
+      <> (if n == 1 then " give" else " gives")
+  was n = if n == 1 then "was" else "were" :: Text

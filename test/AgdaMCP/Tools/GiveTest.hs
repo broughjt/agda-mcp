@@ -13,6 +13,7 @@ import AgdaMCP.Tools.Common (
   Warning (Warning),
  )
 import AgdaMCP.Tools.Give (
+  BatchPosition (BatchPosition),
   Edit (Edit),
   GiveOutcome (GiveApplied, GiveIOError, GiveRejected, GiveStale, GiveUnknownGoal),
   GiveResponse (GiveResponse),
@@ -54,7 +55,7 @@ appliedTests =
               (Loaded [] [] [] [])
           )
           @?= "Applied 1 give:\n\n\
-              \?0 := zero (at 8:12-16)\n\n\
+              \?0 := zero (was at 8:12-16)\n\n\
               \File updated and reloaded; interaction IDs may have changed.\n\n\
               \Load succeeded: no goals."
     , testCase "applied batch followed by a reload with a remaining goal" $
@@ -85,11 +86,11 @@ appliedTests =
               )
           )
           @?= "Applied 2 gives:\n\n\
-              \?0 := reflexive (at 20:4-9)\n\
+              \?0 := reflexive (was at 20:4-9)\n\
               \?1:\n\
               \  submitted: Identity.induction p\n\
               \  written:   induction p\n\
-              \  (at 21:4-9)\n\n\
+              \  (was at 21:4-9)\n\n\
               \File updated and reloaded; interaction IDs may have changed.\n\n\
               \Load succeeded: 1 goal.\n\n\
               \?0 : P x (at 25:8-13)"
@@ -110,7 +111,7 @@ appliedTests =
               \?4 :=\n\
               \  λ x →\n\
               \    x\n\
-              \  (at 30:8-13)\n\n\
+              \  (was at 30:8-13)\n\n\
               \File updated and reloaded; interaction IDs may have changed.\n\n\
               \Load succeeded: no goals."
     , testCase "applied give followed by a stale reload" $
@@ -127,7 +128,7 @@ appliedTests =
               LoadStale
           )
           @?= "Applied 1 give:\n\n\
-              \?0 := zero (at 8:12-16)\n\n\
+              \?0 := zero (was at 8:12-16)\n\n\
               \File updated and reloaded; interaction IDs may have changed.\n\n\
               \The file changed on disk while Agda was checking it, so the result was discarded. Please load the file again."
     ]
@@ -148,7 +149,7 @@ rejectedTests =
                           Nothing
                           []
                       )
-                      0
+                      (BatchPosition 0 0)
                   )
               )
               ( Loaded
@@ -189,7 +190,7 @@ rejectedTests =
                           , Warning (Nothing, "Second warning")
                           ]
                       )
-                      1
+                      (BatchPosition 1 0)
                   )
               )
               ( Loaded
@@ -221,7 +222,7 @@ rejectedTests =
                           (Just (Span (Position 10 3 1) (Position 13 3 4)))
                           []
                       )
-                      0
+                      (BatchPosition 0 0)
                   )
               )
               ( LoadFailed
@@ -250,7 +251,7 @@ rejectedTests =
                           Nothing
                           []
                       )
-                      0
+                      (BatchPosition 0 0)
                   )
               )
               ( LoadFailed
@@ -268,6 +269,29 @@ rejectedTests =
               \Load failed:\n\n\
               \Example.agda:3,1-4\n\
               \Not in scope: bad"
+    , testCase "rejection counts both discarded and skipped gives" $
+        renderGiveResponse
+          ( GiveResponse
+              ( GiveRejected
+                  ( RejectedGive
+                      (InteractionId 2)
+                      Nothing
+                      ( AgdaError
+                          "1.1-5: error: Not in scope: nope"
+                          Nothing
+                          []
+                      )
+                      (BatchPosition 1 2)
+                  )
+              )
+              (Loaded [] [] [] [])
+          )
+          @?= "Give rejected for ?2.\n\n\
+              \Expression error (locations are relative to the submitted expression):\n\n\
+              \1.1-5: error: Not in scope: nope\n\n\
+              \No file changes were made; 1 earlier give in this call was \
+              \discarded and 2 later gives were skipped. Reloaded to resync:\n\n\
+              \Load succeeded: no goals."
     ]
 
 unknownGoalTests :: TestTree
@@ -277,7 +301,7 @@ unknownGoalTests =
     [ testCase "unknown goal followed by the fresh goal list" $
         renderGiveResponse
           ( GiveResponse
-              (GiveUnknownGoal (InteractionId 9) 0)
+              (GiveUnknownGoal (InteractionId 9) (BatchPosition 0 0))
               ( Loaded
                   [ Goal
                       (InteractionId 0)
@@ -297,12 +321,22 @@ unknownGoalTests =
     , testCase "unknown goal with earlier gives discarded" $
         renderGiveResponse
           ( GiveResponse
-              (GiveUnknownGoal (InteractionId 99) 2)
+              (GiveUnknownGoal (InteractionId 99) (BatchPosition 2 0))
               (Loaded [] [] [] [])
           )
           @?= "No such goal ?99 in the loaded file. Goal IDs renumber after \
               \every edit or reload; use the IDs from the fresh list below.\n\n\
               \No file changes were made; 2 earlier gives in this call were discarded. Reloaded to resync:\n\n\
+              \Load succeeded: no goals."
+    , testCase "unknown goal with later gives skipped" $
+        renderGiveResponse
+          ( GiveResponse
+              (GiveUnknownGoal (InteractionId 5) (BatchPosition 0 3))
+              (Loaded [] [] [] [])
+          )
+          @?= "No such goal ?5 in the loaded file. Goal IDs renumber after \
+              \every edit or reload; use the IDs from the fresh list below.\n\n\
+              \No file changes were made; 3 later gives in this call were skipped. Reloaded to resync:\n\n\
               \Load succeeded: no goals."
     ]
 

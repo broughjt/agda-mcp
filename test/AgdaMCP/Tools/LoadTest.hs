@@ -97,13 +97,13 @@ successTests =
               []
           )
           @?= "Load succeeded: no goals, 1 unsolved metavariable.\n\n\
-              \Unsolved hidden metas:\n\n\
+              \Unsolved metavariables:\n\n\
               \_A_12 : Set (at 3:5-6)"
     , testCase "hidden sort metavariable without a source span" $
         renderLoadResponse
           (Loaded [] [HiddenMetavariable "_a_7" Nothing GoalSort] [] [])
           @?= "Load succeeded: no goals, 1 unsolved metavariable.\n\n\
-              \Unsolved hidden metas:\n\n\
+              \Unsolved metavariables:\n\n\
               \Sort _a_7"
     , testCase "non-fatal errors" $
         renderLoadResponse
@@ -154,7 +154,7 @@ successTests =
           @?= "Load completed with 1 non-fatal error: \
               \1 goal, 1 unsolved metavariable, 1 warning.\n\n\
               \?2 : A (at 20:4-9)\n\n\
-              \Unsolved hidden metas:\n\n\
+              \Unsolved metavariables:\n\n\
               \_B_4 : Set₁\n\n\
               \Non-fatal errors:\n\n\
               \non-fatal error text\n\n\

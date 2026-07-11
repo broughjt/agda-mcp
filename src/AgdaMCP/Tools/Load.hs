@@ -183,7 +183,7 @@ renderLoadResponse (Loaded goals hiddenMetavariables warnings errors) =
           [] -> []
           _ -> [Text.intercalate "\n" (map renderGoal goals)]
       , loadSection
-          "Unsolved hidden metas:"
+          "Unsolved metavariables:"
           (map renderHiddenMetavariable hiddenMetavariables)
       , loadSection "Non-fatal errors:" [e | NonFatalError (_, e) <- errors]
       , loadSection "Warnings:" [w | Warning (_, w) <- warnings]

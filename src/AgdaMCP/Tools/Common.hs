@@ -30,6 +30,7 @@ import MCP.Server (
   MCPServerState (..),
   MCPServerT,
  )
+import System.IO.Error (ioeGetErrorString)
 
 import Agda.Interaction.Response (
   DisplayInfo_boot (..),
@@ -40,13 +41,17 @@ import Agda.Interaction.Response (
   Status (..),
  )
 import Agda.Syntax.Common.Pretty (render)
-import Agda.Syntax.Position (getRange)
+import Agda.Syntax.Parser.Monad (ParseError (ReadFileError))
+import Agda.Syntax.Position (getRange, rangeFilePath)
 import Agda.TypeChecking.Errors (getAllWarningsOfTCErr, renderError)
 import Agda.TypeChecking.Monad (TCM)
-import Agda.TypeChecking.Monad.Base (TCErr, TCWarning (tcWarningRange))
+import Agda.TypeChecking.Monad.Base (
+  TCErr (ParserError),
+  TCWarning (tcWarningRange),
+ )
 import Agda.TypeChecking.Pretty (prettyTCM)
 import Agda.TypeChecking.Pretty.Warning (filterTCWarnings)
-import Agda.Utils.FileName (AbsolutePath)
+import Agda.Utils.FileName (AbsolutePath, filePath)
 
 import AgdaMCP.Position (Span, fileSpan)
 import AgdaMCP.Session (Session, SessionM)
@@ -92,9 +97,22 @@ newtype NonFatalError = NonFatalError (Maybe Span, Text)
 resolveError :: AbsolutePath -> TCErr -> TCM AgdaError
 resolveError path err =
   AgdaError
-    <$> (Text.pack <$> renderError err)
+    <$> message
     <*> pure (fileSpan path (getRange err))
     <*> (map Warning <$> (getAllWarningsOfTCErr err >>= locatedWarnings path))
+ where
+  -- Agda's own rendering of `ReadFileError` (Parser/Monad.hs:265-268) follows
+  -- its human-readable line with the raw Haskell exception, which repeats the
+  -- path and adds `openBinaryFile:` noise; render the reason ourselves.
+  message = case err of
+    ParserError (ReadFileError file readError) ->
+      pure $
+        "Cannot read file "
+          <> Text.pack (filePath (rangeFilePath file))
+          <> ": "
+          <> Text.pack (ioeGetErrorString readError)
+          <> "."
+    _ -> Text.pack <$> renderError err
 
 -- Apply Agda's own warning filtering (removes unsolved-constraint warnings in
 -- the case that there are no "interesting" constraints), then pair each
