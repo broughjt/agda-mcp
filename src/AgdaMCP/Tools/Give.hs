@@ -1,6 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module AgdaMCP.Tools.Give (giveTool) where
+module AgdaMCP.Tools.Give (
+  Edit (..),
+  GiveOutcome (..),
+  GiveResponse (..),
+  RejectedGive (..),
+  giveTool,
+  renderGiveResponse,
+) where
 
 import Control.Applicative ((<|>))
 import Control.Exception (

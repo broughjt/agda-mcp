@@ -56,6 +56,9 @@ test-suite agda-mcp-test
   type: exitcode-stdio-1.0
   main-is: Main.hs
   hs-source-dirs: test
+  other-modules:
+    AgdaMCP.Tools.GiveTest
+    AgdaMCP.Tools.LoadTest
   build-depends:
       Agda == 2.8.*,
       agda-mcp,
