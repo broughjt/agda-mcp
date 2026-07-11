@@ -80,14 +80,12 @@ import AgdaMCP.Session (
   runInteractionM,
  )
 import AgdaMCP.Tools.Common (
-  AgdaError,
+  AgdaError (AgdaError),
   NonFatalError (..),
   Warning (..),
   failedTail,
   locatedWarnings,
-  renderAgdaError,
   resolveError,
-  section,
   withSession,
  )
 
@@ -179,32 +177,40 @@ parseLoadArguments arguments =
 
 renderLoadResponse :: LoadResponse -> Text
 renderLoadResponse (Loaded goals hiddenMetavariables warnings errors) =
-  Text.intercalate "\n" $
+  Text.intercalate "\n\n" $
     concat
-      [ ["Load succeeded. Open goals: " <> Text.pack (show (length goals)) <> "."]
-      , map renderGoal goals
-      , section
+      [ case goals of
+          [] | null hiddenMetavariables -> ["Load succeeded (no goals)."]
+          [] -> []
+          _ -> [Text.intercalate "\n" (map renderGoal goals)]
+      , loadSection
           "Unsolved hidden metas:"
           (map renderHiddenMetavariable hiddenMetavariables)
-      , section "Non-fatal errors:" [e | NonFatalError (_, e) <- errors]
-      , section "Warnings:" [w | Warning (_, w) <- warnings]
+      , loadSection "Non-fatal errors:" [e | NonFatalError (_, e) <- errors]
+      , loadSection "Warnings:" [w | Warning (_, w) <- warnings]
       ]
-renderLoadResponse (LoadFailed err) =
-  Text.intercalate "\n" ("Load failed:" : renderAgdaError err)
+renderLoadResponse (LoadFailed (AgdaError message _ warnings)) =
+  Text.intercalate "\n\n" $
+    ["Load failed:", message]
+      <> loadSection "Warnings:" [w | Warning (_, w) <- warnings]
 renderLoadResponse LoadStale =
   "The file changed on disk while Agda was checking it, so the result \
   \was discarded. Please load the file again."
 
+loadSection :: Text -> [Text] -> [Text]
+loadSection _ [] = []
+loadSection title items = [title <> "\n\n" <> Text.intercalate "\n" items]
+
 renderGoal :: Goal -> Text
 renderGoal (Goal ii sp shape) =
   renderShape ("?" <> Text.pack (show (interactionId ii))) shape
-    <> "  (at "
+    <> " (at "
     <> renderSpan sp
     <> ")"
 
 renderHiddenMetavariable :: HiddenMetavariable -> Text
 renderHiddenMetavariable (HiddenMetavariable name sp shape) =
-  renderShape name shape <> maybe "" (\s -> "  (at " <> renderSpan s <> ")") sp
+  renderShape name shape <> maybe "" (\s -> " (at " <> renderSpan s <> ")") sp
 
 renderShape :: Text -> GoalShape -> Text
 renderShape name (GoalOfType ty) = name <> " : " <> ty

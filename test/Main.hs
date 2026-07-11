@@ -39,7 +39,7 @@ successTests =
     "successful loads"
     [ testCase "no open goals" $
         renderLoadResponse (Loaded [] [] [] [])
-          @?= "Load succeeded. Open goals: 0."
+          @?= "Load succeeded (no goals)."
     , testCase "one typed goal" $
         renderLoadResponse
           ( Loaded
@@ -52,8 +52,7 @@ successTests =
               []
               []
           )
-          @?= "Load succeeded. Open goals: 1.\n\
-              \?0 : Nat  (at 8:12-8:16)"
+          @?= "?0 : Nat (at 8:12-8:16)"
     , testCase "multiple goals" $
         renderLoadResponse
           ( Loaded
@@ -70,9 +69,8 @@ successTests =
               []
               []
           )
-          @?= "Load succeeded. Open goals: 2.\n\
-              \?0 : false ＝ false  (at 75:29-75:34)\n\
-              \?1 : true ＝ true  (at 76:27-76:32)"
+          @?= "?0 : false ＝ false (at 75:29-75:34)\n\
+              \?1 : true ＝ true (at 76:27-76:32)"
     , testCase "sort goal" $
         renderLoadResponse
           ( Loaded
@@ -85,8 +83,7 @@ successTests =
               []
               []
           )
-          @?= "Load succeeded. Open goals: 1.\n\
-              \Sort ?3  (at 4:7-4:8)"
+          @?= "Sort ?3 (at 4:7-4:8)"
     , testCase "hidden typed metavariable with a source span" $
         renderLoadResponse
           ( Loaded
@@ -99,14 +96,12 @@ successTests =
               []
               []
           )
-          @?= "Load succeeded. Open goals: 0.\n\n\
-              \Unsolved hidden metas:\n\
-              \_A_12 : Set  (at 3:5-3:6)"
+          @?= "Unsolved hidden metas:\n\n\
+              \_A_12 : Set (at 3:5-3:6)"
     , testCase "hidden sort metavariable without a source span" $
         renderLoadResponse
           (Loaded [] [HiddenMetavariable "_a_7" Nothing GoalSort] [] [])
-          @?= "Load succeeded. Open goals: 0.\n\n\
-              \Unsolved hidden metas:\n\
+          @?= "Unsolved hidden metas:\n\n\
               \Sort _a_7"
     , testCase "non-fatal errors" $
         renderLoadResponse
@@ -121,8 +116,8 @@ successTests =
               , NonFatalError (Nothing, "second non-fatal error")
               ]
           )
-          @?= "Load succeeded. Open goals: 0.\n\n\
-              \Non-fatal errors:\n\
+          @?= "Load succeeded (no goals).\n\n\
+              \Non-fatal errors:\n\n\
               \first non-fatal error\n\
               \second non-fatal error"
     , testCase "warnings" $
@@ -138,8 +133,8 @@ successTests =
               ]
               []
           )
-          @?= "Load succeeded. Open goals: 0.\n\n\
-              \Warnings:\n\
+          @?= "Load succeeded (no goals).\n\n\
+              \Warnings:\n\n\
               \Unreachable clause\n\
               \Import has unsolved metas"
     , testCase "all success sections in their output order" $
@@ -154,13 +149,12 @@ successTests =
               [Warning (Nothing, "warning text")]
               [NonFatalError (Nothing, "non-fatal error text")]
           )
-          @?= "Load succeeded. Open goals: 1.\n\
-              \?2 : A  (at 20:4-20:9)\n\n\
-              \Unsolved hidden metas:\n\
+          @?= "?2 : A (at 20:4-20:9)\n\n\
+              \Unsolved hidden metas:\n\n\
               \_B_4 : Set₁\n\n\
-              \Non-fatal errors:\n\
+              \Non-fatal errors:\n\n\
               \non-fatal error text\n\n\
-              \Warnings:\n\
+              \Warnings:\n\n\
               \warning text"
     , testCase "multiline rendered payloads" $
         renderLoadResponse
@@ -174,10 +168,9 @@ successTests =
               [Warning (Nothing, "warning heading\nwarning detail")]
               []
           )
-          @?= "Load succeeded. Open goals: 1.\n\
-              \?4 : A\n\
-              \  → B  (at 30:8-30:13)\n\n\
-              \Warnings:\n\
+          @?= "?4 : A\n\
+              \  → B (at 30:8-30:13)\n\n\
+              \Warnings:\n\n\
               \warning heading\n\
               \warning detail"
     ]
@@ -189,7 +182,7 @@ failureTests =
     [ testCase "plain error" $
         renderLoadResponse
           (LoadFailed (AgdaError "Cannot read file Example.agda" Nothing []))
-          @?= "Load failed:\nCannot read file Example.agda"
+          @?= "Load failed:\n\nCannot read file Example.agda"
     , testCase "multiline Agda error" $
         renderLoadResponse
           ( LoadFailed
@@ -199,7 +192,7 @@ failureTests =
                   []
               )
           )
-          @?= "Load failed:\n\
+          @?= "Load failed:\n\n\
               \Example.agda:3,1-4\n\
               \Not in scope: bad"
     , testCase "error with warnings" $
@@ -216,10 +209,10 @@ failureTests =
                   ]
               )
           )
-          @?= "Load failed:\n\
+          @?= "Load failed:\n\n\
               \Example.agda:7,5-8\n\
               \Unequal terms\n\n\
-              \Warnings:\n\
+              \Warnings:\n\n\
               \Deprecated syntax\n\
               \Imported module warning"
     ]
