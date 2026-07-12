@@ -94,7 +94,11 @@ loadTool =
   toolHandler
     "load"
     ( Just
-        "Load and typecheck an Agda source file. Reports open goals, unsolved hidden metavariables, non-fatal errors, and warnings on success, or the Agda error if checking fails. Relative paths are resolved against the server process's working directory; prefer an absolute path when that directory may be ambiguous."
+        "Load and typecheck an Agda source file. Reports open goals, unsolved \
+        \hidden metavariables, non-fatal errors, and warnings on success, or \
+        \the Agda error if checking fails. Relative paths are resolved against \
+        \the server process's working directory; prefer an absolute path when \
+        \that directory may be ambiguous."
     )
     ( InputSchema
         "object"
@@ -105,7 +109,10 @@ loadTool =
                 , object
                     [ "type" .= ("string" :: Text)
                     , "description"
-                        .= ( "Path to an Agda source file (.agda, but also literate formats such as .lagda.md, .lagda.tex, .lagda.typ, etc). Relative paths are resolved against the server process's working directory." ::
+                        .= ( "Path to an Agda source file (.agda, but also \
+                             \literate formats such as .lagda.md, .lagda.tex, \
+                             \.lagda.typ, etc). Relative paths are resolved \
+                             \against the server process's working directory." ::
                                Text
                            )
                     ]
@@ -131,7 +138,7 @@ data LoadResponse
   | LoadStale
   deriving (Show)
 
--- A goal (visible interaction metavariable) of the loaded file.
+-- A goal (visible interaction metavariable) in a loaded file.
 data Goal = Goal
   { goalId :: InteractionId
   , goalSpan :: Span
@@ -139,9 +146,12 @@ data Goal = Goal
   }
   deriving (Show)
 
--- There are only two shapes goals and hidden metavariables can take: either
--- `OfType` for a typing judgment or `JustSort` for `IsSort`. The other
--- constructors of `OutputConstraint` are produced for `Cmd_constraints`, never
+-- Goals and hidden metavariables use only two of `OutputConstraint`'s
+-- constructors. The goals response list is built exclusively by `typeOfMetaMI`
+-- (BasicOps.hs:889-921), which does cases on `Judgement`'s two
+-- constructors. `HasType` becomes `OfType` and `IsSort` becomes `JustSort`. The
+-- remaining `OutputConstraint` constructors are used when reifying constraints
+-- (`Cmd_constraints`, the `Cmd_goal_type_context*` family of commands), never
 -- for goals.
 data GoalShape
   = GoalOfType Text
@@ -161,9 +171,7 @@ data HiddenMetavariable = HiddenMetavariable
 load :: LoadRequest -> SessionM LoadResponse
 load (LoadRequest path) = do
   responses <-
-    runInteractionM $
-      const $
-        IOTCM path None Direct (Cmd_load path [])
+    runInteractionM $ const $ IOTCM path None Direct (Cmd_load path [])
   parsed <- fromProtocolResult $ parseLoadResponses responses
   resolved <- liftTCM $ resolveLoad path responses parsed
   fromProtocolResult resolved
@@ -171,7 +179,7 @@ load (LoadRequest path) = do
 parseLoadArguments :: Maybe (Map Text Value) -> Either Text LoadRequest
 parseLoadArguments arguments =
   case Map.lookup "path" (fromMaybe Map.empty arguments) of
-    Just (Aeson.String path) -> Right (LoadRequest (Text.unpack path))
+    Just (Aeson.String path) -> Right $ LoadRequest $ Text.unpack path
     _ -> Left "Missing or invalid 'path' argument: expected a string"
 
 renderLoadResponse :: LoadResponse -> Text
@@ -196,10 +204,6 @@ renderLoadResponse LoadStale =
   "The file changed on disk while Agda was checking it, so the result \
   \was discarded. Please load the file again."
 
--- A one-line summary of everything the sections below report. "Succeeded"
--- would overclaim in the presence of non-fatal errors (the module may still
--- fail when imported, e.g. `SafeFlagPostulate`), so those demote the verb to
--- "completed" and are counted in the verb phrase rather than the list.
 loadedHeader ::
   [Goal] -> [HiddenMetavariable] -> [Warning] -> [NonFatalError] -> Text
 loadedHeader goals hiddenMetavariables warnings errors =
@@ -226,15 +230,16 @@ loadSection _ [] = []
 loadSection title items = [title <> "\n\n" <> Text.intercalate "\n" items]
 
 renderGoal :: Goal -> Text
-renderGoal (Goal ii sp shape) =
-  renderShape ("?" <> Text.pack (show (interactionId ii))) shape
+renderGoal (Goal goalId span shape) =
+  renderShape ("?" <> Text.pack $ show $ interactionId goalId) shape
     <> " (at "
-    <> renderSpan sp
+    <> renderSpan span
     <> ")"
 
 renderHiddenMetavariable :: HiddenMetavariable -> Text
-renderHiddenMetavariable (HiddenMetavariable name sp shape) =
-  renderShape name shape <> maybe "" (\s -> " (at " <> renderSpan s <> ")") sp
+renderHiddenMetavariable (HiddenMetavariable name maybeSpan shape) =
+  renderShape name shape
+    <> maybe "" (\s -> " (at " <> renderSpan s <> ")") maybeSpan
 
 renderShape :: Text -> GoalShape -> Text
 renderShape name (GoalOfType ty) = name <> " : " <> ty
@@ -301,13 +306,8 @@ parseLoadResponses responses = maybe (Left violation) Right (exchange responses)
 
   failed = failedTail LoadError
 
--- Extract everything the pure `LoadResponse` needs from the type-checking
--- monad: rendered goal types (in each goal's scope), interaction ranges, and
--- rendered warnings. This runs on the worker right after the command
--- executed, when the TCState still matches the exchange.
-
--- Using the TCM, convert a `LoadResponse'` to a `LoadResponse`. We collect the rendered goal types
--- TODO:
+-- Extract everything a `LoadResponse` needs while in the context of the
+-- type-checking monad.
 resolveLoad ::
   FilePath ->
   [Response] ->
@@ -372,7 +372,7 @@ resolveLoad path responses response = do
           <$> lift (withMetaId (nmid metavariable) $ prettyATop ty)
     JustSort metavariable ->
       hiddenMetavariable metavariable (pure GoalSort)
-    -- Unreachable per the `GoalShape` note.
+    -- Unreachable, see the `GoalShape` note.
     _ -> throwError violation
    where
     hiddenMetavariable metavariable shape =

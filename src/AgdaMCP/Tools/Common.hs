@@ -127,11 +127,10 @@ locatedWarnings path warnings =
 renderAgdaError :: AgdaError -> [Text]
 renderAgdaError (AgdaError message _ warnings) =
   message : section "Warnings:" [w | Warning (_, w) <- warnings]
-
--- A titled block of lines, omitted entirely when there are no items.
-section :: Text -> [Text] -> [Text]
-section _ [] = []
-section title items = "" : title : items
+ where
+  section :: Text -> [Text] -> [Text]
+  section _ [] = []
+  section title items = "" : title : items
 
 -- The error tail shared by the load and give grammars (handleErr,
 -- InteractionTop.hs:216-242). `handleErr` only ever wraps `Info_GenericError`
