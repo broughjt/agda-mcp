@@ -3,11 +3,10 @@
 
 module AgdaMCP.Server (runServer) where
 
-import MCP.Server
-import System.IO (BufferMode (..), hSetBuffering, stderr, stdin, stdout)
-
 import AgdaMCP.Session (Session)
 import AgdaMCP.Tools (giveTool, loadTool)
+import MCP.Server
+import System.IO (BufferMode (..), hSetBuffering, stderr, stdin, stdout)
 
 runServer :: Session -> IO ()
 runServer session = do

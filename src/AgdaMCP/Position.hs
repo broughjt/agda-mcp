@@ -24,6 +24,12 @@ import Agda.Utils.Maybe.Strict qualified as Strict
 -- Agda-normalized source text (what `applyEdits` splices with; see the note
 -- in `commit` about normalization) and the 1-based line/column that Agda
 -- prints. Agda's `posPos` is 1-based, hence the shift in `toPos`.
+
+-- A position in a loaded file, consisting of a zero-based offset into the
+-- Agda-normalized source text (see comment in `commit`) and one-based
+-- line/column that Agda prints.
+--
+-- We do this because Agda's one-based positions are weird.
 data Position = Position
   { positionOffset :: Int
   , positionLine :: Int
@@ -31,7 +37,7 @@ data Position = Position
   }
   deriving (Eq, Show)
 
--- A contiguous part of the loaded file: start inclusive, end exclusive.
+-- A contiguous part of the loaded file with start inclusive and end exclusive.
 data Span = Span
   { spanStart :: Position
   , spanEnd :: Position
@@ -52,13 +58,10 @@ toSpan i =
     (toPosition (Agda.Syntax.Position.iStart i))
     (toPosition (Agda.Syntax.Position.iEnd i))
 
--- A `Span` is only meaningful against a loaded file, so ranges that lie
--- elsewhere (warnings can point into imported modules) or have no interval
--- convert to `Nothing`.
 fileSpan :: AbsolutePath -> Agda.Syntax.Position.Range -> Maybe Span
 fileSpan p r = do
-  rangeFile <- Strict.toLazy (Agda.Syntax.Position.rangeFile r)
-  guard (Agda.Syntax.Position.rangeFilePath rangeFile == p)
+  rangeFile <- Strict.toLazy $ Agda.Syntax.Position.rangeFile r
+  guard $ Agda.Syntax.Position.rangeFilePath rangeFile == p
   toSpan <$> Agda.Syntax.Position.rangeToInterval r
 
 spanText :: Text -> Span -> Text

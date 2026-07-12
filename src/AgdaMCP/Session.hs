@@ -53,40 +53,34 @@ data ProtocolViolation a = ProtocolViolation
   }
   deriving (Foldable, Functor, Show, Traversable)
 
--- A protocol violation is a bug in agda-mcp. `fromProtocolResult` throws it and we
--- deliberately catch it nowhere: it propagates out of the tool handler,
--- through the transport loop, and kills the process with the encoded
--- exchange dumped to stderr.
+-- A `ProtocolViolation` is a always a bug in agda-mcp. We shouldn't treat them
+-- as runtime recoverable--if we encounter one we should not attempt to recover,
+-- but instead die loudly with good debugging information.
 instance Exception (ProtocolViolation Value)
 
 -- An Agda session as a value, consisting of the type-checker state paired with
 -- the interaction-level command state. `liftCommandM` threads them through one
--- `runTCM`, in the same way Agda's own REPL loop does per command (`maybeAbort`,
--- InteractionTop.hs:305-322).
+-- `runTCM`, in the same way Agda's own REPL loop does per command
+-- (`maybeAbort`, InteractionTop.hs:305-322).
+
+-- It turns out all you need to run Agda commands (in the TCM monad) is
+-- `TCState` and `CommandState`. Once you have that, you can run Agda commands
+-- without needing channels, locks, or threading (which is what I was doing
+-- before I understand this).
 data Session = Session TCState CommandState
 
 type SessionM = StateT Session IO
 
 newSession :: IO Session
 newSession = do
-  -- The queue is inert; nothing ever reads it. We just need to pass it because
-  -- `CommandState` has a `commandQueue` field. Normally, it is Agda's REPL-loop
-  -- delivery and Cmd_abort mechanism, but we purposefully don't use either of
-  -- these.
+  -- The queue is a inert--nothing ever uses it. We just need to pass it because
+  -- `CommandState` has a `commandQueue` field which needs to be
+  -- initialized. Normally, Agda runs in a separate thread and receives commands
+  -- over a channel, but we deliberately avoid that here.
   queue <- CommandQueue <$> newTChanIO <*> newTVarIO Nothing
-  state <- initStateIO
-  (commandState, tcState) <- runTCM initEnv state $ do
-    handleCommand_ (lift $ setCommandLineOptions defaultOptions)
-      `evalStateT` initCommandState queue
-    options <- commandLineOptions
-    pure
-      (initCommandState queue)
-        { optionsOnReload = options {optAbsoluteIncludePaths = []}
-        }
-  pure (Session tcState commandState)
+  tcState <- initStateIO
+  pure $ Session tcState $ initCommandState queue
 
--- Lift Agda's interaction monad into a session computation, threading both
--- pieces of persistent state through the action.
 liftCommandM :: CommandM a -> SessionM a
 liftCommandM action = StateT $ \(Session tcState commandState) ->
   ( \((result, commandState'), tcState') ->
@@ -94,15 +88,10 @@ liftCommandM action = StateT $ \(Session tcState commandState) ->
   )
     <$> runTCM initEnv tcState (runStateT action commandState)
 
--- Lift a plain type-checking computation. It can inspect and update the
--- session's TCState while leaving its CommandState unchanged.
 liftTCM :: TCM a -> SessionM a
 liftTCM = liftCommandM . lift
 
--- Run one typed interaction command and collect every response it emits. The
--- callback and collector are fresh per call. The callback stored in the
--- resulting TCState closes over this call's collector, but the next call
--- overwrites it before running anything.
+-- Run one typed interaction command and collect every response it emits.
 runInteractionM :: IOTCM -> SessionM [Response]
 runInteractionM command = do
   collector <- liftIO $ newIORef []
@@ -112,14 +101,11 @@ runInteractionM command = do
     runInteraction command
   liftIO $ reverse <$> readIORef collector
 
--- Eliminate the result of a response parser or resolver. A mismatch is
--- encoded while the post-command TCState is current, then thrown uncaught as
--- a bug in agda-mcp.
+-- Helper for throwing on a potential `ProtocolViolation`, which should be
+-- treated as fatal.
 fromProtocolResult ::
   Either (ProtocolViolation Response) a -> SessionM a
 fromProtocolResult = either throwProtocolViolation pure
  where
   throwProtocolViolation violation =
-    -- TODO: Use regular pretty printing (`ofPrettyTCM`) instead of JSON
-    -- version?
     liftTCM (traverse encodeTCM violation) >>= liftIO . throwIO

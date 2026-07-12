@@ -1,10 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies #-}
--- MCPHandlerState/MCPHandlerUser are open type families the mcp library
--- requires every application to instantiate; the instances are necessarily
--- orphans (the library's own example does the same). They live here rather
--- than in AgdaMCP.Server because the tool handlers below this module need
--- `MCPHandlerState = Session` in scope to access the session.
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 module AgdaMCP.Tools.Common (
@@ -92,13 +87,14 @@ type instance MCPHandlerState = Session
 type instance MCPHandlerUser = ()
 
 -- Run a session action against the session stored in the MCP server state,
--- storing the successor session back. The transports never run two handlers
--- concurrently (stdio is a serial loop; HTTP runs each handler inside
--- `modifyMVar` over the whole server state), so this get/run/put is atomic.
+-- storing the successor session back. The transports layer never run two
+-- handlers concurrently (stdio is a serial loop and HTTP runs each handler
+-- inside `modifyMVar` over the whole server state), so the get/run/put sequence
+-- is atomic.
 --
 -- A `ProtocolViolation` thrown mid-action (a bug in agda-mcp; see
--- `AgdaMCP.Session`) skips the put and propagates out of the handler,
--- killing the process. We deliberately catch it nowhere.
+-- `AgdaMCP.Session`) skips the put and propagates out of the handler, killing
+-- the process. We deliberately catch it nowhere.
 withSession :: SessionM a -> MCPServerT a
 withSession action = do
   -- Side note: I think the shape of `withSession` is an instance of a more
@@ -126,22 +122,23 @@ newtype Warning = Warning (Maybe Span, Text)
 newtype NonFatalError = NonFatalError (Maybe Span, Text)
   deriving (Show)
 
+-- Mirroring `prettyError` (Errors.hs:102-113).
+-- TODO: Why
 resolveError :: AbsolutePath -> TCErr -> TCM AgdaError
-resolveError path err =
+resolveError path e =
   AgdaError
-    -- Mirroring `prettyError` (Errors.hs:102-113): if an error strikes while
-    -- rendering the error, fall back to Agda's renderer, which recovers
-    -- internally.
-    <$> (message `catchError` \_ -> Text.pack <$> renderError err)
-    <*> pure (fileSpan path (getRange err))
-    <*> (map Warning <$> (getAllWarningsOfTCErr err >>= locatedWarnings path))
+    -- If an error occurs while rendering the message, fall back to Agda's
+    -- renderer, which recovers internally.
+    <$> (message `catchError` (const $ Text.pack <$> renderError e))
+    <*> pure (fileSpan path $ getRange e)
+    <*> (map Warning <$> (getAllWarningsOfTCErr e >>= locatedWarnings path))
  where
   -- Bespoke renderings of the error cases whose stock header line bakes in
   -- an absolute path and Agda's dotted range format. Each mirrors its Agda
   -- counterpart with the header rebuilt by `renderLocation`; the bodies are
   -- Agda's own, so ranges *inside* them keep Agda's format (no rendering
   -- hook exists at that depth — accepted residual).
-  message = case err of
+  message = case e of
     -- `NonFatalErrors` bundles warning-level errors (e.g. --safe violations
     -- promoted to an error at the end of checking); Agda renders it as the
     -- bare warnings with no error header (Errors.hs:141-144). Ours reuses
@@ -194,7 +191,7 @@ resolveError path err =
                 <> Text.pack (take 30 (errInput parseError) <> "...")
             else Text.pack (errMsg parseError)
         ]
-    _ -> Text.pack <$> renderError err
+    _ -> Text.pack <$> renderError e
 
   header location kind = maybe kind (\l -> l <> ": " <> kind) location
 
