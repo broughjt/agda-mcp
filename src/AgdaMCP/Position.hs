@@ -8,7 +8,6 @@ module AgdaMCP.Position (
   renderSpan,
   spanLength,
   spanText,
-  toPosition,
   toSpan,
 ) where
 
