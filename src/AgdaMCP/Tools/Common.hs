@@ -7,10 +7,10 @@ module AgdaMCP.Tools.Common (
   NonFatalError (..),
   Warning (..),
   failedTail,
+  goalName,
   locatedWarnings,
   renderAgdaError,
   resolveError,
-  section,
   withSession,
 ) where
 
@@ -35,6 +35,7 @@ import Agda.Interaction.Response (
   Response_boot (..),
   Status (..),
  )
+import Agda.Syntax.Common (InteractionId (..))
 import Agda.Syntax.Common.Pretty (render)
 import Agda.Syntax.Parser.Monad (ParseError (ReadFileError))
 import Agda.Syntax.Position (getRange, rangeFilePath)
@@ -89,6 +90,10 @@ newtype Warning = Warning (Maybe Span, Text)
 
 newtype NonFatalError = NonFatalError (Maybe Span, Text)
   deriving (Show)
+
+-- A goal's user-facing name (e.g. `?0`).
+goalName :: InteractionId -> Text
+goalName goal = "?" <> Text.pack (show (interactionId goal))
 
 resolveError :: AbsolutePath -> TCErr -> TCM AgdaError
 resolveError path e =

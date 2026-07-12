@@ -99,6 +99,7 @@ import AgdaMCP.Tools.Common (
   AgdaError (AgdaError),
   Warning (Warning),
   failedTail,
+  goalName,
   resolveError,
   withSession,
  )
@@ -486,8 +487,8 @@ renderGiveOutcome (GiveApplied edits) =
  where
   count = Text.pack (show (length edits))
 renderGiveOutcome (GiveRejected (RejectedGive goal holeSpan err batch)) =
-  "Give rejected for ?"
-    <> Text.pack (show (interactionId goal))
+  "Give rejected for "
+    <> goalName goal
     <> maybe "." (\s -> " (at " <> renderSpan s <> ").") holeSpan
     <> "\n\n"
     <> renderRejectedError err
@@ -495,15 +496,15 @@ renderGiveOutcome (GiveRejected (RejectedGive goal holeSpan err batch)) =
     <> renderUnapplied batch
     <> " Reloaded to resync:"
 renderGiveOutcome (GiveUnknownGoal goal batch) =
-  "No such goal ?"
-    <> Text.pack (show (interactionId goal))
+  "No such goal "
+    <> goalName goal
     <> " in the loaded file. Goal IDs renumber after every edit or reload; \
        \use the IDs from the fresh list below.\n\n"
     <> renderUnapplied batch
     <> " Reloaded to resync:"
 renderGiveOutcome (GiveStale edit) =
-  "Edit refused for ?"
-    <> Text.pack (show (interactionId (editGoal edit)))
+  "Edit refused for "
+    <> goalName (editGoal edit)
     <> " at "
     <> renderSpan (editSpan edit)
     <> ".\n\nThe target no longer contains a hole, so the file may have changed \
@@ -541,7 +542,7 @@ renderAppliedEdit edit
         , "  (was at " <> renderSpan (editSpan edit) <> ")"
         ]
  where
-  header = "?" <> Text.pack (show (interactionId (editGoal edit)))
+  header = goalName (editGoal edit)
   submitted = editSubmitted edit
   written = editText edit
 

@@ -46,7 +46,7 @@ import Agda.Interaction.Response (
  )
 import Agda.Syntax.Abstract (Expr)
 import Agda.Syntax.Abstract.Pretty (prettyATop)
-import Agda.Syntax.Common (InteractionId (..))
+import Agda.Syntax.Common (InteractionId)
 import Agda.Syntax.Common.Aspect (TokenBased (..))
 import Agda.Syntax.Common.Pretty (render)
 import Agda.Syntax.Position qualified
@@ -84,6 +84,7 @@ import AgdaMCP.Tools.Common (
   NonFatalError (..),
   Warning (..),
   failedTail,
+  goalName,
   locatedWarnings,
   resolveError,
   withSession,
@@ -231,7 +232,7 @@ loadSection title items = [title <> "\n\n" <> Text.intercalate "\n" items]
 
 renderGoal :: Goal -> Text
 renderGoal (Goal goalId span shape) =
-  renderShape ("?" <> Text.pack $ show $ interactionId goalId) shape
+  renderShape (goalName goalId) shape
     <> " (at "
     <> renderSpan span
     <> ")"
@@ -295,7 +296,7 @@ parseLoadResponses responses = maybe (Left violation) Right (exchange responses)
       loaded status goals warnings rest
   checking rest = failed rest
 
-  loaded _ goals warnings [Resp_InteractionPoints ids] = Just (LoadGoals goals warnings ids)
+  loaded _ goals warnings [Resp_InteractionPoints pointIds] = Just (LoadGoals goals warnings pointIds)
   -- No interaction points means the file's mtime changed during checking, so
   -- `cmd_load'` discarded them and left `theCurrentFile` unset. Hence the
   -- `Status` must report the file as unchecked. If it claims checked, our
@@ -316,15 +317,15 @@ resolveLoad ::
 resolveLoad path responses response = do
   path' <- liftIO (absolute path)
   case response of
-    LoadGoals (visible, hidden) warnings ids -> runExceptT $ do
+    LoadGoals (visible, hidden) warnings pointIds -> runExceptT $ do
       goals <- traverse toGoal visible
 
-      -- The `goals` and interaction ids from `Resp_InteractionPoints` read the
+      -- The `goals` and interaction IDs from `Resp_InteractionPoints` read the
       -- same `stIteractionPoints` moments apart, but
       -- `getInteractionIdsAndMetas` drops solved points and points without
       -- metavariables, so we check that our goal ids in `goals` are a subset of
-      -- the points in `ids` (drawn from `Resp_InteractionPoints`).
-      when (any ((`notElem` ids) . goalId) goals) $
+      -- the points in `pointIds` (drawn from `Resp_InteractionPoints`).
+      when (any ((`notElem` pointIds) . goalId) goals) $
         throwError violation
 
       hiddenMetavariables <- traverse (toHiddenMetavariable path') hidden
@@ -340,21 +341,21 @@ resolveLoad path responses response = do
   toGoal ::
     OutputConstraint Expr InteractionId ->
     ExceptT (ProtocolViolation Response) TCM Goal
-  toGoal (OfType i ty) =
+  toGoal (OfType pointId ty) =
     -- Render in the interaction point's scope, as the Emacs and JSON
     -- frontends both do (showGoals, BasicOps.hs:830-836; JSONTop.hs:309).
-    Goal i
-      <$> spanOf i
+    Goal pointId
+      <$> spanOf pointId
       <*> ( GoalOfType . Text.pack . render
-              <$> lift (withInteractionId i $ prettyATop ty)
+              <$> lift (withInteractionId pointId $ prettyATop ty)
           )
-  toGoal (JustSort i) = flip (Goal i) GoalSort <$> spanOf i
+  toGoal (JustSort pointId) = flip (Goal pointId) GoalSort <$> spanOf pointId
   -- Unreachable; see the `GoalShape` note.
   toGoal _ = throwError violation
 
   spanOf :: InteractionId -> ExceptT (ProtocolViolation Response) TCM Span
-  spanOf i =
-    lift (getInteractionRange i)
+  spanOf pointId =
+    lift (getInteractionRange pointId)
       >>= maybe
         -- Assertion: interaction ids have ranges
         (throwError violation)
@@ -372,7 +373,7 @@ resolveLoad path responses response = do
           <$> lift (withMetaId (nmid metavariable) $ prettyATop ty)
     JustSort metavariable ->
       hiddenMetavariable metavariable (pure GoalSort)
-    -- Unreachable, see the `GoalShape` note.
+    -- Unreachable; see the `GoalShape` note.
     _ -> throwError violation
    where
     hiddenMetavariable metavariable shape =
