@@ -5,7 +5,7 @@ module AgdaMCP.Tools.Give (
   Edit (..),
   GiveOutcome (..),
   GiveResponse (..),
-  RejectedGive (..),
+  GiveRejection (..),
   giveTool,
   renderGiveResponse,
 ) where
@@ -115,7 +115,19 @@ giveTool =
   toolHandler
     "give"
     ( Just
-        "Fill one or more goals in an Agda source file. Takes the file `path` and a non-empty list of `gives`, each containing a goal interaction ID and an expression. Gives are checked in order as an atomic batch: if one is rejected, subsequent gives are skipped and no source edits are written. Before writing, the server verifies that every recorded span still contains a hole. If the file changed, it refuses all edits. Every checked outcome is followed by a reload to resync. Interaction IDs may change, so use the goals in the fresh result. Successful gives write Agda’s elaborated, pretty-printed expressions, which may differ from the submitted text. The result reports both when they differ. Relative paths are resolved against the server process’s working directory. Prefer an absolute path when that directory may be ambiguous."
+        "Fill one or more goals in an Agda source file. Takes the file `path` \
+        \and a non-empty list of `gives`, each containing a goal interaction \
+        \ID and an expression. Gives are checked in order as an atomic batch: \
+        \if one is rejected, subsequent gives are skipped and no source edits \
+        \are written. Before writing, the server verifies that every recorded \
+        \span still contains a hole. If the file changed, it refuses all \
+        \edits. Every checked outcome is followed by a reload to resync. \
+        \Interaction IDs may change, so use the goals in the fresh result. \
+        \Successful gives write Agda’s elaborated, pretty-printed expressions, \
+        \which may differ from the submitted text. The result reports both \
+        \when they differ. Relative paths are resolved against the server \
+        \process’s working directory. Prefer an absolute path when that \
+        \directory may be ambiguous."
     )
     ( InputSchema
         "object"
@@ -126,7 +138,10 @@ giveTool =
                 , object
                     [ "type" .= ("string" :: Text)
                     , "description"
-                        .= ( "Path to an Agda source file, including literate Agda files. Relative paths are resolved against the server process's working directory." ::
+                        .= ( "Path to an Agda source file (.agda, but also \
+                             \literate formats such as .lagda.md, .lagda.tex, \
+                             \.lagda.typ, etc). Relative paths are resolved \
+                             \against the server process's working directory." ::
                                Text
                            )
                     ]
@@ -190,29 +205,28 @@ data GiveOutcome
   = -- Every give typechecked and its edit was spliced into the file.
     GiveApplied [Edit]
   | -- A give failed to typecheck, so the file was left untouched.
-    GiveRejected RejectedGive
+    GiveRejected GiveRejection
   | -- A give named an interaction ID that doesn't exist in the loaded file
-    -- (Agda's `NoSuchInteractionPoint`), so no expression was ever checked.
+    -- (Agda's `NoSuchInteractionPoint`), so the current and subsequent give
+    -- expressions were not checked.
     GiveUnknownGoal InteractionId BatchPosition
   | -- A goal's recorded span no longer holds a hole (the file changed on disk
     -- since it was loaded), so the edit was refused and nothing was written.
     GiveStale Edit
-  | -- Reading or writing the file failed (deleted, permissions, disk full, ...).
-    -- The write is atomic, so a failed write leaves the original
-    -- intact. Carries the rendered I/O error.
+  | -- Reading or writing the file failed (deleted, permissions, disk full, -- ...).
     GiveIOError Text
   deriving (Show)
 
--- A single give Agda did not apply: either the goal's interaction ID doesn't
--- exist (nothing was checked), or checking the expression failed (with the
--- hole span when the interaction point exists, and the error).
+-- The reason a single give was not applied. Either the goal's interaction ID
+-- didn't exist, or checking the expression failed.
 data GiveFailure
   = UnknownGoal
   | GiveFailed (Maybe Span) AgdaError
 
--- A give that failed to typecheck: the goal, its hole span when the interaction
--- point still exists, its error, and where it sat in the batch.
-data RejectedGive = RejectedGive
+-- Information about why a give failed to typecheck, including the goal, the
+-- goal's span (when the interaction point still exists), its error, and its
+-- position in the batch of gives.
+data GiveRejection = GiveRejection
   { rejectedGoal :: InteractionId
   , rejectedSpan :: Maybe Span
   , rejectedError :: AgdaError
@@ -220,9 +234,9 @@ data RejectedGive = RejectedGive
   }
   deriving (Show)
 
--- Where a failing give sat in its batch: earlier gives had already been
--- checked and are discarded by the resync reload; later gives were skipped
--- without being checked.
+-- Position in a batch of gives, consisting of the number of dicarded gives that
+-- had already been checked, and the number of gives which were skipped without
+-- being checked.
 data BatchPosition = BatchPosition
   { batchDiscarded :: Int
   , batchSkipped :: Int
@@ -273,14 +287,15 @@ parseGiveArguments arguments = do
 
 -- Run each give against the current loaded state in order, accumulating the
 -- edits. The gives don't touch the file yet, so every edit's span stays valid
--- against the current source. If any give fails to typecheck, we stop, roll
+-- against the current source. If any give fails to type check, we stop, roll
 -- back the in-flight gives by reloading the (untouched) file, and report the
 -- failure. If each give is successful, we write the accumulated edits back to
 -- disk.
 give :: GiveRequest -> SessionM GiveResponse
 give (GiveRequest path items) =
   runExceptT (traverse runGive (zip [0 :: Int ..] items))
-    >>= either resync (\edits -> liftIO (commit edits) >>= resync)
+    >>= either pure (liftIO . commit)
+    >>= resync
  where
   runGive :: (Int, GiveItem) -> ExceptT GiveOutcome SessionM Edit
   runGive (index, (goal, expression)) =
@@ -291,7 +306,7 @@ give (GiveRequest path items) =
   fromFailure :: InteractionId -> BatchPosition -> GiveFailure -> GiveOutcome
   fromFailure goal batch UnknownGoal = GiveUnknownGoal goal batch
   fromFailure goal batch (GiveFailed holeSpan err) =
-    GiveRejected (RejectedGive goal holeSpan err batch)
+    GiveRejected (GiveRejection goal holeSpan err batch)
 
   -- All gives succeeded. Read the source, confirm every recorded span still
   -- holds a hole (if not, the file change under us since the last load, so
@@ -371,7 +386,7 @@ resolveGive ::
         (Either GiveFailure Edit)
     )
 resolveGive path goal _ _ (Left e)
-  -- A give for a non-existent interaction ID fails `give_gen`'s first failable
+  -- A give for a non-existent interaction ID fails `give_gen`'s first fallible
   -- operation, `lookupInteractionPoint` (MetaVars.hs:638-640), with this
   -- dedicated constructor. Match it before rendering so it isn't mistakenly
   -- reported as an error in the submitted expression.
@@ -382,8 +397,8 @@ resolveGive path goal _ _ (Left e)
       path' <- liftIO (absolute path)
       interactionPoints <- useR stInteractionPoints
       let holeSpan = BiMap.lookup goal interactionPoints >>= fileSpan path' . ipRange
-      err <- resolveError path' e
-      pure (Right (Left (GiveFailed holeSpan err)))
+      e' <- resolveError path' e
+      pure (Right (Left (GiveFailed holeSpan e')))
 resolveGive _ goal submitted responses (Right s) =
   maybe
     missing
@@ -486,12 +501,12 @@ renderGiveOutcome (GiveApplied edits) =
     <> "\n\nFile updated and reloaded; interaction IDs may have changed."
  where
   count = Text.pack (show (length edits))
-renderGiveOutcome (GiveRejected (RejectedGive goal holeSpan err batch)) =
+renderGiveOutcome (GiveRejected (GiveRejection goal holeSpan e batch)) =
   "Give rejected for "
     <> goalName goal
     <> maybe "." (\s -> " (at " <> renderSpan s <> ").") holeSpan
     <> "\n\n"
-    <> renderRejectedError err
+    <> renderRejectedError e
     <> "\n\n"
     <> renderUnapplied batch
     <> " Reloaded to resync:"
@@ -509,9 +524,9 @@ renderGiveOutcome (GiveStale edit) =
     <> renderSpan (editSpan edit)
     <> ".\n\nThe target no longer contains a hole, so the file may have changed \
        \since it was loaded. No changes were made.\n\nReloaded to resync:"
-renderGiveOutcome (GiveIOError err) =
+renderGiveOutcome (GiveIOError e) =
   "Could not access the file on disk:\n\n"
-    <> err
+    <> e
     <> "\n\nNo changes were written.\n\nReloaded to resync:"
 
 -- The span labels read "was at", since they point to the hole in the file as it
