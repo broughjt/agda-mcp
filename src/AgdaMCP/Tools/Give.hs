@@ -21,15 +21,12 @@ import Control.Exception (
 import Control.Monad (when)
 import Control.Monad.Except (ExceptT (..), runExceptT)
 import Control.Monad.IO.Class (liftIO)
-import Data.Aeson (Value, object, (.=))
-import Data.Aeson qualified as Aeson
-import Data.Aeson.KeyMap qualified as KeyMap
+import Data.Aeson (FromJSON (parseJSON), Value, object, withObject, (.:), (.=))
+import Data.Aeson.Types qualified as Aeson
 import Data.Bifunctor (Bifunctor (first))
 import Data.Foldable (toList)
 import Data.List (find, nub, sortBy)
-import Data.Map (Map)
 import Data.Map qualified as Map
-import Data.Maybe (fromMaybe)
 import Data.Ord (Down (..), comparing)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -100,6 +97,7 @@ import AgdaMCP.Tools.Common (
   Warning (Warning),
   failedTail,
   goalName,
+  parseArguments,
   resolveError,
   withSession,
  )
@@ -188,7 +186,7 @@ giveTool =
             . withSession
             . give
         )
-        . parseGiveArguments
+        . parseArguments
     )
 
 data GiveRequest = GiveRequest FilePath [GiveItem]
@@ -245,45 +243,32 @@ data BatchPosition = BatchPosition
 
 type GiveItem = (InteractionId, String)
 
--- TODO: Does Aeson have macros or derives that do this for us?
-parseGiveArguments :: Maybe (Map Text Value) -> Either Text GiveRequest
-parseGiveArguments arguments = do
-  let arguments' = fromMaybe Map.empty arguments
-  path <- case Map.lookup "path" arguments' of
-    Just (Aeson.String p) -> Right (Text.unpack p)
-    _ -> Left "Missing or invalid 'path' argument: expected a string"
-  givesValue <-
-    maybe
-      (Left "Missing 'gives' argument: expected an array")
-      Right
-      (Map.lookup "gives" arguments')
-  items <- parseGiveItems givesValue
-  when (null items) $
-    Left "The 'gives' array must contain at least one {goal, expression} object"
-  let goals = [g | (g, _) <- items]
-  when (length (nub goals) /= length goals) $
-    Left "Duplicate goal ids in 'gives'; each goal may be given only once per call"
-  pure (GiveRequest path items)
- where
-  parseGiveItems :: Value -> Either Text [GiveItem]
-  parseGiveItems (Aeson.Array items) = traverse parseGiveItem (toList items)
-  parseGiveItems _ = Left "'gives' must be an array of {goal, expression} objects"
+instance FromJSON GiveRequest where
+  parseJSON = withObject "give arguments" $ \o -> do
+    path <- o .: "path"
+    items <- Aeson.explicitParseField parseGiveItems o "gives"
+    when (null items) $
+      fail "The 'gives' array must contain at least one {goal, expression} object"
+    let goals = [g | (g, _) <- items]
+    when (length (nub goals) /= length goals) $
+      fail "Duplicate goal ids in 'gives'; each goal may be given only once per call"
+    pure (GiveRequest path items)
 
-  parseGiveItem :: Value -> Either Text GiveItem
-  parseGiveItem (Aeson.Object fields) = do
-    goal <- case KeyMap.lookup "goal" fields of
-      Just value -> case Aeson.fromJSON value of
-        Aeson.Success n -> Right (InteractionId n)
-        Aeson.Error _ -> Left "A 'gives' entry has a non-integer 'goal'"
-      Nothing -> Left "A 'gives' entry is missing 'goal'"
-    expression <- case KeyMap.lookup "expression" fields of
-      Just (Aeson.String s) -> Right (Text.strip s)
-      Just _ -> Left "A 'gives' entry has a non-string 'expression'"
-      Nothing -> Left "A 'gives' entry is missing 'expression'"
-    when (Text.null expression) $
-      Left "A 'gives' entry has an empty 'expression'"
-    pure (goal, (Text.unpack expression))
-  parseGiveItem _ = Left "Each 'gives' entry must be a {goal, expression} object"
+-- `Aeson.listParser` doesn't record each element's index in the error path, so
+-- we annotate it ourselves.
+parseGiveItems :: Value -> Aeson.Parser [GiveItem]
+parseGiveItems = Aeson.withArray "gives" $ \items ->
+  traverse
+    (\(i, item) -> parseGiveItem item Aeson.<?> Aeson.Index i)
+    (zip [0 ..] (toList items))
+
+parseGiveItem :: Value -> Aeson.Parser GiveItem
+parseGiveItem = withObject "give" $ \o -> do
+  goal <- InteractionId <$> o .: "goal"
+  expression <- Text.strip <$> o .: "expression"
+  when (Text.null expression) $
+    fail "'expression' is empty or whitespace-only"
+  pure (goal, Text.unpack expression)
 
 -- Run each give against the current loaded state in order, accumulating the
 -- edits. The gives don't touch the file yet, so every edit's span stays valid

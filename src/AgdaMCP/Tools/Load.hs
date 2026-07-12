@@ -15,11 +15,8 @@ import Control.Monad (when)
 import Control.Monad.Except (ExceptT, runExceptT, throwError)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (lift)
-import Data.Aeson (Value, object, (.=))
-import Data.Aeson qualified as Aeson
-import Data.Map (Map)
+import Data.Aeson (FromJSON (parseJSON), object, withObject, (.:), (.=))
 import Data.Map qualified as Map
-import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import MCP.Server (
@@ -86,6 +83,7 @@ import AgdaMCP.Tools.Common (
   failedTail,
   goalName,
   locatedWarnings,
+  parseArguments,
   resolveError,
   withSession,
  )
@@ -128,10 +126,13 @@ loadTool =
             . withSession
             . load
         )
-        . parseLoadArguments
+        . parseArguments
     )
 
 data LoadRequest = LoadRequest FilePath
+
+instance FromJSON LoadRequest where
+  parseJSON = withObject "load arguments" $ \o -> LoadRequest <$> o .: "path"
 
 data LoadResponse
   = Loaded [Goal] [HiddenMetavariable] [Warning] [NonFatalError]
@@ -176,12 +177,6 @@ load (LoadRequest path) = do
   parsed <- fromProtocolResult $ parseLoadResponses responses
   resolved <- liftTCM $ resolveLoad path responses parsed
   fromProtocolResult resolved
-
-parseLoadArguments :: Maybe (Map Text Value) -> Either Text LoadRequest
-parseLoadArguments arguments =
-  case Map.lookup "path" (fromMaybe Map.empty arguments) of
-    Just (Aeson.String path) -> Right $ LoadRequest $ Text.unpack path
-    _ -> Left "Missing or invalid 'path' argument: expected a string"
 
 renderLoadResponse :: LoadResponse -> Text
 renderLoadResponse (Loaded goals hiddenMetavariables warnings errors) =
@@ -231,10 +226,10 @@ loadSection _ [] = []
 loadSection title items = [title <> "\n\n" <> Text.intercalate "\n" items]
 
 renderGoal :: Goal -> Text
-renderGoal (Goal goalId span shape) =
+renderGoal (Goal goalId s shape) =
   renderShape (goalName goalId) shape
     <> " (at "
-    <> renderSpan span
+    <> renderSpan s
     <> ")"
 
 renderHiddenMetavariable :: HiddenMetavariable -> Text

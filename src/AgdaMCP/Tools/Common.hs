@@ -9,6 +9,7 @@ module AgdaMCP.Tools.Common (
   failedTail,
   goalName,
   locatedWarnings,
+  parseArguments,
   renderAgdaError,
   resolveError,
   withSession,
@@ -16,6 +17,13 @@ module AgdaMCP.Tools.Common (
 
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (get, put, runStateT)
+import Data.Aeson (FromJSON, Value)
+import Data.Aeson.KeyMap qualified as KeyMap
+import Data.Aeson.Types qualified as Aeson
+import Data.Bifunctor (first)
+import Data.Map (Map)
+import Data.Map qualified as Map
+import Data.Maybe (fromMaybe)
 import Data.Set (Set)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -74,6 +82,17 @@ withSession action = do
   (result, session) <- liftIO $ runStateT action (mcp_handler_state state)
   put state {mcp_handler_state = session}
   pure result
+
+-- Tool arguments arrive from the MCP layer as a map of top-level fields.
+-- Rebuild the JSON object and decode it with the request type's `FromJSON`
+-- instance. A `Left` is agent misuse.
+parseArguments :: (FromJSON a) => Maybe (Map Text Value) -> Either Text a
+parseArguments =
+  first Text.pack
+    . Aeson.parseEither Aeson.parseJSON
+    . Aeson.Object
+    . KeyMap.fromMapText
+    . fromMaybe Map.empty
 
 -- A failed Agda command, consisting of the rendered error text, a span in the
 -- loaded file (if indeed the error occurred there, `Nothing` otherwise), and a
