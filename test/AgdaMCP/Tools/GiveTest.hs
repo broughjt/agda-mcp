@@ -16,8 +16,8 @@ import AgdaMCP.Tools.Give (
   BatchPosition (BatchPosition),
   Edit (Edit),
   GiveOutcome (GiveApplied, GiveIOError, GiveRejected, GiveStale, GiveUnknownGoal),
+  GiveRejection (GiveRejection),
   GiveResponse (GiveResponse),
-  RejectedGive (RejectedGive),
   renderGiveResponse,
  )
 import AgdaMCP.Tools.Load (
@@ -141,7 +141,7 @@ rejectedTests =
         renderGiveResponse
           ( GiveResponse
               ( GiveRejected
-                  ( RejectedGive
+                  ( GiveRejection
                       (InteractionId 1)
                       (Just (Span (Position 6 76 27) (Position 11 76 32)))
                       ( AgdaError
@@ -180,7 +180,7 @@ rejectedTests =
         renderGiveResponse
           ( GiveResponse
               ( GiveRejected
-                  ( RejectedGive
+                  ( GiveRejection
                       (InteractionId 3)
                       (Just (Span (Position 20 40 7) (Position 25 40 12)))
                       ( AgdaError
@@ -214,7 +214,7 @@ rejectedTests =
         renderGiveResponse
           ( GiveResponse
               ( GiveRejected
-                  ( RejectedGive
+                  ( GiveRejection
                       (InteractionId 0)
                       Nothing
                       ( AgdaError
@@ -243,7 +243,7 @@ rejectedTests =
         renderGiveResponse
           ( GiveResponse
               ( GiveRejected
-                  ( RejectedGive
+                  ( GiveRejection
                       (InteractionId 0)
                       Nothing
                       ( AgdaError
@@ -273,7 +273,7 @@ rejectedTests =
         renderGiveResponse
           ( GiveResponse
               ( GiveRejected
-                  ( RejectedGive
+                  ( GiveRejection
                       (InteractionId 2)
                       Nothing
                       ( AgdaError

@@ -48,6 +48,7 @@
             pkgs.hlint
             pkgs.ghcid
             pkgs.zlib
+            haskellPackages.tasty-hunit
           ];
         };
       }
