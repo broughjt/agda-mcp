@@ -11,7 +11,7 @@ import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 import Agda.Syntax.Common (InteractionId (InteractionId))
 
-import AgdaMCP.Tools.Common (AgdaError (..), Warning (..))
+import AgdaMCP.Tools.Common (AgdaError (..), NonFatalError (..), Warning (..))
 import AgdaMCP.Tools.Load (
   Goal (..),
   GoalShape (..),
@@ -81,6 +81,19 @@ tests =
                 Just s -> spanCoordinates s @?= ((9, 1), (9, 14))
                 Nothing -> assertFailure "expected the warning's span"
             other -> assertFailure ("expected one warning, got " <> show other)
+    , testCase "safe postulate populates non-fatal errors" $
+        withFixture "SafePostulate.agda" $ \path -> do
+          response <- runSession (load (LoadRequest path))
+          (goals, _, warnings, errors) <- expectLoaded response
+          map goalId goals @?= []
+          warnings @?= []
+          case errors of
+            [NonFatalError (Just s, message)] -> do
+              spanCoordinates s @?= ((4, 11), (4, 25))
+              assertBool "mentions SafeFlagPostulate" $
+                "SafeFlagPostulate" `Text.isInfixOf` message
+            other ->
+              assertFailure ("expected one located non-fatal error, got " <> show other)
     , testCase "unsolved metas populate hidden metavariables" $
         withFixture "UnsolvedMetas.agda" $ \path -> do
           response <- runSession (load (LoadRequest path))
