@@ -74,7 +74,7 @@ import Agda.TypeChecking.Monad.Base (
   InteractionPoint (ipRange),
   Interface (iSourceHash),
   ModuleInfo (miInterface),
-  TCErr (TypeError),
+  TCErr (IOException, TypeError),
   TypeError (InteractionError),
   stInteractionPoints,
   useR,
@@ -236,11 +236,14 @@ data GiveBug
 
 instance Exception GiveBug
 
--- The reason a single give was not applied. Either the goal's interaction ID
--- didn't exist, or checking the expression failed.
+-- The reason a single give was not applied. The goal may not exist, checking
+-- the expression may have failed, or an environmental I/O error may have
+-- interrupted Agda after it accepted the expression but before the command
+-- completed.
 data GiveFailure
   = UnknownGoal
   | GiveFailed (Maybe Span) AgdaError
+  | GiveIOFailed Text
 
 -- Information about why a give failed to typecheck, including the goal, the
 -- goal's span (when the interaction point still exists), its error, and its
@@ -333,6 +336,7 @@ give (GiveRequest path items) = do
   fromFailure goal batch UnknownGoal = GiveUnknownGoal goal batch
   fromFailure goal batch (GiveFailed holeSpan err) =
     GiveRejected (GiveRejection goal holeSpan err batch)
+  fromFailure _ _ (GiveIOFailed message) = GiveIOError message
 
   -- All gives succeeded. Read the source and confirm it is still the source
   -- Agda checked (equal hashes of the normalized text). If not, the recorded
@@ -454,6 +458,8 @@ resolveGive ::
         (Either GiveFailure Edit)
     )
 resolveGive path goal _ _ (Left e)
+  | IOException _ _ exception <- e =
+      pure $ Right $ Left $ GiveIOFailed $ Text.pack $ displayException exception
   -- A give for a non-existent interaction ID fails `give_gen`'s first fallible
   -- operation, `lookupInteractionPoint` (MetaVars.hs:638-640), with this
   -- dedicated constructor. Match it before rendering so it isn't mistakenly
@@ -503,6 +509,7 @@ applyEdits source edits =
 {- The grammar of a Cmd_give response list, following the Agda 2.8.0 source:
 
 exchange := given
+          | givenThenIOFailed
           | failed
 
 given := GiveAction (goal, Give_String s) -- give_gen:1021; noRange => Give_String (:1010)
@@ -514,6 +521,15 @@ failed := DisplayInfo (Info_Error)       -- handleErr:216-242, as in matchLoad
           JumpToError?                   -- with noRange, typically absent
           HighlightingInfo
           Status                         -- hardcoded sChecked=False (:239)
+
+givenThenIOFailed := GiveAction (goal, Give_String s)
+                     failed(IOException)
+                                      -- `Cmd_metas` calls `displayStatus`
+                                      -- after emitting GiveAction. `status`
+                                      -- reads the current file's mtime, so an
+                                      -- environmental file-access failure can
+                                      -- occur here. Agda rolls the command
+                                      -- state back before emitting failed.
 
 When the IOTCM's file is not `theCurrentFile`, `runInteraction` prefixes the
 exchange with an implicit cmd_load' (Status ClearRunningInfo ClearHighlighting
@@ -530,7 +546,7 @@ parseGiveResponses goal responses = maybe (Left violation) Right (exchange respo
  where
   violation = ProtocolViolation "Cmd_give" responses
 
-  exchange rest = given rest <|> failed rest
+  exchange rest = given rest <|> givenThenIOFailed rest <|> failed rest
 
   given
     ( Resp_GiveAction goal' (Give_String s)
@@ -540,6 +556,13 @@ parseGiveResponses goal responses = maybe (Left violation) Right (exchange respo
       )
       | goal' == goal = Just (Right s)
   given _ = Nothing
+
+  givenThenIOFailed
+    (Resp_GiveAction goal' (Give_String _) : rest)
+      | goal' == goal
+      , Just e@IOException {} <- failedTail id rest =
+          Just (Left e)
+  givenThenIOFailed _ = Nothing
 
   failed = failedTail Left
 
@@ -581,7 +604,7 @@ renderGiveOutcome GiveFileChanged =
   "Edits refused: the file on disk is not the version Agda loaded (it changed \
   \since the last load). No changes were made.\n\nReloaded to resync:"
 renderGiveOutcome (GiveIOError e) =
-  "Could not access the file on disk:\n\n"
+  "The give could not be completed because the source file could not be accessed:\n\n"
     <> e
     <> "\n\nNo changes were written.\n\nReloaded to resync:"
 

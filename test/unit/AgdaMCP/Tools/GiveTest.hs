@@ -418,7 +418,7 @@ ioErrorTests =
                   (AgdaError "Cannot read file Example.agda" Nothing [])
               )
           )
-          @?= "Could not access the file on disk:\n\n\
+          @?= "The give could not be completed because the source file could not be accessed:\n\n\
               \Example.agda: permission denied\n\
               \while opening the file\n\n\
               \No changes were written.\n\n\

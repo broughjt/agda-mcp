@@ -247,15 +247,7 @@ tests =
           map goalId goals @?= []
           after <- ByteString.readFile path
           after @?= withHoleGiven "y" edited
-    , -- KNOWN RED (2026-07-13): pins the taxonomy-desired behavior, but the
-      -- server currently dies with a ProtocolViolation instead. The give
-      -- succeeds in memory (`Resp_GiveAction` arrives), then Agda's post-give
-      -- `Cmd_metas` display calls `status`, whose `getModificationTime` on the
-      -- deleted file throws; `handleCommand` rolls the state back and emits the
-      -- standard failed tail, so the exchange is `GiveAction : failed` — a
-      -- shape `parseGiveResponses` rejects. Fix (and the outcome this should
-      -- map to) pending design discussion; see TESTING.md's coverage-gap notes.
-      testCase "deleting the file between load and give is an IO error" $
+    , testCase "deleting the file between load and give is an IO error" $
         withFixture "Hole.agda" $ \path -> do
           response <- runSession $ do
             _ <- load (LoadRequest path)
