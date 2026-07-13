@@ -26,6 +26,7 @@ import AgdaMCP.Tools.Give (
  )
 import AgdaMCP.Tools.Load (
   ContextEntry (..),
+  ContextEntryAttributes (..),
   Goal (..),
   GoalShape (..),
   LoadRequest (..),
@@ -488,7 +489,7 @@ tests =
           after @?= withHoleGiven "_" original
     , testCase "resync report carries the remaining goals' contexts" $
         -- Contexts re-anchor the agent across the id renumbering the give
-        -- causes: the surviving goals renumber to ?0 and ?1, and each line
+        -- causes. The surviving goals renumber to ?0 and ?1, and each line
         -- still shows what is in scope there.
         withFixture "Context.agda" $ \path -> do
           response <-
@@ -502,9 +503,21 @@ tests =
           map goalId goals @?= [InteractionId 0, InteractionId 1]
           map goalContext goals
             @?= [
-                  [ ContextEntry "x" "x" "Nat" Nothing True
-                  , ContextEntry "y" "y" "Nat" Nothing True
+                  [ ContextEntry "x" True "x" "Nat" Nothing True noAttributes
+                  , ContextEntry "y" True "y" "Nat" Nothing True noAttributes
                   ]
-                , [ContextEntry "one" "one" "Nat" (Just "suc zero") True]
+                ,
+                  [ ContextEntry
+                      "one"
+                      True
+                      "one"
+                      "Nat"
+                      (Just "suc zero")
+                      True
+                      noAttributes
+                  ]
                 ]
     ]
+
+noAttributes :: ContextEntryAttributes
+noAttributes = ContextEntryAttributes Nothing False Nothing Nothing False

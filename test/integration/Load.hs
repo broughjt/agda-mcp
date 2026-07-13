@@ -14,6 +14,7 @@ import Agda.Syntax.Common (InteractionId (InteractionId))
 import AgdaMCP.Tools.Common (AgdaError (..), NonFatalError (..), Warning (..))
 import AgdaMCP.Tools.Load (
   ContextEntry (..),
+  ContextEntryAttributes (..),
   Goal (..),
   GoalShape (..),
   HiddenMetavariable (..),
@@ -44,8 +45,8 @@ tests =
               ty @?= "Nat"
               spanCoordinates s @?= ((8, 12), (8, 16))
               context
-                @?= [ ContextEntry "x" "x" "Nat" Nothing True
-                    , ContextEntry "y" "y" "Nat" Nothing True
+                @?= [ ContextEntry "x" True "x" "Nat" Nothing True noAttributes
+                    , ContextEntry "y" True "y" "Nat" Nothing True noAttributes
                     ]
             other -> assertFailure ("expected one typed goal, got " <> show other)
           assertBool "no metas, warnings, or non-fatal errors" $
@@ -56,12 +57,45 @@ tests =
           (goals, _, _, _) <- expectLoaded response
           -- The two-variable goal checks telescope order: outermost first.
           map goalContext goals
-            @?= [ [ContextEntry "y" "y" "Nat" Nothing True]
+            @?= [ [ContextEntry "y" True "y" "Nat" Nothing True noAttributes]
                 ,
-                  [ ContextEntry "x" "x" "Nat" Nothing True
-                  , ContextEntry "y" "y" "Nat" Nothing True
+                  [ ContextEntry "x" True "x" "Nat" Nothing True noAttributes
+                  , ContextEntry "y" True "y" "Nat" Nothing True noAttributes
                   ]
-                , [ContextEntry "one" "one" "Nat" (Just "suc zero") True]
+                ,
+                  [ ContextEntry
+                      "one"
+                      True
+                      "one"
+                      "Nat"
+                      (Just "suc zero")
+                      True
+                      noAttributes
+                  ]
+                ]
+    , testCase "goal contexts carry erased and instance attributes" $
+        withFixture "ContextAttributes.agda" $ \path -> do
+          response <- runSession $ load $ LoadRequest path
+          (goals, _, _, _) <- expectLoaded response
+          map goalContext goals
+            @?= [
+                  [ ContextEntry
+                      "erased"
+                      True
+                      "erased"
+                      "Nat"
+                      Nothing
+                      True
+                      (ContextEntryAttributes Nothing True Nothing Nothing False)
+                  , ContextEntry
+                      "instanceArg"
+                      True
+                      "instanceArg"
+                      "Nat"
+                      Nothing
+                      True
+                      (ContextEntryAttributes Nothing False Nothing Nothing True)
+                  ]
                 ]
     , testCase "type error carries a file span" $
         withFixture "TypeError.agda" $ \path -> do
@@ -164,3 +198,6 @@ tests =
             other ->
               assertFailure ("expected one sort-shaped metavariable, got " <> show other)
     ]
+
+noAttributes :: ContextEntryAttributes
+noAttributes = ContextEntryAttributes Nothing False Nothing Nothing False

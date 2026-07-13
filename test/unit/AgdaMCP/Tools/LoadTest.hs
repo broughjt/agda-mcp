@@ -20,6 +20,7 @@ import AgdaMCP.Tools.Common (
  )
 import AgdaMCP.Tools.Load (
   ContextEntry (ContextEntry),
+  ContextEntryAttributes (ContextEntryAttributes),
   Goal (Goal),
   GoalShape (GoalOfType, GoalSort),
   HiddenMetavariable (HiddenMetavariable),
@@ -103,16 +104,23 @@ successTests =
           )
           @?= "Load succeeded: 1 goal.\n\n\
               \Sort ?3 (at 4:7-8)"
-    , testCase "goal context renders as an indented block" $
+    , testCase "goal context renders innermost-first as an indented block" $
         renderLoadResponse
           ( Loaded
               [ Goal
                   (InteractionId 0)
                   (Span (Position 0 9 18) (Position 0 9 22))
                   (GoalOfType "Nat")
-                  [ ContextEntry "x" "x" "Nat" Nothing True
-                  , ContextEntry "y" "y" "Vec A n" Nothing False
-                  , ContextEntry "one" "one" "Nat" (Just "suc zero") True
+                  [ ContextEntry "x" True "x" "Nat" Nothing True noAttributes
+                  , ContextEntry "y" False "y" "Vec A n" Nothing False noAttributes
+                  , ContextEntry
+                      "one"
+                      True
+                      "one"
+                      "Nat"
+                      (Just "suc zero")
+                      True
+                      noAttributes
                   ]
               ]
               []
@@ -121,10 +129,10 @@ successTests =
           )
           @?= "Load succeeded: 1 goal.\n\n\
               \?0 : Nat (at 9:18-22)\n\
-              \  x : Nat\n\
-              \  y : Vec A n (not in scope)\n\
               \  one : Nat\n\
-              \  one = suc zero"
+              \  one = suc zero\n\
+              \  y : Vec A n (not in scope)\n\
+              \  x : Nat"
     , testCase "shadowed context name displays its reified alias" $
         renderLoadResponse
           ( Loaded
@@ -132,7 +140,7 @@ successTests =
                   (InteractionId 1)
                   (Span (Position 0 4 11) (Position 0 4 15))
                   (GoalOfType "Nat")
-                  [ContextEntry "n = n₁" "n₁" "Nat" Nothing True]
+                  [ContextEntry "n" True "n₁" "Nat" Nothing True noAttributes]
               ]
               []
               []
@@ -141,6 +149,52 @@ successTests =
           @?= "Load succeeded: 1 goal.\n\n\
               \?1 : Nat (at 4:11-15)\n\
               \  n = n₁ : Nat"
+    , testCase "out-of-scope original name displays only the reified name" $
+        renderLoadResponse
+          ( Loaded
+              [ Goal
+                  (InteractionId 1)
+                  (Span (Position 0 4 11) (Position 0 4 15))
+                  (GoalOfType "Nat")
+                  [ContextEntry "n" False "n₁" "Nat" Nothing True noAttributes]
+              ]
+              []
+              []
+              []
+          )
+          @?= "Load succeeded: 1 goal.\n\n\
+              \?1 : Nat (at 4:11-15)\n\
+              \  n₁ : Nat"
+    , testCase "context binder attributes follow the Emacs layout" $
+        renderLoadResponse
+          ( Loaded
+              [ Goal
+                  (InteractionId 0)
+                  (Span (Position 0 5 3) (Position 0 5 7))
+                  (GoalOfType "B")
+                  [ ContextEntry
+                      "x"
+                      True
+                      "x₁"
+                      "A"
+                      Nothing
+                      False
+                      ( ContextEntryAttributes
+                          (Just "@♭")
+                          True
+                          (Just "irrelevant")
+                          (Just "positive")
+                          True
+                      )
+                  ]
+              ]
+              []
+              []
+              []
+          )
+          @?= "Load succeeded: 1 goal.\n\n\
+              \?0 : B (at 5:3-7)\n\
+              \  @♭ x = x₁ : A (not in scope, erased, irrelevant, positive, instance)"
     , testCase "multiline context type keeps the block indentation" $
         renderLoadResponse
           ( Loaded
@@ -148,7 +202,7 @@ successTests =
                   (InteractionId 0)
                   (Span (Position 0 6 3) (Position 0 6 7))
                   (GoalOfType "B")
-                  [ContextEntry "f" "f" "A\n→ B" Nothing True]
+                  [ContextEntry "f" True "f" "A\n→ B" Nothing True noAttributes]
               ]
               []
               []
@@ -255,6 +309,9 @@ successTests =
               \warning heading\n\
               \warning detail"
     ]
+
+noAttributes :: ContextEntryAttributes
+noAttributes = ContextEntryAttributes Nothing False Nothing Nothing False
 
 failureTests :: TestTree
 failureTests =
