@@ -39,9 +39,14 @@ tests :: TestTree
 tests =
   testGroup
     "give"
-    [ testCase "single give splices the hole and resyncs to zero goals" $
+    [ testCase "single give uses code-point offsets with non-ASCII source" $
         withFixture "Hole.agda" $ \path -> do
           original <- ByteString.readFile path
+          -- The arrows before the hole are multi-byte in UTF-8. The exact-byte
+          -- assertion below is therefore a check against an accidental use of
+          -- byte offsets in place of Agda's code-point offsets.
+          assertBool "fixture has multi-byte source before the hole" $
+            ByteString.length original > Text.length (decodeUtf8 original)
           response <-
             runSession $
               load (LoadRequest path) *> give (GiveRequest path [(InteractionId 0, "y")])
@@ -55,6 +60,25 @@ tests =
           (goals, _, _, _) <- expectLoaded (giveReload response)
           map goalId goals @?= []
           after <- ByteString.readFile path
+          after @?= withHoleGiven "y" original
+    , testCase "BOM and CRLF source is normalized and spliced correctly" $
+        withFixture "Hole.agda" $ \path -> do
+          original <- ByteString.readFile path
+          let bom = ByteString.pack [0xEF, 0xBB, 0xBF]
+              crlfSource =
+                bom <> encodeUtf8 (Text.replace "\n" "\r\n" (decodeUtf8 original))
+          ByteString.writeFile path crlfSource
+          response <-
+            runSession $
+              load (LoadRequest path) *> give (GiveRequest path [(InteractionId 0, "y")])
+          case giveOutcome response of
+            GiveApplied [_] -> pure ()
+            other -> assertFailure ("expected one applied edit, got " <> show other)
+          (goals, _, _, _) <- expectLoaded (giveReload response)
+          map goalId goals @?= []
+          after <- ByteString.readFile path
+          -- Give writes Agda's normalized view: UTF-8 without a BOM and with
+          -- LF endings.
           after @?= withHoleGiven "y" original
     , testCase "written text is Agda's elaboration of the submitted text" $
         withFixture "Hole.agda" $ \path -> do
@@ -83,6 +107,69 @@ tests =
           map goalId goals @?= []
           after <- ByteString.readFile path
           after @?= withHoleGiven "zero" original
+    , testCase "give preserves prose around a literate Markdown module" $
+        withFixture "Literate.lagda.md" $ \path -> do
+          original <- ByteString.readFile path
+          response <-
+            runSession $
+              load (LoadRequest path) *> give (GiveRequest path [(InteractionId 0, "x")])
+          case giveOutcome response of
+            GiveApplied [_] -> pure ()
+            other -> assertFailure ("expected one applied edit, got " <> show other)
+          (goals, _, _, _) <- expectLoaded (giveReload response)
+          map goalId goals @?= []
+          after <- ByteString.readFile path
+          after @?= withHoleGiven "x" original
+    , testCase "give preserves a missing trailing newline" $
+        withFixture "Hole.agda" $ \path -> do
+          original <- ByteString.readFile path
+          let source = decodeUtf8 original
+          assertBool "fixture ends in a newline" ("\n" `Text.isSuffixOf` source)
+          let eofSource = Text.dropEnd 1 source
+          ByteString.writeFile path (encodeUtf8 eofSource)
+          response <-
+            runSession $
+              load (LoadRequest path) *> give (GiveRequest path [(InteractionId 0, "y")])
+          case giveOutcome response of
+            GiveApplied [_] -> pure ()
+            other -> assertFailure ("expected one applied edit, got " <> show other)
+          (goals, _, _, _) <- expectLoaded (giveReload response)
+          map goalId goals @?= []
+          after <- decodeUtf8 <$> ByteString.readFile path
+          after @?= Text.replace "{!!}" "y" eofSource
+          assertBool "give did not append a newline" (not ("\n" `Text.isSuffixOf` after))
+    , testCase "question-mark hole is spliced over its exact span" $
+        withFixture "Hole.agda" $ \path -> do
+          original <- decodeUtf8 <$> ByteString.readFile path
+          let questionSource = Text.replace "{!!}" "?" original
+          ByteString.writeFile path (encodeUtf8 questionSource)
+          response <-
+            runSession $
+              load (LoadRequest path) *> give (GiveRequest path [(InteractionId 0, "y")])
+          case giveOutcome response of
+            GiveApplied [edit] ->
+              spanCoordinates (editSpan edit) @?= ((8, 12), (8, 13))
+            other -> assertFailure ("expected one applied edit, got " <> show other)
+          (goals, _, _, _) <- expectLoaded (giveReload response)
+          map goalId goals @?= []
+          after <- decodeUtf8 <$> ByteString.readFile path
+          after @?= Text.replace "?" "y" questionSource
+    , testCase "content hole is spliced over its exact span" $
+        withFixture "Hole.agda" $ \path -> do
+          original <- decodeUtf8 <$> ByteString.readFile path
+          let contentSource = Text.replace "{!!}" "{! y !}" original
+          ByteString.writeFile path (encodeUtf8 contentSource)
+          response <-
+            runSession $
+              load (LoadRequest path) *> give (GiveRequest path [(InteractionId 0, "y")])
+          case giveOutcome response of
+            GiveApplied [edit] ->
+              spanCoordinates (editSpan edit) @?= ((8, 12), (8, 19))
+            other -> assertFailure ("expected one applied edit, got " <> show other)
+          (goals, _, _, _) <- expectLoaded (giveReload response)
+          map goalId goals @?= []
+          after <- decodeUtf8 <$> ByteString.readFile path
+          after @?= Text.replace "{! y !}" "y" contentSource
     , testCase "partial give renumbers the remaining goals" $
         withFixture "TwoHoles.agda" $ \path -> do
           original <- ByteString.readFile path
