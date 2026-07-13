@@ -138,7 +138,7 @@ data LoadResponse
   = Loaded [Goal] [HiddenMetavariable] [Warning] [NonFatalError]
   | LoadFailed AgdaError
   | LoadStale
-  deriving (Show)
+  deriving (Eq, Show)
 
 -- A goal (visible interaction metavariable) in a loaded file.
 data Goal = Goal
@@ -146,7 +146,7 @@ data Goal = Goal
   , goalSpan :: Span
   , goalShape :: GoalShape
   }
-  deriving (Show)
+  deriving (Eq, Show)
 
 -- Goals and hidden metavariables use only two of `OutputConstraint`'s
 -- constructors. The goals response list is built exclusively by `typeOfMetaMI`
@@ -158,7 +158,7 @@ data Goal = Goal
 data GoalShape
   = GoalOfType Text
   | GoalSort
-  deriving (Show)
+  deriving (Eq, Show)
 
 -- An unsolved implicit ("hidden") metavariable reported alongside the goals,
 -- consisting of a rendered name, a span location (when in the loaded file), and
@@ -168,7 +168,7 @@ data HiddenMetavariable = HiddenMetavariable
   , hiddenMetavariableSpan :: Maybe Span
   , hiddenMetavariableShape :: GoalShape
   }
-  deriving (Show)
+  deriving (Eq, Show)
 
 load :: LoadRequest -> SessionM LoadResponse
 load (LoadRequest path) = do

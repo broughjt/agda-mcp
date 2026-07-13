@@ -4,9 +4,12 @@ module AgdaMCP.Tools.Give (
   BatchPosition (..),
   Edit (..),
   GiveBug (..),
+  GiveItem,
   GiveOutcome (..),
+  GiveRequest (..),
   GiveResponse (..),
   GiveRejection (..),
+  give,
   giveTool,
   renderGiveResponse,
 ) where

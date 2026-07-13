@@ -108,7 +108,7 @@ newtype Warning = Warning (Maybe Span, Text)
   deriving (Eq, Show)
 
 newtype NonFatalError = NonFatalError (Maybe Span, Text)
-  deriving (Show)
+  deriving (Eq, Show)
 
 -- A goal's user-facing name (e.g. `?0`).
 goalName :: InteractionId -> Text

@@ -10,7 +10,7 @@ main :: IO ()
 main =
   defaultMain $
     testGroup
-      "rendering"
+      "unit"
       [ PositionTest.tests
       , LoadTest.tests
       , GiveTest.tests

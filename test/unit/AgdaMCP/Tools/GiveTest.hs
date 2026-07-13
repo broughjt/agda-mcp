@@ -2,8 +2,12 @@
 
 module AgdaMCP.Tools.GiveTest (tests) where
 
+import Data.Aeson (Value, object, toJSON, (.=))
+import Data.Map qualified as Map
+import Data.Text (Text)
+import Data.Text qualified as Text
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (testCase, (@?=))
+import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 import Agda.Syntax.Common (InteractionId (InteractionId))
 
@@ -11,6 +15,7 @@ import AgdaMCP.Position (Position (Position), Span (Span))
 import AgdaMCP.Tools.Common (
   AgdaError (AgdaError),
   Warning (Warning),
+  parseArguments,
  )
 import AgdaMCP.Tools.Give (
   BatchPosition (BatchPosition),
@@ -24,6 +29,7 @@ import AgdaMCP.Tools.Give (
     GiveUnknownGoal
   ),
   GiveRejection (GiveRejection),
+  GiveRequest (GiveRequest),
   GiveResponse (GiveResponse),
   renderGiveResponse,
  )
@@ -35,6 +41,14 @@ import AgdaMCP.Tools.Load (
 
 tests :: TestTree
 tests =
+  testGroup
+    "give"
+    [ renderTests
+    , parseArgumentTests
+    ]
+
+renderTests :: TestTree
+renderTests =
   testGroup
     "renderGiveResponse"
     [ appliedTests
@@ -412,3 +426,83 @@ ioErrorTests =
               \Load failed:\n\n\
               \Cannot read file Example.agda"
     ]
+
+parseArgumentTests :: TestTree
+parseArgumentTests =
+  testGroup
+    "parseArguments"
+    [ testCase "valid request" $
+        case parseGive
+          [ ("path", "/tmp/Hole.agda")
+          , ("gives", toJSON [giveItem (toJSON (0 :: Int)) "y"])
+          ] of
+          Right (GiveRequest path items) -> do
+            path @?= "/tmp/Hole.agda"
+            items @?= [(InteractionId 0, "y")]
+          Left message ->
+            assertFailure ("unexpected parse failure: " <> Text.unpack message)
+    , testCase "non-string path" $
+        expectParseFailure "$.path" $
+          parseGive
+            [ ("path", toJSON (42 :: Int))
+            , ("gives", toJSON [giveItem (toJSON (0 :: Int)) "y"])
+            ]
+    , testCase "empty gives" $
+        expectParseFailure "at least one" $
+          parseGive [("path", "/tmp/Hole.agda"), ("gives", toJSON ([] :: [Value]))]
+    , testCase "string goal carries the element's path" $
+        expectParseFailure "$.gives[0].goal" $
+          parseGive
+            [ ("path", "/tmp/Hole.agda")
+            , ("gives", toJSON [giveItem "0" "y"])
+            ]
+    , testCase "non-integral goal carries the element's path" $
+        expectParseFailure "$.gives[0].goal" $
+          parseGive
+            [ ("path", "/tmp/Hole.agda")
+            , ("gives", toJSON [giveItem (toJSON (1.5 :: Double)) "y"])
+            ]
+    , testCase "duplicate goals" $
+        expectParseFailure "Duplicate goal" $
+          parseGive
+            [ ("path", "/tmp/Hole.agda")
+            ,
+              ( "gives"
+              , toJSON
+                  [ giveItem (toJSON (0 :: Int)) "y"
+                  , giveItem (toJSON (0 :: Int)) "zero"
+                  ]
+              )
+            ]
+    , testCase "blank expression carries the element's path" $
+        expectParseFailure "$.gives[1]" $
+          parseGive
+            [ ("path", "/tmp/Hole.agda")
+            ,
+              ( "gives"
+              , toJSON
+                  [ giveItem (toJSON (0 :: Int)) "y"
+                  , giveItem (toJSON (1 :: Int)) "  \n "
+                  ]
+              )
+            ]
+    ]
+
+parseGive :: [(Text, Value)] -> Either Text GiveRequest
+parseGive = parseArguments . Just . Map.fromList
+
+giveItem :: Value -> Text -> Value
+giveItem goal expression =
+  object ["goal" .= goal, "expression" .= expression]
+
+expectParseFailure :: Text -> Either Text GiveRequest -> IO ()
+expectParseFailure fragment (Left message) =
+  assertBool
+    ( "expected the failure message to mention "
+        <> Text.unpack fragment
+        <> ", got: "
+        <> Text.unpack message
+    )
+    (fragment `Text.isInfixOf` message)
+expectParseFailure _ (Right _) =
+  assertFailure "expected a parse failure, got a parsed request"

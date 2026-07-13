@@ -25,10 +25,8 @@ library
       aeson,
       atomic-write,
       base >= 4.18 && < 5,
-      bytestring,
       containers,
       mcp,
-      mcp-types,
       mtl,
       stm,
       text
@@ -55,20 +53,83 @@ executable agda-mcp
 test-suite agda-mcp-test
   type: exitcode-stdio-1.0
   main-is: Main.hs
-  hs-source-dirs: test
+  hs-source-dirs: test/unit
   other-modules:
     AgdaMCP.PositionTest
     AgdaMCP.Tools.GiveTest
     AgdaMCP.Tools.LoadTest
   build-depends:
       Agda == 2.8.*,
+      aeson,
       agda-mcp,
       base >= 4.18 && < 5,
+      containers,
       tasty,
       tasty-hunit,
       text
   default-language: GHC2021
   ghc-options:
+      -Wall
+      -Wcompat
+      -Wincomplete-record-updates
+      -Wincomplete-uni-patterns
+      -Wmissing-home-modules
+      -Wpartial-fields
+      -Wredundant-constraints
+
+test-suite agda-mcp-integration
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs: test/integration
+  other-modules:
+    Common
+    Give
+    Load
+  build-depends:
+      Agda == 2.8.*,
+      agda-mcp,
+      base >= 4.18 && < 5,
+      bytestring,
+      directory,
+      filepath,
+      mtl,
+      tasty,
+      tasty-hunit,
+      temporary,
+      text
+  default-language: GHC2021
+  ghc-options:
+      -Wall
+      -Wcompat
+      -Wincomplete-record-updates
+      -Wincomplete-uni-patterns
+      -Wmissing-home-modules
+      -Wpartial-fields
+      -Wredundant-constraints
+
+test-suite agda-mcp-end-to-end
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs: test/end-to-end
+  build-tool-depends: agda-mcp:agda-mcp
+  build-depends:
+      aeson,
+      base >= 4.18 && < 5,
+      bytestring,
+      containers,
+      directory,
+      filepath,
+      jsonrpc,
+      mcp-types,
+      process,
+      tasty,
+      tasty-hunit,
+      temporary,
+      text,
+      transformers
+  default-language: GHC2021
+  ghc-options:
+      -threaded
       -Wall
       -Wcompat
       -Wincomplete-record-updates

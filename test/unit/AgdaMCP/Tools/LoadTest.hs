@@ -2,8 +2,12 @@
 
 module AgdaMCP.Tools.LoadTest (tests) where
 
+import Data.Aeson (toJSON)
+import Data.Map qualified as Map
+import Data.Text (Text)
+import Data.Text qualified as Text
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (testCase, (@?=))
+import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 import Agda.Syntax.Common (InteractionId (InteractionId))
 
@@ -12,17 +16,27 @@ import AgdaMCP.Tools.Common (
   AgdaError (AgdaError),
   NonFatalError (NonFatalError),
   Warning (Warning),
+  parseArguments,
  )
 import AgdaMCP.Tools.Load (
   Goal (Goal),
   GoalShape (GoalOfType, GoalSort),
   HiddenMetavariable (HiddenMetavariable),
+  LoadRequest (LoadRequest),
   LoadResponse (LoadFailed, LoadStale, Loaded),
   renderLoadResponse,
  )
 
 tests :: TestTree
 tests =
+  testGroup
+    "load"
+    [ renderTests
+    , parseArgumentTests
+    ]
+
+renderTests :: TestTree
+renderTests =
   testGroup
     "renderLoadResponse"
     [ successTests
@@ -228,3 +242,22 @@ staleTest =
     renderLoadResponse LoadStale
       @?= "The file changed on disk while Agda was checking it, so the result \
           \was discarded. Please load the file again."
+
+parseArgumentTests :: TestTree
+parseArgumentTests =
+  testGroup
+    "parseArguments"
+    [ testCase "valid request" $
+        case parseArguments (Just (Map.fromList [("path", "/tmp/Hole.agda")])) of
+          Right (LoadRequest path) -> path @?= "/tmp/Hole.agda"
+          Left message ->
+            assertFailure ("unexpected parse failure: " <> Text.unpack message)
+    , testCase "non-string path" $
+        case parseArguments (Just (Map.fromList [("path", toJSON (42 :: Int))])) of
+          Right (LoadRequest _) ->
+            assertFailure "expected a parse failure, got a parsed request"
+          Left message ->
+            assertBool
+              ("expected the failure message to mention $.path, got: " <> Text.unpack message)
+              ("$.path" `Text.isInfixOf` (message :: Text))
+    ]
