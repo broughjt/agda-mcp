@@ -13,6 +13,7 @@ import Agda.Syntax.Common (InteractionId (InteractionId))
 
 import AgdaMCP.Tools.Common (AgdaError (..), NonFatalError (..), Warning (..))
 import AgdaMCP.Tools.Load (
+  ContextEntry (..),
   Goal (..),
   GoalShape (..),
   HiddenMetavariable (..),
@@ -38,13 +39,30 @@ tests =
           response <- runSession $ load $ LoadRequest path
           (goals, metas, warnings, errors) <- expectLoaded response
           case goals of
-            [Goal goalId' s (GoalOfType ty)] -> do
+            [Goal goalId' s (GoalOfType ty) context] -> do
               goalId' @?= InteractionId 0
               ty @?= "Nat"
               spanCoordinates s @?= ((8, 12), (8, 16))
+              context
+                @?= [ ContextEntry "x" "x" "Nat" Nothing True
+                    , ContextEntry "y" "y" "Nat" Nothing True
+                    ]
             other -> assertFailure ("expected one typed goal, got " <> show other)
           assertBool "no metas, warnings, or non-fatal errors" $
             null metas && null warnings && null errors
+    , testCase "goal contexts carry pattern variables and let-bindings" $
+        withFixture "Context.agda" $ \path -> do
+          response <- runSession $ load $ LoadRequest path
+          (goals, _, _, _) <- expectLoaded response
+          -- The two-variable goal checks telescope order: outermost first.
+          map goalContext goals
+            @?= [ [ContextEntry "y" "y" "Nat" Nothing True]
+                ,
+                  [ ContextEntry "x" "x" "Nat" Nothing True
+                  , ContextEntry "y" "y" "Nat" Nothing True
+                  ]
+                , [ContextEntry "one" "one" "Nat" (Just "suc zero") True]
+                ]
     , testCase "type error carries a file span" $
         withFixture "TypeError.agda" $ \path -> do
           response <- runSession (load (LoadRequest path))

@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module AgdaMCP.Tools.Load (
+  ContextEntry (..),
   Goal (..),
   GoalShape (..),
   HiddenMetavariable (..),
@@ -32,20 +33,24 @@ import Agda.Interaction.Base (
   IOTCM' (..),
   Interaction' (Cmd_load),
   OutputConstraint_boot (..),
+  Rewrite (AsIs),
  )
+import Agda.Interaction.BasicOps qualified as B
 import Agda.Interaction.Output (OutputConstraint)
 import Agda.Interaction.Response (
   DisplayInfo_boot (..),
   Goals,
   Response,
+  ResponseContextEntry (..),
   Response_boot (..),
   Status (..),
  )
 import Agda.Syntax.Abstract (Expr)
 import Agda.Syntax.Abstract.Pretty (prettyATop)
-import Agda.Syntax.Common (InteractionId)
+import Agda.Syntax.Common (InteractionId, unArg)
 import Agda.Syntax.Common.Aspect (TokenBased (..))
-import Agda.Syntax.Common.Pretty (render)
+import Agda.Syntax.Common.Pretty (prettyShow, render)
+import Agda.Syntax.Concrete.Name (NameInScope (..), isInScope)
 import Agda.Syntax.Position qualified
 import Agda.TypeChecking.Monad (TCM)
 import Agda.TypeChecking.Monad.Base (
@@ -93,10 +98,10 @@ loadTool =
   toolHandler
     "load"
     ( Just
-        "Load and typecheck an Agda source file. Reports open goals, unsolved \
-        \hidden metavariables, non-fatal errors, and warnings on success, or \
-        \the Agda error if checking fails. Relative paths are resolved against \
-        \the server process's working directory; prefer an absolute path when \
+        "Load and typecheck an Agda source file. Reports open goals (each with \
+        \the local context in scope at the goal), unsolved hidden the Agda \
+        \error if checking fails. Relative paths are resolved against the \
+        \server process's working directory; prefer an absolute path when  \
         \that directory may be ambiguous."
     )
     ( InputSchema
@@ -140,11 +145,35 @@ data LoadResponse
   | LoadStale
   deriving (Eq, Show)
 
--- A goal (visible interaction metavariable) in a loaded file.
+-- A goal (visible interaction metavariable) in a loaded file, with the
+-- context (local variables and let-bindings) in scope at the goal.
 data Goal = Goal
   { goalId :: InteractionId
   , goalSpan :: Span
   , goalShape :: GoalShape
+  , goalContext :: [ContextEntry]
+  }
+  deriving (Eq, Show)
+
+-- An entry of a goal's context, decomposed the way JSONTop encodes
+-- `ResponseContextEntry` (JSONTop.hs:96-102): typed structure, rendered
+-- leaves. Entries arrive from `getResponseContext` with local variables
+-- outermost-first followed by let-bindings (contextOfMeta, BasicOps.hs:1099-
+-- 1110; the Emacs frontend reverses them for display, we keep telescope
+-- order).
+data ContextEntry = ContextEntry
+  { contextEntryName :: Text
+  {- ^ Display name, following EmacsTop's `prettyCtxName` rule
+  (EmacsTop.hs:334-339): the reified name, or "original = reified" when
+  the original name is in scope but reifies differently.
+  -}
+  , contextEntryVariable :: Text
+  -- ^ The reified name alone: what an expression at this goal should use.
+  , contextEntryType :: Text
+  , contextEntryValue :: Maybe Text
+  -- ^ The bound value, when the entry is a let-binding.
+  , contextEntryInScope :: Bool
+  -- ^ Whether the reified name is in scope at the goal (`respInScope`).
   }
   deriving (Eq, Show)
 
@@ -185,7 +214,7 @@ renderLoadResponse (Loaded goals hiddenMetavariables warnings errors) =
       [ [loadedHeader goals hiddenMetavariables warnings errors]
       , case goals of
           [] -> []
-          _ -> [Text.intercalate "\n" (map renderGoal goals)]
+          _ -> [Text.intercalate "\n\n" (map renderGoal goals)]
       , loadSection
           "Unsolved metavariables:"
           (map renderHiddenMetavariable hiddenMetavariables)
@@ -226,11 +255,27 @@ loadSection _ [] = []
 loadSection title items = [title <> "\n\n" <> Text.intercalate "\n" items]
 
 renderGoal :: Goal -> Text
-renderGoal (Goal goalId s shape) =
-  renderShape (goalName goalId) shape
-    <> " (at "
-    <> renderSpan s
-    <> ")"
+renderGoal (Goal goalId s shape context) =
+  Text.intercalate "\n" $
+    ( renderShape (goalName goalId) shape
+        <> " (at "
+        <> renderSpan s
+        <> ")"
+    )
+      : concatMap renderContextEntry context
+
+-- A context entry as indented lines under its goal: the typing line, then a
+-- value line when the entry is a let-binding (the two-line layout
+-- `prettyResponseContext` uses, EmacsTop.hs:365-367).
+renderContextEntry :: ContextEntry -> [Text]
+renderContextEntry (ContextEntry name variable ty value inScope) =
+  concatMap
+    (map ("  " <>) . Text.lines)
+    ( (name <> " : " <> ty <> scopeNote)
+        : [variable <> " = " <> v | Just v <- [value]]
+    )
+ where
+  scopeNote = if inScope then "" else " (not in scope)"
 
 renderHiddenMetavariable :: HiddenMetavariable -> Text
 renderHiddenMetavariable (HiddenMetavariable name maybeSpan shape) =
@@ -344,9 +389,42 @@ resolveLoad path responses response = do
       <*> ( GoalOfType . Text.pack . render
               <$> lift (withInteractionId pointId $ prettyATop ty)
           )
-  toGoal (JustSort pointId) = flip (Goal pointId) GoalSort <$> spanOf pointId
+      <*> lift (contextOf pointId)
+  toGoal (JustSort pointId) =
+    Goal pointId <$> spanOf pointId <*> pure GoalSort <*> lift (contextOf pointId)
   -- Unreachable; see the `GoalShape` note.
   toGoal _ = throwError violation
+
+  -- The goal's context, unnormalized. `getResponseContext` is plain TCM
+  -- (BasicOps.hs:855-858) and enters the interaction point's scope itself;
+  -- the outer `withInteractionId` covers our own `prettyATop` calls, as the
+  -- Emacs frontend does around `prettyResponseContext` (EmacsTop.hs:212).
+  contextOf :: InteractionId -> TCM [ContextEntry]
+  contextOf pointId =
+    withInteractionId pointId $
+      B.getResponseContext AsIs pointId >>= traverse toContextEntry
+
+  toContextEntry :: ResponseContextEntry -> TCM ContextEntry
+  toContextEntry entry = do
+    ty <- prettyATop (unArg (respType entry))
+    value <- traverse prettyATop (respLetValue entry)
+    pure
+      ContextEntry
+        { contextEntryName =
+            Text.pack (displayName (respOrigName entry) (respReifName entry))
+        , contextEntryVariable = Text.pack (prettyShow (respReifName entry))
+        , contextEntryType = Text.pack (render ty)
+        , contextEntryValue = Text.pack . render <$> value
+        , contextEntryInScope = case respInScope entry of
+            InScope -> True
+            NotInScope -> False
+        }
+
+  -- EmacsTop's `prettyCtxName` rule (EmacsTop.hs:334-339).
+  displayName n x
+    | n == x = prettyShow x
+    | InScope <- isInScope n = prettyShow n <> " = " <> prettyShow x
+    | otherwise = prettyShow x
 
   spanOf :: InteractionId -> ExceptT (ProtocolViolation Response) TCM Span
   spanOf pointId =

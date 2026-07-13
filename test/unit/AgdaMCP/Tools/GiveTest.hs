@@ -101,6 +101,7 @@ appliedTests =
                       (InteractionId 0)
                       (Span (Position 40 25 8) (Position 45 25 13))
                       (GoalOfType "P x")
+                      []
                   ]
                   []
                   []
@@ -179,10 +180,12 @@ rejectedTests =
                       (InteractionId 0)
                       (Span (Position 0 75 29) (Position 5 75 34))
                       (GoalOfType "false ＝ false")
+                      []
                   , Goal
                       (InteractionId 1)
                       (Span (Position 6 76 27) (Position 11 76 32))
                       (GoalOfType "true ＝ true")
+                      []
                   ]
                   []
                   []
@@ -196,7 +199,7 @@ rejectedTests =
               \when checking that the expression ⋆ has type true ＝ true\n\n\
               \No file changes were made. Reloaded to resync:\n\n\
               \Load succeeded: 2 goals.\n\n\
-              \?0 : false ＝ false (at 75:29-34)\n\
+              \?0 : false ＝ false (at 75:29-34)\n\n\
               \?1 : true ＝ true (at 76:27-32)"
     , testCase "later give rejected with warnings and earlier gives discarded" $
         renderGiveResponse
@@ -300,6 +303,7 @@ unknownGoalTests =
                       (InteractionId 0)
                       (Span (Position 0 75 29) (Position 5 75 34))
                       (GoalOfType "false ＝ false")
+                      []
                   ]
                   []
                   []
@@ -346,6 +350,7 @@ notLoadedTests =
                       (InteractionId 0)
                       (Span (Position 0 75 29) (Position 5 75 34))
                       (GoalOfType "false ＝ false")
+                      []
                   ]
                   []
                   []
@@ -394,6 +399,7 @@ staleTests =
                       (InteractionId 0)
                       (Span (Position 101 76 29) (Position 106 76 34))
                       (GoalOfType "false ＝ false")
+                      []
                   ]
                   []
                   []

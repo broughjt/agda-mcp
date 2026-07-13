@@ -24,7 +24,13 @@ import AgdaMCP.Tools.Give (
   GiveResponse (..),
   give,
  )
-import AgdaMCP.Tools.Load (Goal (..), GoalShape (..), LoadRequest (..), load)
+import AgdaMCP.Tools.Load (
+  ContextEntry (..),
+  Goal (..),
+  GoalShape (..),
+  LoadRequest (..),
+  load,
+ )
 
 import Common (
   expectLoadFailed,
@@ -183,7 +189,7 @@ tests =
           -- The remaining hole, formerly ?1, is renumbered to ?0 by the resync.
           (goals, _, _, _) <- expectLoaded (giveReload response)
           case goals of
-            [Goal goal s _] -> do
+            [Goal goal s _ _] -> do
               goal @?= InteractionId 0
               spanCoordinates s @?= ((11, 7), (11, 11))
             other -> assertFailure ("expected one goal, got " <> show other)
@@ -288,7 +294,7 @@ tests =
           -- The resync sees the hand-edited file
           (goals, _, _, _) <- expectLoaded (giveReload response)
           case goals of
-            [Goal _ s _] -> spanCoordinates s @?= ((9, 12), (9, 16))
+            [Goal _ s _ _] -> spanCoordinates s @?= ((9, 12), (9, 16))
             other -> assertFailure ("expected one goal, got " <> show other)
     , testCase "span-preserving disk edit is refused via the fingerprint" $
         -- A same-width edit leaves the hole offsets valid, but we still catch
@@ -312,7 +318,7 @@ tests =
           after @?= edited
           (goals, _, _, _) <- expectLoaded $ giveReload response
           case goals of
-            [Goal _ _ (GoalOfType ty)] -> ty @?= "Set"
+            [Goal _ _ (GoalOfType ty) _] -> ty @?= "Set"
             other -> assertFailure ("expected one typed goal, got " <> show other)
     , testCase "give refused for a changed file applies when retried" $
         withFixture "Hole.agda" $ \path -> do
@@ -480,4 +486,25 @@ tests =
           assertBool "stranded hidden metavariable reported" (not $ null metas)
           after <- ByteString.readFile path
           after @?= withHoleGiven "_" original
+    , testCase "resync report carries the remaining goals' contexts" $
+        -- Contexts re-anchor the agent across the id renumbering the give
+        -- causes: the surviving goals renumber to ?0 and ?1, and each line
+        -- still shows what is in scope there.
+        withFixture "Context.agda" $ \path -> do
+          response <-
+            runSession $
+              load (LoadRequest path)
+                *> give (GiveRequest path [(InteractionId 0, "y")])
+          case giveOutcome response of
+            GiveApplied [_] -> pure ()
+            other -> assertFailure ("expected one applied edit, got " <> show other)
+          (goals, _, _, _) <- expectLoaded (giveReload response)
+          map goalId goals @?= [InteractionId 0, InteractionId 1]
+          map goalContext goals
+            @?= [
+                  [ ContextEntry "x" "x" "Nat" Nothing True
+                  , ContextEntry "y" "y" "Nat" Nothing True
+                  ]
+                , [ContextEntry "one" "one" "Nat" (Just "suc zero") True]
+                ]
     ]

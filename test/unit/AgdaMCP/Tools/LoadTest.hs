@@ -19,6 +19,7 @@ import AgdaMCP.Tools.Common (
   parseArguments,
  )
 import AgdaMCP.Tools.Load (
+  ContextEntry (ContextEntry),
   Goal (Goal),
   GoalShape (GoalOfType, GoalSort),
   HiddenMetavariable (HiddenMetavariable),
@@ -58,6 +59,7 @@ successTests =
                   (InteractionId 0)
                   (Span (Position 0 8 12) (Position 0 8 16))
                   (GoalOfType "Nat")
+                  []
               ]
               []
               []
@@ -72,17 +74,19 @@ successTests =
                   (InteractionId 0)
                   (Span (Position 0 75 29) (Position 0 75 34))
                   (GoalOfType "false ＝ false")
+                  []
               , Goal
                   (InteractionId 1)
                   (Span (Position 0 76 27) (Position 0 76 32))
                   (GoalOfType "true ＝ true")
+                  []
               ]
               []
               []
               []
           )
           @?= "Load succeeded: 2 goals.\n\n\
-              \?0 : false ＝ false (at 75:29-34)\n\
+              \?0 : false ＝ false (at 75:29-34)\n\n\
               \?1 : true ＝ true (at 76:27-32)"
     , testCase "sort goal" $
         renderLoadResponse
@@ -91,6 +95,7 @@ successTests =
                   (InteractionId 3)
                   (Span (Position 0 4 7) (Position 0 4 8))
                   GoalSort
+                  []
               ]
               []
               []
@@ -98,6 +103,61 @@ successTests =
           )
           @?= "Load succeeded: 1 goal.\n\n\
               \Sort ?3 (at 4:7-8)"
+    , testCase "goal context renders as an indented block" $
+        renderLoadResponse
+          ( Loaded
+              [ Goal
+                  (InteractionId 0)
+                  (Span (Position 0 9 18) (Position 0 9 22))
+                  (GoalOfType "Nat")
+                  [ ContextEntry "x" "x" "Nat" Nothing True
+                  , ContextEntry "y" "y" "Vec A n" Nothing False
+                  , ContextEntry "one" "one" "Nat" (Just "suc zero") True
+                  ]
+              ]
+              []
+              []
+              []
+          )
+          @?= "Load succeeded: 1 goal.\n\n\
+              \?0 : Nat (at 9:18-22)\n\
+              \  x : Nat\n\
+              \  y : Vec A n (not in scope)\n\
+              \  one : Nat\n\
+              \  one = suc zero"
+    , testCase "shadowed context name displays its reified alias" $
+        renderLoadResponse
+          ( Loaded
+              [ Goal
+                  (InteractionId 1)
+                  (Span (Position 0 4 11) (Position 0 4 15))
+                  (GoalOfType "Nat")
+                  [ContextEntry "n = n₁" "n₁" "Nat" Nothing True]
+              ]
+              []
+              []
+              []
+          )
+          @?= "Load succeeded: 1 goal.\n\n\
+              \?1 : Nat (at 4:11-15)\n\
+              \  n = n₁ : Nat"
+    , testCase "multiline context type keeps the block indentation" $
+        renderLoadResponse
+          ( Loaded
+              [ Goal
+                  (InteractionId 0)
+                  (Span (Position 0 6 3) (Position 0 6 7))
+                  (GoalOfType "B")
+                  [ContextEntry "f" "f" "A\n→ B" Nothing True]
+              ]
+              []
+              []
+              []
+          )
+          @?= "Load succeeded: 1 goal.\n\n\
+              \?0 : B (at 6:3-7)\n\
+              \  f : A\n\
+              \  → B"
     , testCase "hidden typed metavariable with a source span" $
         renderLoadResponse
           ( Loaded
@@ -160,6 +220,7 @@ successTests =
                   (InteractionId 2)
                   (Span (Position 0 20 4) (Position 0 20 9))
                   (GoalOfType "A")
+                  []
               ]
               [HiddenMetavariable "_B_4" Nothing (GoalOfType "Set₁")]
               [Warning (Nothing, "warning text")]
@@ -181,6 +242,7 @@ successTests =
                   (InteractionId 4)
                   (Span (Position 0 30 8) (Position 0 30 13))
                   (GoalOfType "A\n  → B")
+                  []
               ]
               []
               [Warning (Nothing, "warning heading\nwarning detail")]
