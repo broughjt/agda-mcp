@@ -15,7 +15,14 @@ import AgdaMCP.Tools.Common (
 import AgdaMCP.Tools.Give (
   BatchPosition (BatchPosition),
   Edit (Edit),
-  GiveOutcome (GiveApplied, GiveIOError, GiveRejected, GiveStale, GiveUnknownGoal),
+  GiveOutcome (
+    GiveApplied,
+    GiveFileChanged,
+    GiveIOError,
+    GiveNotLoaded,
+    GiveRejected,
+    GiveUnknownGoal
+  ),
   GiveRejection (GiveRejection),
   GiveResponse (GiveResponse),
   renderGiveResponse,
@@ -33,6 +40,7 @@ tests =
     [ appliedTests
     , rejectedTests
     , unknownGoalTests
+    , notLoadedTests
     , staleTests
     , ioErrorTests
     ]
@@ -210,36 +218,7 @@ rejectedTests =
               \Load succeeded: no goals, 1 warning.\n\n\
               \Warnings:\n\n\
               \Reload warning"
-    , testCase "implicit load error uses its file span" $
-        renderGiveResponse
-          ( GiveResponse
-              ( GiveRejected
-                  ( GiveRejection
-                      (InteractionId 0)
-                      Nothing
-                      ( AgdaError
-                          "Example.agda:3,1-4\nNot in scope: bad"
-                          (Just (Span (Position 10 3 1) (Position 13 3 4)))
-                          []
-                      )
-                      (BatchPosition 0 0)
-                  )
-              )
-              ( LoadFailed
-                  ( AgdaError
-                      "Example.agda:3,1-4\nNot in scope: bad"
-                      (Just (Span (Position 10 3 1) (Position 13 3 4)))
-                      []
-                  )
-              )
-          )
-          @?= "Give rejected for ?0.\n\n\
-              \Agda error at 3:1-4:\n\n\
-              \Example.agda:3,1-4\n\
-              \Not in scope: bad\n\n\
-              \No file changes were made. Reloaded to resync: \
-              \load failed with the same error."
-    , testCase "reload failure with a different error renders in full" $
+    , testCase "reload failure after a rejection renders in full" $
         renderGiveResponse
           ( GiveResponse
               ( GiveRejected
@@ -340,21 +319,62 @@ unknownGoalTests =
               \Load succeeded: no goals."
     ]
 
+notLoadedTests :: TestTree
+notLoadedTests =
+  testGroup
+    "not-loaded files"
+    [ testCase "give against an unloaded file refused and the file loaded" $
+        renderGiveResponse
+          ( GiveResponse
+              GiveNotLoaded
+              ( Loaded
+                  [ Goal
+                      (InteractionId 0)
+                      (Span (Position 0 75 29) (Position 5 75 34))
+                      (GoalOfType "false ＝ false")
+                  ]
+                  []
+                  []
+                  []
+              )
+          )
+          @?= "Give refused: the file is not the currently loaded file, and \
+              \goal interaction IDs are only valid for the most recently \
+              \loaded file. Nothing was checked and no changes were made. \
+              \Loaded the file; use the goal IDs from the fresh result \
+              \below:\n\n\
+              \Load succeeded: 1 goal.\n\n\
+              \?0 : false ＝ false (at 75:29-34)"
+    , testCase "give against an unloaded file that fails to load" $
+        renderGiveResponse
+          ( GiveResponse
+              GiveNotLoaded
+              ( LoadFailed
+                  ( AgdaError
+                      "Example.agda:3,1-4\nNot in scope: bad"
+                      (Just (Span (Position 10 3 1) (Position 13 3 4)))
+                      []
+                  )
+              )
+          )
+          @?= "Give refused: the file is not the currently loaded file, and \
+              \goal interaction IDs are only valid for the most recently \
+              \loaded file. Nothing was checked and no changes were made. \
+              \Loaded the file; use the goal IDs from the fresh result \
+              \below:\n\n\
+              \Load failed:\n\n\
+              \Example.agda:3,1-4\n\
+              \Not in scope: bad"
+    ]
+
 staleTests :: TestTree
 staleTests =
   testGroup
     "stale edits"
-    [ testCase "stale edit refused and reloaded with a shifted goal" $
+    [ testCase "changed file refused and reloaded with a shifted goal" $
         renderGiveResponse
           ( GiveResponse
-              ( GiveStale
-                  ( Edit
-                      (InteractionId 0)
-                      (Span (Position 100 75 29) (Position 105 75 34))
-                      "reflexive"
-                      "reflexive"
-                  )
-              )
+              GiveFileChanged
               ( Loaded
                   [ Goal
                       (InteractionId 0)
@@ -366,8 +386,7 @@ staleTests =
                   []
               )
           )
-          @?= "Edit refused for ?0 at 75:29-34.\n\n\
-              \The target no longer contains a hole, so the file may have changed since it was loaded. No changes were made.\n\n\
+          @?= "Edits refused: the file on disk is not the version Agda loaded (it changed since the last load). No changes were made.\n\n\
               \Reloaded to resync:\n\n\
               \Load succeeded: 1 goal.\n\n\
               \?0 : false ＝ false (at 76:29-34)"

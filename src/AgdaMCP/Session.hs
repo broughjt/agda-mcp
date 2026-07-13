@@ -3,6 +3,7 @@ module AgdaMCP.Session (
   Session,
   SessionM,
   fromProtocolResult,
+  liftCommandM,
   liftTCM,
   newSession,
   runInteractionM,
@@ -15,21 +16,12 @@ import Agda.Interaction.Base (
   initCommandState,
  )
 import Agda.Interaction.Command (CommandM)
-import Agda.Interaction.InteractionTop (
-  handleCommand_,
-  runInteraction,
- )
+import Agda.Interaction.InteractionTop (runInteraction)
 import Agda.Interaction.JSON (EncodeTCM (..))
 import Agda.Interaction.JSONTop ()
-import Agda.Interaction.Options (
-  CommandLineOptions (..),
-  commandLineOptions,
-  defaultOptions,
- )
 import Agda.Interaction.Response (Response)
 import Agda.TypeChecking.Monad (
   TCM,
-  setCommandLineOptions,
   setInteractionOutputCallback,
  )
 import Agda.TypeChecking.Monad.Base (
@@ -42,7 +34,7 @@ import Control.Concurrent.STM.TChan (newTChanIO)
 import Control.Concurrent.STM.TVar (newTVarIO)
 import Control.Exception (Exception, throwIO)
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad.State (StateT (..), evalStateT, lift, runStateT)
+import Control.Monad.State (StateT (..), lift, runStateT)
 import Data.Aeson (Value)
 import Data.IORef (modifyIORef', newIORef, readIORef)
 

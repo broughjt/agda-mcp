@@ -3,6 +3,7 @@
 module AgdaMCP.Tools.Give (
   BatchPosition (..),
   Edit (..),
+  GiveBug (..),
   GiveOutcome (..),
   GiveResponse (..),
   GiveRejection (..),
@@ -17,10 +18,12 @@ import Control.Exception (
   IOException,
   catches,
   displayException,
+  throwIO,
  )
 import Control.Monad (when)
 import Control.Monad.Except (ExceptT (..), runExceptT)
 import Control.Monad.IO.Class (liftIO)
+import Control.Monad.State (gets)
 import Data.Aeson (FromJSON (parseJSON), Value, object, withObject, (.:), (.=))
 import Data.Aeson.Types qualified as Aeson
 import Data.Bifunctor (Bifunctor (first))
@@ -43,6 +46,8 @@ import MCP.Server (
 import System.AtomicWrite.Writer.ByteString (atomicWriteFile)
 
 import Agda.Interaction.Base (
+  CommandState (theCurrentFile),
+  CurrentFile (currentFileModule, currentFilePath),
   IOTCM' (..),
   Interaction' (Cmd_give),
   UseForce (WithoutForce),
@@ -52,10 +57,9 @@ import Agda.Interaction.Response (
   GiveResult (..),
   Response,
   Response_boot (..),
-  Status (..),
  )
 import Agda.Syntax.Common (InteractionId (..))
-import Agda.Syntax.Common.Aspect (TokenBased (..))
+import Agda.Syntax.Common.Pretty (prettyShow)
 import Agda.Syntax.Position (noRange)
 import Agda.Syntax.Position qualified
 import Agda.TypeChecking.Monad (TCM)
@@ -65,14 +69,18 @@ import Agda.TypeChecking.Monad.Base (
   HighlightingMethod (..),
   InteractionError (NoSuchInteractionPoint),
   InteractionPoint (ipRange),
+  Interface (iSourceHash),
+  ModuleInfo (miInterface),
   TCErr (TypeError),
   TypeError (InteractionError),
   stInteractionPoints,
   useR,
  )
+import Agda.TypeChecking.Monad.Imports (getVisitedModule)
 import Agda.TypeChecking.Monad.MetaVars (getInteractionRange)
 import Agda.Utils.BiMap qualified as BiMap
-import Agda.Utils.FileName (absolute)
+import Agda.Utils.FileName (absolute, filePath)
+import Agda.Utils.Hash (Hash, hashText)
 import Agda.Utils.IO.UTF8 (ReadException, readTextFile)
 
 import AgdaMCP.Position (
@@ -89,6 +97,7 @@ import AgdaMCP.Session (
   ProtocolViolation (ProtocolViolation),
   SessionM,
   fromProtocolResult,
+  liftCommandM,
   liftTCM,
   runInteractionM,
  )
@@ -103,7 +112,7 @@ import AgdaMCP.Tools.Common (
  )
 import AgdaMCP.Tools.Load (
   LoadRequest (..),
-  LoadResponse (LoadFailed),
+  LoadResponse,
   load,
   renderLoadResponse,
  )
@@ -113,19 +122,8 @@ giveTool =
   toolHandler
     "give"
     ( Just
-        "Fill one or more goals in an Agda source file. Takes the file `path` \
-        \and a non-empty list of `gives`, each containing a goal interaction \
-        \ID and an expression. Gives are checked in order as an atomic batch: \
-        \if one is rejected, subsequent gives are skipped and no source edits \
-        \are written. Before writing, the server verifies that every recorded \
-        \span still contains a hole. If the file changed, it refuses all \
-        \edits. Every checked outcome is followed by a reload to resync. \
-        \Interaction IDs may change, so use the goals in the fresh result. \
-        \Successful gives write Agda’s elaborated, pretty-printed expressions, \
-        \which may differ from the submitted text. The result reports both \
-        \when they differ. Relative paths are resolved against the server \
-        \process’s working directory. Prefer an absolute path when that \
-        \directory may be ambiguous."
+        -- TODO:
+        "Fill one or more goals in an Agda source file. Takes the file `path` and a non-empty list of `gives`, each consisting of a goal interaction ID and an expression. The file must be the currently loaded file. Agda tracks goals for one file at a time, so goal interaction IDs are only valid for the most recently loaded file, and a give against any other file is refused and returns that file's fresh load result to give against instead. Gives are checked in order as an atomic batch: if one is rejected, subsequent gives are skipped and no source edits are written. Before writing, the server verifies that the file on disk still matches the source Agda checked; if it changed, all edits are refused. Every checked outcome is followed by a reload to resync. Interaction IDs may change, so use the goals in the fresh result. Successful gives write Agda’s elaborated, pretty-printed expressions, which may differ from the submitted text. The result reports both when they differ. Relative paths are resolved against the server process’s working directory. Prefer an absolute path when that directory may be ambiguous."
     )
     ( InputSchema
         "object"
@@ -208,12 +206,32 @@ data GiveOutcome
     -- (Agda's `NoSuchInteractionPoint`), so the current and subsequent give
     -- expressions were not checked.
     GiveUnknownGoal InteractionId BatchPosition
-  | -- A goal's recorded span no longer holds a hole (the file changed on disk
-    -- since it was loaded), so the edit was refused and nothing was written.
-    GiveStale Edit
+  | -- The target file is not the currently loaded file. Goal interaction IDs
+    -- are only valid for the most recently loaded file, and loading a new file
+    -- destroys the previous file's interaction points.
+    GiveNotLoaded
+  | -- The on-disk source no longer matches the source Agda checked (the file
+    -- changed since it was loaded), so the recorded goal spans are unreliable
+    -- and all edits were refused.
+    GiveFileChanged
   | -- Reading or writing the file failed (deleted, permissions, disk full, -- ...).
     GiveIOError Text
   deriving (Show)
+
+-- Internal failures of the pre-write staleness guard. Both bugs in agda-mcp;
+-- thrown and caught nowhere, so the process dies with debug output on stderr.
+data GiveBug
+  = -- After a batch of successful gives, locating the loaded source's
+    -- fingerprint broke.
+    FingerprintUnavailable FilePath String
+  | -- The on-disk source is exactly the text Agda checked (equal hashes of the
+    -- normalized text), and yet the recorded goal span does not contain a
+    -- hole. In this case, our mental model of Agda's offsets or text
+    -- normalization is wrong.
+    SpanNotHole FilePath InteractionId Span Text Hash
+  deriving (Show)
+
+instance Exception GiveBug
 
 -- The reason a single give was not applied. Either the goal's interaction ID
 -- didn't exist, or checking the expression failed.
@@ -277,11 +295,31 @@ parseGiveItem = withObject "give" $ \o -> do
 -- failure. If each give is successful, we write the accumulated edits back to
 -- disk.
 give :: GiveRequest -> SessionM GiveResponse
-give (GiveRequest path items) =
-  runExceptT (traverse runGive (zip [0 :: Int ..] items))
-    >>= either pure (liftIO . commit)
-    >>= resync
+give (GiveRequest path items) = do
+  loaded <- targetIsLoaded
+  outcome <-
+    if loaded
+      then
+        runExceptT (traverse runGive (zip [0 :: Int ..] items))
+          >>= either pure checkedCommit
+      else pure GiveNotLoaded
+  resync outcome
  where
+  -- Goal interaction IDs are only meaningful against a load result the caller
+  -- has seen, so a give may only target the loaded current file. Without this
+  -- check Agda would load the file implicitly and interpret the IDs against
+  -- fresh interaction points the caller never saw.
+  targetIsLoaded :: SessionM Bool
+  targetIsLoaded = do
+    path' <- liftIO $ absolute path
+    current <- liftCommandM $ gets theCurrentFile
+    pure (Just path' == (currentFilePath <$> current))
+
+  -- All gives succeeded; fetch the loaded source's fingerprint and commit the
+  -- edits.
+  checkedCommit :: [Edit] -> SessionM GiveOutcome
+  checkedCommit edits = loadedSourceHash path >>= liftIO . flip commit edits
+
   runGive :: (Int, GiveItem) -> ExceptT GiveOutcome SessionM Edit
   runGive (index, (goal, expression)) =
     ExceptT $
@@ -293,27 +331,37 @@ give (GiveRequest path items) =
   fromFailure goal batch (GiveFailed holeSpan err) =
     GiveRejected (GiveRejection goal holeSpan err batch)
 
-  -- All gives succeeded. Read the source, confirm every recorded span still
-  -- holds a hole (if not, the file change under us since the last load, so
-  -- refuse rather than corrupt it), splice all the edits in, and write.
-  commit :: [Edit] -> IO GiveOutcome
-  commit edits =
+  -- All gives succeeded. Read the source and confirm it is still the source
+  -- Agda checked (equal hashes of the normalized text). If not, the recorded
+  -- spans are unreliable, so refuse rather than risk corrupting the file. When
+  -- the hashes match, every span must still hold a hole. If this is not the
+  -- case, this is an agda-mcp bug and we die loudly.
+  commit :: Hash -> [Edit] -> IO GiveOutcome
+  commit expected edits =
     ( do
         -- Read the source with Agda's parser, so our edit offsets line up with
-        -- its `posPos`.
-        source <- LazyText.toStrict <$> readTextFile path
-        -- We try to check that each of the `editSpan`s correspond to actual
-        -- holes. See .scratch/GIVE_STALENESS.md.
-        case find (not . spanIsHole . spanText source . editSpan) edits of
-          Just stale -> pure (GiveStale stale)
-          Nothing -> do
-            -- Note: we write UTF-8 with LF endings regardless of platform.
-            -- Agda's reader (`readTextFile`) normalizes to LF internally, so
-            -- the hole span indices depend on this behavior. I just don't
-            -- really care to think about what the defensibly correct solution
-            -- is here, so I'm going to say "screw you Windows" and write LFs.
-            atomicWriteFile path (encodeUtf8 (applyEdits source edits))
-            pure (GiveApplied edits)
+        -- its `posPos` and the hash matches `iSourceHash`'s input.
+        lazySource <- readTextFile path
+        let source = LazyText.toStrict lazySource
+        if hashText lazySource /= expected
+          then pure GiveFileChanged
+          else case find (not . spanIsHole . spanText source . editSpan) edits of
+            Just bad ->
+              throwIO $
+                SpanNotHole
+                  path
+                  (editGoal bad)
+                  (editSpan bad)
+                  (spanText source (editSpan bad))
+                  expected
+            Nothing -> do
+              -- Note: we write UTF-8 with LF endings regardless of platform.
+              -- Agda's reader (`readTextFile`) normalizes to LF internally, so
+              -- the hole span indices depend on this behavior. I just don't
+              -- really care to think about what the defensibly correct solution
+              -- is here, so I'm going to say "screw you Windows" and write LFs.
+              atomicWriteFile path (encodeUtf8 (applyEdits source edits))
+              pure (GiveApplied edits)
     )
       -- Catch `IOException`s (missing file, permissions, disk full) and
       -- `readTextFile`'s decoding `ReadException`.
@@ -321,14 +369,46 @@ give (GiveRequest path items) =
                 , Handler (fromIOError :: ReadException -> IO GiveOutcome)
                 ]
 
-  -- Every `give` outcome ends by reloading. The happy path uses this to report
-  -- the fresh goals, while the sad paths discard any in-memory gives and sync
-  -- Agda's state with the contents on disk.
+  -- Every `give` outcome ends by loading the file. The happy path uses this
+  -- to report the fresh goals, the sad paths discard any in-memory gives and
+  -- sync Agda's state with the contents on disk, and `GiveNotLoaded` gets the
+  -- initial load whose goal IDs the caller was missing.
   resync :: GiveOutcome -> SessionM GiveResponse
   resync outcome = GiveResponse outcome <$> load (LoadRequest path)
 
   fromIOError :: (Exception e) => e -> IO GiveOutcome
   fromIOError = pure . GiveIOError . Text.pack . displayException
+
+-- Obtain the hash of the normalized source text for the currently loaded file
+-- that Agda checked. Gives only run after `targetIsLoaded` confirmed the
+-- target is the loaded current file, so every broken link here is an agda-mcp
+-- bug.
+loadedSourceHash :: FilePath -> SessionM Hash
+loadedSourceHash path = do
+  -- `parseSource` reads the file with `readTextFile` (Imports.hs:165) and
+  -- hashes exactly that text into the interface (`iSourceHash = hashText
+  -- source`, Imports.hs:1411). `visitModule` records the interface even when
+  -- the module has warnings such as open holes (Import.hs:467, warnings only
+  -- skip `storeDecodedModule`).
+  path' <- liftIO $ absolute path
+  current <- liftCommandM $ gets theCurrentFile
+  case current of
+    Nothing -> bug "no file is loaded (`theCurrentFile` is `Nothing`)"
+    Just file
+      | currentFilePath file /= path' ->
+          bug ("the loaded file is " <> filePath (currentFilePath file))
+      | otherwise -> do
+          visited <- liftTCM $ getVisitedModule $ currentFileModule file
+          case visited of
+            Nothing ->
+              bug $
+                "module "
+                  <> prettyShow (currentFileModule file)
+                  <> " has no visited interface"
+            Just moduleInfo -> pure $ iSourceHash $ miInterface moduleInfo
+ where
+  bug :: String -> SessionM a
+  bug = liftIO . throwIO . FingerprintUnavailable path
 
 giveSingle ::
   FilePath ->
@@ -419,13 +499,8 @@ applyEdits source edits =
 
 {- The grammar of a Cmd_give response list, following the Agda 2.8.0 source:
 
-exchange := prelude? given
-          | prelude? failed
-
-prelude := Status ClearRunningInfo ClearHighlighting RunningInfo*
-        -- Appears only when the give targets a not-yet-loaded
-        -- file. `runInteraction` executes an implicit cmd_load' with a no-op
-        -- continuation (InteractionTop.hs:257-263, cmd_load':848-869).
+exchange := given
+          | failed
 
 given := GiveAction (goal, Give_String s) -- give_gen:1021; noRange => Give_String (:1010)
          Status                           -- give_gen ends with `Cmd_metas` => display_info (:1024)
@@ -436,6 +511,13 @@ failed := DisplayInfo (Info_Error)       -- handleErr:216-242, as in matchLoad
           JumpToError?                   -- with noRange, typically absent
           HighlightingInfo
           Status                         -- hardcoded sChecked=False (:239)
+
+When the IOTCM's file is not `theCurrentFile`, `runInteraction` prefixes the
+exchange with an implicit cmd_load' (Status ClearRunningInfo ClearHighlighting
+RunningInfo*; InteractionTop.hs:257-263, cmd_load':848-869). `give` refuses
+such calls with `GiveNotLoaded` before sending any Cmd_give, using the same
+absolute-path comparison (`targetIsLoaded`), so a prelude-shaped response here
+is a protocol violation.
 -}
 parseGiveResponses ::
   InteractionId ->
@@ -445,16 +527,7 @@ parseGiveResponses goal responses = maybe (Left violation) Right (exchange respo
  where
   violation = ProtocolViolation "Cmd_give" responses
 
-  exchange
-    ( Resp_Status status : Resp_ClearRunningInfo
-        : Resp_ClearHighlighting NotOnlyTokenBased
-        : rest
-      )
-      | not (sChecked status) = afterPrelude rest
-  exchange rest = afterPrelude rest
-
-  afterPrelude (Resp_RunningInfo {} : rest) = afterPrelude rest
-  afterPrelude rest = given rest <|> failed rest
+  exchange rest = given rest <|> failed rest
 
   given
     ( Resp_GiveAction goal' (Give_String s)
@@ -468,12 +541,6 @@ parseGiveResponses goal responses = maybe (Left violation) Right (exchange respo
   failed = failedTail Left
 
 renderGiveResponse :: GiveResponse -> Text
--- When a give was rejected by its implicit load, the resync reload fails with
--- the same error. Repeating it verbatim is redundant, so we detect this case
--- and more concise version.
-renderGiveResponse (GiveResponse outcome@(GiveRejected rejected) (LoadFailed reloadError))
-  | rejectedError rejected == reloadError =
-      renderGiveOutcome outcome <> " load failed with the same error."
 renderGiveResponse (GiveResponse outcome reloaded) =
   renderGiveOutcome outcome <> "\n\n" <> renderLoadResponse reloaded
 
@@ -502,13 +569,14 @@ renderGiveOutcome (GiveUnknownGoal goal batch) =
        \use the IDs from the fresh list below.\n\n"
     <> renderUnapplied batch
     <> " Reloaded to resync:"
-renderGiveOutcome (GiveStale edit) =
-  "Edit refused for "
-    <> goalName (editGoal edit)
-    <> " at "
-    <> renderSpan (editSpan edit)
-    <> ".\n\nThe target no longer contains a hole, so the file may have changed \
-       \since it was loaded. No changes were made.\n\nReloaded to resync:"
+renderGiveOutcome GiveNotLoaded =
+  "Give refused: the file is not the currently loaded file, and goal \
+  \interaction IDs are only valid for the most recently loaded file. Nothing \
+  \was checked and no changes were made. Loaded the file; use the goal IDs \
+  \from the fresh result below:"
+renderGiveOutcome GiveFileChanged =
+  "Edits refused: the file on disk is not the version Agda loaded (it changed \
+  \since the last load). No changes were made.\n\nReloaded to resync:"
 renderGiveOutcome (GiveIOError e) =
   "Could not access the file on disk:\n\n"
     <> e
