@@ -8,6 +8,7 @@ import Data.Maybe (isJust)
 import Data.Text qualified as Text
 import Data.Text.Encoding (decodeUtf8, encodeUtf8)
 import System.Directory (removeFile)
+import System.FilePath (takeDirectory, takeFileName, (</>))
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
@@ -384,6 +385,29 @@ tests =
             length goals @?= 1
             after <- ByteString.readFile holePath
             after @?= original
+    , testCase "equivalent non-canonical path is recognized as loaded" $
+        withFixture "Hole.agda" $ \path -> do
+          original <- ByteString.readFile path
+          let directory = takeDirectory path
+              nonCanonicalPath =
+                directory
+                  </> ".."
+                  </> takeFileName directory
+                  </> takeFileName path
+          assertBool "test path contains a parent-directory segment" $
+            nonCanonicalPath /= path
+          response <-
+            runSession $
+              load (LoadRequest path)
+                *> give
+                  (GiveRequest nonCanonicalPath [(InteractionId 0, "y")])
+          case giveOutcome response of
+            GiveApplied [_] -> pure ()
+            other -> assertFailure ("expected one applied edit, got " <> show other)
+          (goals, _, _, _) <- expectLoaded (giveReload response)
+          map goalId goals @?= []
+          after <- ByteString.readFile path
+          after @?= withHoleGiven "y" original
     , testCase "refused give retried in the same session applies" $
         withFixture "Hole.agda" $ \path -> do
           original <- ByteString.readFile path
