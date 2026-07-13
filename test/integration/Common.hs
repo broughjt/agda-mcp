@@ -10,6 +10,7 @@ module Common (
   runSession,
   spanCoordinates,
   withFixture,
+  withFixtureDirectory,
   withHoleGiven,
 ) where
 
@@ -34,10 +35,17 @@ import AgdaMCP.Tools.Load (Goal, HiddenMetavariable, LoadResponse (..))
 -- against the file name.
 withFixture :: FilePath -> (FilePath -> IO a) -> IO a
 withFixture name action =
+  withFixtureDirectory [name] $ \directory -> action (directory </> name)
+
+-- Copy a group of fixtures into one fresh temporary directory. This is used
+-- for import scenarios, where Agda must be able to resolve sibling modules.
+withFixtureDirectory :: [FilePath] -> (FilePath -> IO a) -> IO a
+withFixtureDirectory names action =
   withSystemTempDirectory "agda-mcp-integration" $ \directory -> do
-    let target = directory </> name
-    copyFile ("test" </> "fixtures" </> name) target
-    action target
+    mapM_
+      (\name -> copyFile ("test" </> "fixtures" </> name) (directory </> name))
+      names
+    action directory
 
 -- We use one session per test. Multi-step scenarios use a single session, which
 -- is exactly how the server works in production.

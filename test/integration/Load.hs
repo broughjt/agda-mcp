@@ -26,6 +26,7 @@ import Common (
   runSession,
   spanCoordinates,
   withFixture,
+  withFixtureDirectory,
  )
 
 tests :: TestTree
@@ -102,4 +103,46 @@ tests =
           assertBool "hidden metavariables reported" (not $ null metas)
           assertBool "at least one hidden metavariable has a span" $
             any (isJust . hiddenMetavariableSpan) metas
+    , testCase "warning from an imported module keeps its foreign location"
+        $ withFixtureDirectory
+          ["ImportsWarning.agda", "ImportedWarning.agda"]
+        $ \directory -> do
+          let path = directory </> "ImportsWarning.agda"
+          response <- runSession (load (LoadRequest path))
+          (goals, metas, warnings, errors) <- expectLoaded response
+          goals @?= []
+          metas @?= []
+          errors @?= []
+          case warnings of
+            [Warning (Nothing, message)] -> do
+              assertBool "rendered warning names the imported file" $
+                "ImportedWarning.agda" `Text.isInfixOf` message
+              assertBool "rendered warning keeps its foreign range" $
+                ":9.1-14" `Text.isInfixOf` message
+            other ->
+              assertFailure ("expected one foreign warning, got " <> show other)
+    , testCase "module with open holes cannot be imported"
+        $ withFixtureDirectory
+          ["ImportsOpenHole.agda", "ImportedOpenHole.agda"]
+        $ \directory -> do
+          let path = directory </> "ImportsOpenHole.agda"
+          response <- runSession (load (LoadRequest path))
+          e <- expectLoadFailed response
+          assertBool "reports SolvedButOpenHoles" $
+            "Module cannot be imported since it has open interaction points"
+              `Text.isInfixOf` agdaErrorMessage e
+    , testCase "sort-shaped hidden metavariable is typed as GoalSort" $
+        withFixture "SortMeta.agda" $ \path -> do
+          response <- runSession (load (LoadRequest path))
+          (goals, metas, warnings, errors) <- expectLoaded response
+          goals @?= []
+          warnings @?= []
+          errors @?= []
+          case metas of
+            [HiddenMetavariable name (Just s) GoalSort] -> do
+              assertBool "metavariable has Agda's generated name" $
+                "_" `Text.isPrefixOf` name
+              spanCoordinates s @?= ((3, 14), (3, 15))
+            other ->
+              assertFailure ("expected one sort-shaped metavariable, got " <> show other)
     ]
