@@ -107,17 +107,17 @@ goalTool =
     ( Just
         "Inspect a single open goal in the currently loaded Agda file, without \
         \modifying anything. With just a goal ID, reports the goal's type, its \
-        \local context, and any unsolved constraints mentioning the goal; the \
+        \local context, and any unsolved constraints mentioning the goal. The \
         \type is reported as stated plus fully normalized when the two differ, \
         \or at the requested `normalization` only. With an `expression`, \
         \instead reports the goal's type, the expression's inferred type \
         \(Have), and the expression's elaboration checked against the goal \
-        \(Checks) - infer and check are independent, so one can succeed while \
+        \(Checks). Infer and check are independent, so one can succeed while \
         \the other fails. Goal interaction IDs are only valid for the most \
-        \recently loaded file; a query against any other file is refused and \
+        \recently loaded file. A query against any other file is refused and \
         \returns that file's fresh load result to query against instead. \
         \Relative paths are resolved against the server process's working \
-        \directory; prefer an absolute path when that directory may be \
+        \directory. Prefer an absolute path when that directory may be \
         \ambiguous."
     )
     ( InputSchema
@@ -220,11 +220,11 @@ parseExpression value = do
   expression <- Text.strip <$> parseJSON value
   when (Text.null expression) $
     fail "'expression' is empty or whitespace-only"
-  pure (Text.unpack expression)
+  pure $ Text.unpack expression
 
 data GoalResponse
   = -- The queried goal, with either its plain display or the expression
-    -- quadrants.
+    -- results.
     GoalDisplayed GoalDisplay
   | -- The query named an interaction ID that doesn't exist in the loaded file
     -- (Agda's `NoSuchInteractionPoint`).
@@ -256,18 +256,17 @@ data GoalType = GoalType
   deriving (Eq, Show)
 
 data GoalDetail
-  = -- A plain query: the goal's local context (at the requested
-    -- normalization), the cubical boundary, and the unsolved constraints
-    -- mentioning the goal, all pre-rendered.
+  = -- A query for a goal's local context (at the requested normalization), its
+    -- cubical boundary, and the unsolved constraints that mention it.
     PlainGoal
       { plainContext :: [ContextEntry]
       , plainBoundary :: [Text]
       , plainConstraints :: [Text]
       }
-  | -- An expression query: the submitted expression, its inferred type, and
-    -- its elaboration checked against the goal. The two quadrants are
-    -- independent: unannotated lambdas check but don't infer, and type
-    -- mismatches infer but don't check.
+  | -- An expression query, consisting of the submitted expression, its inferred
+    -- type, and its elaboration checked against the goal. Inference and
+    -- checking are independent. For example, unannotated lambdas check but
+    -- don't infer, and type mismatches infer but don't check.
     ExpressionGoal
       { expressionSubmitted :: Text
       , expressionHave :: Either AgdaError Text
@@ -276,7 +275,7 @@ data GoalDetail
   deriving (Eq, Show)
 
 goal :: GoalRequest -> SessionM GoalResponse
-goal (GoalRequest path goalId normalization expression) = do
+goal (GoalRequest path goalId normalization maybeExpression) = do
   -- Goal interaction IDs are only meaningful against a load result the caller
   -- has seen (see `targetIsLoaded`). Without this check Agda would load the
   -- file implicitly and interpret the ID against fresh interaction points the
@@ -284,51 +283,55 @@ goal (GoalRequest path goalId normalization expression) = do
   loaded <- targetIsLoaded path
   if not loaded
     then GoalNotLoaded <$> load (LoadRequest path)
-    else case expression of
-      Nothing -> plainGoal
-      Just expr -> expressionGoal expr
+    else maybe plainGoal expressionGoal maybeExpression
  where
-  norm = fromMaybe AsIs normalization
+  normalization' = fromMaybe AsIs normalization
 
   command interaction = const $ IOTCM path None Direct interaction
 
   plainGoal = do
     responses <-
-      runInteractionM $ command $ Cmd_goal_type_context norm goalId noRange ""
+      runInteractionM $
+        command $
+          Cmd_goal_type_context normalization' goalId noRange ""
     parsed <-
       fromProtocolResult $
-        parseGoalTypeResponses "Cmd_goal_type_context" goalId norm plainAux responses
+        parseGoalTypeResponses
+          "Cmd_goal_type_context"
+          goalId
+          normalization'
+          plainAux
+          responses
     resolved <-
       liftTCM $ resolvePlainGoal path goalId normalization responses parsed
     fromProtocolResult resolved
 
-  -- Both interactions run unconditionally: the quadrants are independent, and
-  -- a failed command doesn't change the session state (`handleCommand`,
-  -- InteractionTop.hs:157-171), so a failed infer neither must nor needs to
-  -- skip the check.
-  expressionGoal expr = do
+  -- Both interactions run unconditionally, since inference and checking are
+  -- independent. A failed command doesn't change the session state, so a failed
+  -- infer doesn't break or skip the check.
+  expressionGoal expression = do
     inferResponses <-
       runInteractionM $
         command $
-          Cmd_goal_type_context_infer norm goalId noRange expr
+          Cmd_goal_type_context_infer normalization' goalId noRange expression
     inferParsed <-
       fromProtocolResult $
         parseGoalTypeResponses
           "Cmd_goal_type_context_infer"
           goalId
-          norm
+          normalization'
           inferAux
           inferResponses
     checkResponses <-
       runInteractionM $
         command $
-          Cmd_goal_type_context_check norm goalId noRange expr
+          Cmd_goal_type_context_check normalization' goalId noRange expression
     checkParsed <-
       fromProtocolResult $
         parseGoalTypeResponses
           "Cmd_goal_type_context_check"
           goalId
-          norm
+          normalization'
           checkAux
           checkResponses
     resolved <-
@@ -337,7 +340,7 @@ goal (GoalRequest path goalId normalization expression) = do
           path
           goalId
           normalization
-          (Text.pack expr)
+          (Text.pack expression)
           (inferResponses <> checkResponses)
           (fst <$> inferParsed)
           (fst <$> checkParsed)
@@ -348,11 +351,10 @@ goal (GoalRequest path goalId normalization expression) = do
   plainAux GoalOnly = Just ()
   plainAux _ = Nothing
 
-  -- The infer payload carries the expression's type; its "actual" boundary
+  -- The infer payload carries the expression's type. Its "actual" boundary
   -- faces are not rendered (`interpret Cmd_goal_type_context_infer`,
-  -- InteractionTop.hs:727-738; the all-whitespace fallback to GoalOnly there
-  -- is unreachable because blank expressions are rejected at argument
-  -- parsing).
+  -- InteractionTop.hs:727-738; the all-whitespace fallback to GoalOnly there is
+  -- unreachable because blank expressions are rejected at argument parsing).
   inferAux (GoalAndHave ty _) = Just ty
   inferAux _ = Nothing
 
@@ -468,8 +470,8 @@ resolveExpressionGoal path goalId normalization submitted responses inferResult 
       pure (Right (GoalUnknown goalId))
   | otherwise = runExceptT $ do
       goalType <- resolveGoalType violation goalId normalization
-      have <- lift $ quadrant inferResult
-      checks <- lift $ quadrant checkResult
+      have <- lift $ resolveResult inferResult
+      checks <- lift $ resolveResult checkResult
       pure $
         GoalDisplayed $
           GoalDisplay goalId goalType (ExpressionGoal submitted have checks)
@@ -479,10 +481,10 @@ resolveExpressionGoal path goalId normalization submitted responses inferResult 
 
   failedLookup = either isNoSuchInteractionPoint (const False)
 
-  quadrant (Left e) = do
+  resolveResult (Left e) = do
     path' <- liftIO (absolute path)
     Left <$> resolveError path' e
-  quadrant (Right expr) =
+  resolveResult (Right expr) =
     Right . Text.pack . render <$> withInteractionId goalId (prettyATop expr)
 
 -- Distinguish a failure caused by the queried goal not existing from other
@@ -498,12 +500,12 @@ isNoSuchInteractionPoint e
 
 resolveFailure :: FilePath -> InteractionId -> TCErr -> TCM GoalResponse
 resolveFailure path goalId e
-  | isNoSuchInteractionPoint e = pure (GoalUnknown goalId)
+  | isNoSuchInteractionPoint e = pure $ GoalUnknown goalId
   | otherwise = do
-      path' <- liftIO (absolute path)
-      GoalFailed <$> resolveError path' e
+      path' <- liftIO $ absolute path
+      GoalFailed <$> flip resolveError e path'
 
--- The goal's type doesn't travel in the `Goal_GoalType` payload; query it
+-- The goal's type isn't part of the `Goal_GoalType` payload, so we query it
 -- with `typeOfMeta` and render in the interaction point's scope, as JSONTop
 -- does (`prettyTypeOfMeta`, JSONTop.hs:392-398). `typeOfMeta` reports goals
 -- through the same two `Judgement`-derived shapes as the load goals list
@@ -516,13 +518,13 @@ resolveGoalType ::
   InteractionId ->
   Maybe Rewrite ->
   ExceptT (ProtocolViolation Response) TCM GoalType
-resolveGoalType violation goalId normalization =
+resolveGoalType violation goalId maybeNormalization =
   GoalType
-    <$> shapeAt (fromMaybe AsIs normalization)
-    <*> traverse shapeAt (maybe (Just Normalised) (const Nothing) normalization)
+    <$> shapeAt (fromMaybe AsIs maybeNormalization)
+    <*> traverse shapeAt (maybe (Just Normalised) (const Nothing) maybeNormalization)
  where
-  shapeAt norm = do
-    form <- lift $ withInteractionId goalId $ typeOfMeta norm goalId
+  shapeAt normalization = do
+    form <- lift $ withInteractionId goalId $ typeOfMeta normalization goalId
     case form of
       OfType _ ty ->
         GoalOfType . Text.pack . render
@@ -556,11 +558,11 @@ renderGoalResponse (GoalDisplayed (GoalDisplay goalId goalType detail)) =
       Text.intercalate "\n\n" $
         [ Text.intercalate "\n" goalLines
         , either
-            (renderQuadrantFailure "Infer failed")
+            (renderExpressionFailure "Infer failed")
             (\ty -> "Have: " <> submitted <> " : " <> ty)
             have
         , either
-            (renderQuadrantFailure "Check failed")
+            (renderExpressionFailure "Check failed")
             ("Checks: elaborates to " <>)
             checks
         ]
@@ -568,6 +570,7 @@ renderGoalResponse (GoalDisplayed (GoalDisplay goalId goalType detail)) =
   goalLines =
     renderShape (goalName goalId) (goalTypeStated goalType)
       : normalizedLine
+
   -- The normalized rendering is shown only when it differs textually from
   -- the stated one. The shapes can't disagree (see `resolveGoalType`), so
   -- sort goals never show the line.
@@ -586,8 +589,8 @@ goalSection title items = [title <> "\n\n" <> Text.intercalate "\n" items]
 -- in the project plan), hence the parenthetical. When the error has a file
 -- span (only environmental failures are known to), the message already
 -- carries Agda's own location text.
-renderQuadrantFailure :: Text -> AgdaError -> Text
-renderQuadrantFailure label e =
+renderExpressionFailure :: Text -> AgdaError -> Text
+renderExpressionFailure label e =
   label
     <> note
     <> ":\n\n"

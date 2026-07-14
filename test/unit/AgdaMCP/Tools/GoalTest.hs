@@ -106,7 +106,7 @@ renderTests =
               )
           )
           @?= "Sort ?3"
-    , testCase "expression goal with both quadrants succeeding" $
+    , testCase "expression goal with successful inference and checking" $
         renderGoalResponse
           ( GoalDisplayed
               ( GoalDisplay

@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 -- Integration coverage for the `goal` tool: the M4 acceptance list (types at
--- normalization levels, expression quadrants, goal-specific constraints, and
+-- normalization levels, expression inference and checking, goal-specific constraints, and
 -- the refusal paths).
 module Goal (tests) where
 
@@ -118,7 +118,7 @@ tests =
             @?= GoalType (GoalOfType "Nat → Nat") (Just (GoalOfType "Nat → Nat"))
           displayDetail display
             @?= ExpressionGoal "λ n → n" (Right "(n : _8) → _8") (Right "λ n → n")
-    , testCase "scope error fails both quadrants independently" $
+    , testCase "scope error fails both inference and checking independently" $
         withFixture "Normalize.agda" $ \path -> do
           response <-
             runSession $
@@ -132,7 +132,7 @@ tests =
               assertContains "NotInScope" (agdaErrorMessage checksError)
             other ->
               assertFailure
-                ("expected both quadrants to fail, got " <> show other)
+                ("expected both inference and checking to fail, got " <> show other)
     , testCase "constraints mentioning the goal are reported" $
         -- The dogfood UX-gap-3 shape: a hole in type position whose clauses
         -- constrain it. The postponed definition check is attached to the
