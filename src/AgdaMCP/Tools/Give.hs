@@ -111,6 +111,7 @@ import AgdaMCP.Tools.Common (
   goalName,
   parseArguments,
   resolveError,
+  targetIsLoaded,
   withSession,
  )
 import AgdaMCP.Tools.Load (
@@ -302,7 +303,9 @@ parseGiveItem = withObject "give" $ \o -> do
 -- disk.
 give :: GiveRequest -> SessionM GiveResponse
 give (GiveRequest path items) = do
-  loaded <- targetIsLoaded
+  -- Without the loaded-file check Agda would load the file implicitly and
+  -- interpret the IDs against fresh interaction points the caller never saw.
+  loaded <- targetIsLoaded path
   outcome <-
     if loaded
       then
@@ -311,16 +314,6 @@ give (GiveRequest path items) = do
       else pure GiveNotLoaded
   resync outcome
  where
-  -- Goal interaction IDs are only meaningful against a load result the caller
-  -- has seen, so a give may only target the loaded current file. Without this
-  -- check Agda would load the file implicitly and interpret the IDs against
-  -- fresh interaction points the caller never saw.
-  targetIsLoaded :: SessionM Bool
-  targetIsLoaded = do
-    path' <- liftIO $ absolute path
-    current <- liftCommandM $ gets theCurrentFile
-    pure (Just path' == (currentFilePath <$> current))
-
   -- All gives succeeded; fetch the loaded source's fingerprint and commit the
   -- edits.
   checkedCommit :: [Edit] -> SessionM GiveOutcome

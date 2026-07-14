@@ -88,8 +88,8 @@ handshakeTest =
     initializeResult.serverInfo.name @?= "agda-mcp"
     toolsResult <- resultFor 2 responses :: IO ListToolsResult
     let names = map (.name) toolsResult.tools
-    assertBool "tools/list carries load and give" $
-      "load" `elem` names && "give" `elem` names
+    assertBool "tools/list carries load, give, and goal" $
+      all (`elem` names) (["load", "give", "goal"] :: [Text])
 
 loadTest :: TestTree
 loadTest =

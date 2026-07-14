@@ -10,7 +10,10 @@ module AgdaMCP.Tools.Load (
   LoadResponse (..),
   load,
   loadTool,
+  renderContext,
   renderLoadResponse,
+  renderShape,
+  resolveContext,
 ) where
 
 import Control.Monad (when)
@@ -299,21 +302,21 @@ loadSection title items = [title <> "\n\n" <> Text.intercalate "\n" items]
 
 renderGoal :: Goal -> Text
 renderGoal (Goal goalId s shape context) =
-  let
-    -- `getResponseContext` gives us outermost-first telescope order, which
-    -- `Goal` preserves as structure. The Emacs goal rendering in Agda calls
-    -- `prettyResponseContext ii True`, which reverses that order so the
-    -- innermost bindings appear nearest the goal (EmacsTop.hs:225-226,
-    -- 324-332).
-    renderedContext = concatMap renderContextEntry $ reverse context
-   in
-    Text.intercalate "\n" $
-      ( renderShape (goalName goalId) shape
-          <> " (at "
-          <> renderSpan s
-          <> ")"
-      )
-        : renderedContext
+  Text.intercalate "\n" $
+    ( renderShape (goalName goalId) shape
+        <> " (at "
+        <> renderSpan s
+        <> ")"
+    )
+      : renderContext context
+
+-- Render a goal's context as indented lines. `resolveContext` gives us
+-- outermost-first telescope order, which `Goal` preserves as structure. The
+-- Emacs goal rendering in Agda calls `prettyResponseContext ii True`, which
+-- reverses that order so the innermost bindings appear nearest the goal
+-- (EmacsTop.hs:225-226, 324-332).
+renderContext :: [ContextEntry] -> [Text]
+renderContext = concatMap renderContextEntry . reverse
 
 -- A context entry as indented lines under its goal: the typing line, then a
 -- value line when the entry is a let-binding (the two-line layout
@@ -478,56 +481,9 @@ resolveLoad path responses response = do
 
   -- Obtain the goal's unnormalized context
   contextOf :: InteractionId -> TCM [ContextEntry]
-  contextOf pointId = withInteractionId pointId $ do
-    -- Agda's Emacs frontend also reads the goal modality before rendering its
-    -- entries (`prettyResponseContext`, EmacsTop.hs:329-332). Erasure and
-    -- relevance below are relative to this modality.
-    goalModality <- currentModality
-    getResponseContext AsIs pointId >>= traverse (toContextEntry goalModality)
-
-  toContextEntry :: Modality -> ResponseContextEntry -> TCM ContextEntry
-  toContextEntry goalModality entry = do
-    let Arg info tyExpr = respType entry
-        cohesion = Text.pack $ prettyShow $ getCohesion info
-        relevance =
-          getRelevance goalModality
-            `inverseComposeRelevance` getRelevance info
-        polarity = modPolarityAnn $ getModalPolarity info
-    ty <- prettyATop tyExpr
-    value <- traverse prettyATop $ respLetValue entry
-    pure
-      ContextEntry
-        { contextEntryOriginalName = Text.pack $ prettyShow $ respOrigName entry
-        , contextEntryOriginalNameInScope =
-            nameInScope $ isInScope $ respOrigName entry
-        , contextEntryReifiedName = Text.pack $ prettyShow $ respReifName entry
-        , contextEntryType = Text.pack $ render ty
-        , contextEntryLetValue = Text.pack . render <$> value
-        , contextEntryInScope = nameInScope $ respInScope entry
-        , -- These are the five binder annotations selected by Agda's own Emacs
-          -- renderer (`prettyResponseContext`, EmacsTop.hs:341-361).
-          contextEntryAttributes =
-            ContextEntryAttributes
-              { contextEntryCohesion =
-                  if Text.null cohesion then Nothing else Just cohesion
-              , contextEntryErased =
-                  not $
-                    getQuantity info
-                      `moreQuantity` getQuantity goalModality
-              , contextEntryRelevance =
-                  if isRelevant relevance
-                    then Nothing
-                    else Just $ Text.pack $ verbalize relevance
-              , contextEntryPolarity =
-                  if polarity == MixedPolarity
-                    then Nothing
-                    else Just $ Text.pack $ verbalize polarity
-              , contextEntryIsInstance = isInstance info
-              }
-        }
-
-  nameInScope InScope = True
-  nameInScope NotInScope = False
+  contextOf pointId =
+    withInteractionId pointId (getResponseContext AsIs pointId)
+      >>= resolveContext pointId
 
   spanOf :: InteractionId -> ExceptT (ProtocolViolation Response) TCM Span
   spanOf pointId =
@@ -561,3 +517,57 @@ resolveLoad path responses response = do
     renderedName metavariable =
       Text.pack . render
         <$> lift (withMetaId (nmid metavariable) $ prettyATop metavariable)
+
+-- Convert raw response context entries into `ContextEntry`s, rendering in the
+-- interaction point's scope. Agda's Emacs frontend also reads the goal
+-- modality before rendering its entries (`prettyResponseContext`,
+-- EmacsTop.hs:329-332); erasure and relevance in the attributes are relative
+-- to this modality.
+resolveContext :: InteractionId -> [ResponseContextEntry] -> TCM [ContextEntry]
+resolveContext pointId entries = withInteractionId pointId $ do
+  goalModality <- currentModality
+  traverse (toContextEntry goalModality) entries
+
+toContextEntry :: Modality -> ResponseContextEntry -> TCM ContextEntry
+toContextEntry goalModality entry = do
+  let Arg info tyExpr = respType entry
+      cohesion = Text.pack $ prettyShow $ getCohesion info
+      relevance =
+        getRelevance goalModality
+          `inverseComposeRelevance` getRelevance info
+      polarity = modPolarityAnn $ getModalPolarity info
+  ty <- prettyATop tyExpr
+  value <- traverse prettyATop $ respLetValue entry
+  pure
+    ContextEntry
+      { contextEntryOriginalName = Text.pack $ prettyShow $ respOrigName entry
+      , contextEntryOriginalNameInScope =
+          nameInScope $ isInScope $ respOrigName entry
+      , contextEntryReifiedName = Text.pack $ prettyShow $ respReifName entry
+      , contextEntryType = Text.pack $ render ty
+      , contextEntryLetValue = Text.pack . render <$> value
+      , contextEntryInScope = nameInScope $ respInScope entry
+      , -- These are the five binder annotations selected by Agda's own Emacs
+        -- renderer (`prettyResponseContext`, EmacsTop.hs:341-361).
+        contextEntryAttributes =
+          ContextEntryAttributes
+            { contextEntryCohesion =
+                if Text.null cohesion then Nothing else Just cohesion
+            , contextEntryErased =
+                not $
+                  getQuantity info
+                    `moreQuantity` getQuantity goalModality
+            , contextEntryRelevance =
+                if isRelevant relevance
+                  then Nothing
+                  else Just $ Text.pack $ verbalize relevance
+            , contextEntryPolarity =
+                if polarity == MixedPolarity
+                  then Nothing
+                  else Just $ Text.pack $ verbalize polarity
+            , contextEntryIsInstance = isInstance info
+            }
+      }
+ where
+  nameInScope InScope = True
+  nameInScope NotInScope = False

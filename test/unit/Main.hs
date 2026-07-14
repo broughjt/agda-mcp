@@ -4,6 +4,7 @@ import Test.Tasty (defaultMain, testGroup)
 
 import AgdaMCP.PositionTest qualified as PositionTest
 import AgdaMCP.Tools.GiveTest qualified as GiveTest
+import AgdaMCP.Tools.GoalTest qualified as GoalTest
 import AgdaMCP.Tools.LoadTest qualified as LoadTest
 
 main :: IO ()
@@ -14,4 +15,5 @@ main =
       [ PositionTest.tests
       , LoadTest.tests
       , GiveTest.tests
+      , GoalTest.tests
       ]

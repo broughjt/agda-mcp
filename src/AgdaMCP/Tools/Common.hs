@@ -12,11 +12,12 @@ module AgdaMCP.Tools.Common (
   parseArguments,
   renderAgdaError,
   resolveError,
+  targetIsLoaded,
   withSession,
 ) where
 
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad.State (get, put, runStateT)
+import Control.Monad.State (get, gets, put, runStateT)
 import Data.Aeson (FromJSON, Value)
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Aeson.Types qualified as Aeson
@@ -35,6 +36,10 @@ import MCP.Server (
  )
 import System.IO.Error (ioeGetErrorString)
 
+import Agda.Interaction.Base (
+  CommandState (theCurrentFile),
+  CurrentFile (currentFilePath),
+ )
 import Agda.Interaction.Response (
   DisplayInfo_boot (..),
   Info_Error_boot (..),
@@ -55,10 +60,10 @@ import Agda.TypeChecking.Monad.Base (
  )
 import Agda.TypeChecking.Pretty (prettyTCM)
 import Agda.TypeChecking.Pretty.Warning (filterTCWarnings)
-import Agda.Utils.FileName (AbsolutePath, filePath)
+import Agda.Utils.FileName (AbsolutePath, absolute, filePath)
 
 import AgdaMCP.Position (Span, fileSpan)
-import AgdaMCP.Session (Session, SessionM)
+import AgdaMCP.Session (Session, SessionM, liftCommandM)
 
 type instance MCPHandlerState = Session
 type instance MCPHandlerUser = ()
@@ -113,6 +118,18 @@ newtype NonFatalError = NonFatalError (Maybe Span, Text)
 -- A goal's user-facing name (e.g. `?0`).
 goalName :: InteractionId -> Text
 goalName goal = "?" <> Text.pack (show (interactionId goal))
+
+-- Whether the given path is the currently loaded file. Goal interaction IDs
+-- are only meaningful against a load result the caller has seen, so
+-- goal-targeting tools may only address the loaded current file. This is the
+-- same absolute-path comparison `runInteraction` uses to decide whether to
+-- load the file implicitly (InteractionTop.hs:257-259), so it predicts Agda
+-- exactly.
+targetIsLoaded :: FilePath -> SessionM Bool
+targetIsLoaded path = do
+  path' <- liftIO $ absolute path
+  current <- liftCommandM $ gets theCurrentFile
+  pure (Just path' == (currentFilePath <$> current))
 
 resolveError :: AbsolutePath -> TCErr -> TCM AgdaError
 resolveError path e =

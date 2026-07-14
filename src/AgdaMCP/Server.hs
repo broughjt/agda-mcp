@@ -4,7 +4,7 @@
 module AgdaMCP.Server (runServer) where
 
 import AgdaMCP.Session (Session)
-import AgdaMCP.Tools (giveTool, loadTool)
+import AgdaMCP.Tools (giveTool, goalTool, loadTool)
 import MCP.Server
 import System.IO (BufferMode (..), hSetBuffering, stderr, stdin, stdout)
 
@@ -24,7 +24,7 @@ runServer session = do
       instructions =
         -- TODO:
         "Interact with Agda"
-      handlers = withToolHandlers [loadTool, giveTool] defaultProcessHandlers
+      handlers = withToolHandlers [loadTool, giveTool, goalTool] defaultProcessHandlers
   serveStdio stdin stdout $
     initMCPServerState
       session
