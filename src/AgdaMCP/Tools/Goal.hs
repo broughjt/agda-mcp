@@ -63,7 +63,7 @@ import Agda.TypeChecking.Monad.Base (
   HighlightingMethod (..),
   IPFace',
   InteractionError (NoSuchInteractionPoint),
-  TCErr (TypeError),
+  TCErr (IOException, TypeError),
   TypeError (InteractionError),
  )
 import Agda.TypeChecking.Monad.MetaVars (withInteractionId)
@@ -248,7 +248,7 @@ data GoalDisplay = GoalDisplay
 -- The goal's type at the requested normalization (or as stated when none was
 -- requested), plus the fully normalized shape when no normalization was
 -- requested. Whether the normalized rendering is shown is a presentation
--- decision (`renderGoalType` shows it only when it differs textually).
+-- decision (`renderGoalResponse` shows it only when it differs textually).
 data GoalType = GoalType
   { goalTypeStated :: GoalShape
   , goalTypeNormalized :: Maybe GoalShape
@@ -265,8 +265,8 @@ data GoalDetail
       }
   | -- An expression query, consisting of the submitted expression, its inferred
     -- type, and its elaboration checked against the goal. Inference and
-    -- checking are independent. For example, unannotated lambdas check but
-    -- don't infer, and type mismatches infer but don't check.
+    -- checking are independent. For example, type mismatches can infer but not
+    -- check, while some expressions infer only a fresh-meta type.
     ExpressionGoal
       { expressionSubmitted :: Text
       , expressionHave :: Either AgdaError Text
@@ -436,7 +436,7 @@ resolvePlainGoal ::
   Either TCErr (GoalTypePayload ()) ->
   TCM (Either (ProtocolViolation Response) GoalResponse)
 resolvePlainGoal path goalId normalization responses parsed = case parsed of
-  Left e -> Right <$> resolveFailure path goalId e
+  Left e -> resolveFailure violation path goalId e
   Right ((), (ctx, boundary, constraints)) -> runExceptT $ do
     goalType <- resolveGoalType violation goalId normalization
     context <- lift $ resolveContext goalId ctx
@@ -463,23 +463,39 @@ resolveExpressionGoal ::
   Either TCErr A.Expr ->
   Either TCErr A.Expr ->
   TCM (Either (ProtocolViolation Response) GoalResponse)
-resolveExpressionGoal path goalId normalization submitted responses inferResult checkResult
-  -- A bogus interaction ID fails `withInteractionId`'s lookup in both
-  -- commands, so either error suffices to conclude the goal doesn't exist.
-  | any failedLookup [inferResult, checkResult] =
-      pure (Right (GoalUnknown goalId))
-  | otherwise = runExceptT $ do
-      goalType <- resolveGoalType violation goalId normalization
-      have <- lift $ resolveResult inferResult
-      checks <- lift $ resolveResult checkResult
-      pure $
-        GoalDisplayed $
-          GoalDisplay goalId goalType (ExpressionGoal submitted have checks)
+resolveExpressionGoal path goalId normalization submitted responses inferResult checkResult =
+  case (failedLookup inferResult, failedLookup checkResult) of
+    -- A bogus interaction ID fails the lookup in both commands. Require both
+    -- errors to name the ID we sent; a mixed or mismatched pair contradicts
+    -- the model and is therefore a protocol violation.
+    (Just inferGoal, Just checkGoal)
+      | inferGoal == goalId && checkGoal == goalId ->
+          pure $ Right $ GoalUnknown goalId
+      | otherwise -> pure $ Left violation
+    (Just _, Nothing) -> pure $ Left violation
+    (Nothing, Just _) -> pure $ Left violation
+    (Nothing, Nothing) -> case firstIOFailure of
+      -- An IOException is environmental rather than a failure to infer or
+      -- check the submitted expression. Treat the whole query as failed so
+      -- the renderer does not claim its location is expression-relative.
+      Just e -> Right <$> resolveGoalError path e
+      Nothing -> runExceptT $ do
+        goalType <- resolveGoalType violation goalId normalization
+        have <- lift $ resolveResult inferResult
+        checks <- lift $ resolveResult checkResult
+        pure $
+          GoalDisplayed $
+            GoalDisplay goalId goalType (ExpressionGoal submitted have checks)
  where
   violation =
     ProtocolViolation "Cmd_goal_type_context_infer/check" responses
 
-  failedLookup = either isNoSuchInteractionPoint (const False)
+  failedLookup = either noSuchInteractionPoint (const Nothing)
+
+  firstIOFailure = case (inferResult, checkResult) of
+    (Left e@(IOException _ _ _), _) -> Just e
+    (_, Left e@(IOException _ _ _)) -> Just e
+    _ -> Nothing
 
   resolveResult (Left e) = do
     path' <- liftIO (absolute path)
@@ -491,19 +507,29 @@ resolveExpressionGoal path goalId normalization submitted responses inferResult 
 -- failures of the goal-type commands. A bogus interaction ID fails
 -- `withInteractionId`'s `lookupInteractionPoint` (MetaVars.hs:638-640) with
 -- this dedicated constructor (Base.hs:5412/5438).
-isNoSuchInteractionPoint :: TCErr -> Bool
-isNoSuchInteractionPoint e
+noSuchInteractionPoint :: TCErr -> Maybe InteractionId
+noSuchInteractionPoint e
   | TypeError _ _ closure <- e
-  , InteractionError (NoSuchInteractionPoint _) <- clValue closure =
-      True
-  | otherwise = False
+  , InteractionError (NoSuchInteractionPoint goalId) <- clValue closure =
+      Just goalId
+  | otherwise = Nothing
 
-resolveFailure :: FilePath -> InteractionId -> TCErr -> TCM GoalResponse
-resolveFailure path goalId e
-  | isNoSuchInteractionPoint e = pure $ GoalUnknown goalId
-  | otherwise = do
-      path' <- liftIO $ absolute path
-      GoalFailed <$> flip resolveError e path'
+resolveFailure ::
+  ProtocolViolation Response ->
+  FilePath ->
+  InteractionId ->
+  TCErr ->
+  TCM (Either (ProtocolViolation Response) GoalResponse)
+resolveFailure violation path goalId e = case noSuchInteractionPoint e of
+  Just failedGoal
+    | failedGoal == goalId -> pure $ Right $ GoalUnknown goalId
+    | otherwise -> pure $ Left violation
+  Nothing -> Right <$> resolveGoalError path e
+
+resolveGoalError :: FilePath -> TCErr -> TCM GoalResponse
+resolveGoalError path e = do
+  path' <- liftIO $ absolute path
+  GoalFailed <$> resolveError path' e
 
 -- The goal's type isn't part of the `Goal_GoalType` payload, so we query it
 -- with `typeOfMeta` and render in the interaction point's scope, as JSONTop

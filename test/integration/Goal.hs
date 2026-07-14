@@ -5,7 +5,10 @@
 -- the refusal paths).
 module Goal (tests) where
 
+import Control.Monad.IO.Class (liftIO)
+import Data.Char (isDigit)
 import Data.Text qualified as Text
+import System.Directory (removeFile)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
@@ -74,6 +77,27 @@ tests =
               boundary @?= []
               constraints @?= []
             other -> assertFailure ("expected a plain goal display, got " <> show other)
+    , testCase "plain query reports an environmental file failure" $
+        withFixture "Normalize.agda" $ \path -> do
+          response <-
+            runSession $ do
+              _ <- load (LoadRequest path)
+              liftIO $ removeFile path
+              goal (GoalRequest path (InteractionId 0) Nothing Nothing)
+          case response of
+            GoalFailed e -> assertContains "does not exist" (agdaErrorMessage e)
+            other -> assertFailure ("expected GoalFailed, got " <> show other)
+    , testCase "plain query carries a real cubical boundary" $
+        withFixture "CubicalBoundary.agda" $ \path -> do
+          response <-
+            runSession $
+              load (LoadRequest path)
+                *> goal (GoalRequest path (InteractionId 0) Nothing Nothing)
+          display <- expectDisplayed response
+          case displayDetail display of
+            PlainGoal _ boundary _ ->
+              boundary @?= ["i = i0 ⊢ right", "i = i1 ⊢ left"]
+            other -> assertFailure ("expected a plain goal display, got " <> show other)
     , testCase "fitting expression infers and checks" $
         withFixture "Context.agda" $ \path -> do
           response <-
@@ -116,8 +140,14 @@ tests =
           display <- expectDisplayed response
           displayType display
             @?= GoalType (GoalOfType "Nat → Nat") (Just (GoalOfType "Nat → Nat"))
-          displayDetail display
-            @?= ExpressionGoal "λ n → n" (Right "(n : _8) → _8") (Right "λ n → n")
+          case displayDetail display of
+            ExpressionGoal submitted (Right inferred) (Right checked) -> do
+              submitted @?= "λ n → n"
+              assertFreshMetaIdentityType inferred
+              checked @?= "λ n → n"
+            other ->
+              assertFailure
+                ("expected successful inference and checking, got " <> show other)
     , testCase "scope error fails both inference and checking independently" $
         withFixture "Normalize.agda" $ \path -> do
           response <-
@@ -133,6 +163,16 @@ tests =
             other ->
               assertFailure
                 ("expected both inference and checking to fail, got " <> show other)
+    , testCase "expression query reports an environmental file failure" $
+        withFixture "Context.agda" $ \path -> do
+          response <-
+            runSession $ do
+              _ <- load (LoadRequest path)
+              liftIO $ removeFile path
+              goal (GoalRequest path (InteractionId 0) Nothing (Just "y"))
+          case response of
+            GoalFailed e -> assertContains "does not exist" (agdaErrorMessage e)
+            other -> assertFailure ("expected GoalFailed, got " <> show other)
     , testCase "constraints mentioning the goal are reported" $
         -- The dogfood UX-gap-3 shape: a hole in type position whose clauses
         -- constrain it. The postponed definition check is attached to the
@@ -201,6 +241,19 @@ assertContains fragment text
             <> ", got: "
             <> Text.unpack text
         )
+
+assertFreshMetaIdentityType :: Text.Text -> IO ()
+assertFreshMetaIdentityType inferred = case Text.words inferred of
+  ["(n", ":", parameterWithParen, "→", result]
+    | Just parameter <- Text.stripSuffix ")" parameterWithParen
+    , parameter == result
+    , Just digits <- Text.stripPrefix "_" parameter
+    , not (Text.null digits)
+    , Text.all isDigit digits ->
+        pure ()
+  _ ->
+    assertFailure
+      ("expected a fresh-meta identity-function type, got " <> Text.unpack inferred)
 
 noAttributes :: ContextEntryAttributes
 noAttributes = ContextEntryAttributes Nothing False Nothing Nothing False
