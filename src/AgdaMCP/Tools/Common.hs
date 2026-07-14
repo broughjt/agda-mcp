@@ -123,13 +123,12 @@ goalName goal = "?" <> Text.pack (show (interactionId goal))
 -- are only meaningful against a load result the caller has seen, so
 -- goal-targeting tools may only address the loaded current file. This is the
 -- same absolute-path comparison `runInteraction` uses to decide whether to
--- load the file implicitly (InteractionTop.hs:257-259), so it predicts Agda
--- exactly.
+-- load the file implicitly (InteractionTop.hs:257-259).
 targetIsLoaded :: FilePath -> SessionM Bool
 targetIsLoaded path = do
   path' <- liftIO $ absolute path
   current <- liftCommandM $ gets theCurrentFile
-  pure (Just path' == (currentFilePath <$> current))
+  pure $ Just path' == (currentFilePath <$> current)
 
 resolveError :: AbsolutePath -> TCErr -> TCM AgdaError
 resolveError path e =

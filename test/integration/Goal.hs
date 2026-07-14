@@ -36,7 +36,7 @@ tests :: TestTree
 tests =
   testGroup
     "goal"
-    [ testCase "goal type is reported as stated plus normalised when they differ" $
+    [ testCase "goal type is reported as stated plus normalized when they differ" $
         withFixture "Normalize.agda" $ \path -> do
           response <-
             runSession $

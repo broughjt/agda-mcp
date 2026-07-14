@@ -68,7 +68,7 @@ renderTests =
               )
           )
           @?= "?0 : double zero ≡ plus zero zero\n\
-              \normalised: zero ≡ zero\n\
+              \normalized: zero ≡ zero\n\
               \  one : Nat\n\
               \  one = suc zero\n\
               \  x : Nat\n\n\
@@ -76,7 +76,7 @@ renderTests =
               \i = i0 ⊢ zero\n\n\
               \Constraints on this goal:\n\n\
               \Check definition of Constraints.f : ?0 (blocked on _5)"
-    , testCase "equal normalised rendering is suppressed" $
+    , testCase "equal normalized rendering is suppressed" $
         renderGoalResponse
           ( GoalDisplayed
               ( GoalDisplay
@@ -96,7 +96,7 @@ renderTests =
               )
           )
           @?= "?0 : zero ≡ zero"
-    , testCase "sort goal never shows a normalised line" $
+    , testCase "sort goal never shows a normalized line" $
         renderGoalResponse
           ( GoalDisplayed
               ( GoalDisplay
@@ -159,7 +159,7 @@ renderTests =
               )
           )
           @?= "?0 : double zero ≡ plus zero zero\n\
-              \normalised: zero ≡ zero\n\n\
+              \normalized: zero ≡ zero\n\n\
               \Have: zero : Nat\n\n\
               \Check failed (locations are relative to the submitted expression):\n\n\
               \1.1-5: error: [UnequalTerms]\n\

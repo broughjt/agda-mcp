@@ -482,8 +482,9 @@ resolveLoad path responses response = do
   -- Obtain the goal's unnormalized context
   contextOf :: InteractionId -> TCM [ContextEntry]
   contextOf pointId =
-    withInteractionId pointId (getResponseContext AsIs pointId)
-      >>= resolveContext pointId
+    withInteractionId pointId $
+      getResponseContext AsIs pointId
+        >>= resolveContext pointId
 
   spanOf :: InteractionId -> ExceptT (ProtocolViolation Response) TCM Span
   spanOf pointId =
@@ -519,10 +520,7 @@ resolveLoad path responses response = do
         <$> lift (withMetaId (nmid metavariable) $ prettyATop metavariable)
 
 -- Convert raw response context entries into `ContextEntry`s, rendering in the
--- interaction point's scope. Agda's Emacs frontend also reads the goal
--- modality before rendering its entries (`prettyResponseContext`,
--- EmacsTop.hs:329-332); erasure and relevance in the attributes are relative
--- to this modality.
+-- interaction point's scope.
 resolveContext :: InteractionId -> [ResponseContextEntry] -> TCM [ContextEntry]
 resolveContext pointId entries = withInteractionId pointId $ do
   goalModality <- currentModality

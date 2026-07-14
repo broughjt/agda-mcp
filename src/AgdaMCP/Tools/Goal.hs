@@ -108,7 +108,7 @@ goalTool =
         "Inspect a single open goal in the currently loaded Agda file, without \
         \modifying anything. With just a goal ID, reports the goal's type, its \
         \local context, and any unsolved constraints mentioning the goal; the \
-        \type is reported as stated plus fully normalised when the two differ, \
+        \type is reported as stated plus fully normalized when the two differ, \
         \or at the requested `normalization` only. With an `expression`, \
         \instead reports the goal's type, the expression's inferred type \
         \(Have), and the expression's elaboration checked against the goal \
@@ -156,7 +156,7 @@ goalTool =
                     , "description"
                         .= ( "How much to normalize the reported types. When \
                              \omitted, the goal type is reported as stated \
-                             \plus fully normalised when that differs." ::
+                             \plus fully normalized when that differs." ::
                                Text
                            )
                     ]
@@ -203,7 +203,7 @@ normalizations =
     , ("instantiated", Instantiated)
     , ("headnormal", HeadNormal)
     , ("simplified", Simplified)
-    , ("normalised", Normalised)
+    , ("normalized", Normalised)
     ]
 
 parseNormalization :: Value -> Aeson.Parser Rewrite
@@ -246,12 +246,12 @@ data GoalDisplay = GoalDisplay
   deriving (Eq, Show)
 
 -- The goal's type at the requested normalization (or as stated when none was
--- requested), plus the fully normalised shape when no normalization was
--- requested. Whether the normalised rendering is shown is a presentation
+-- requested), plus the fully normalized shape when no normalization was
+-- requested. Whether the normalized rendering is shown is a presentation
 -- decision (`renderGoalType` shows it only when it differs textually).
 data GoalType = GoalType
   { goalTypeStated :: GoalShape
-  , goalTypeNormalised :: Maybe GoalShape
+  , goalTypeNormalized :: Maybe GoalShape
   }
   deriving (Eq, Show)
 
@@ -509,7 +509,7 @@ resolveFailure path goalId e
 -- through the same two `Judgement`-derived shapes as the load goals list
 -- (`typeOfMetaMI`, BasicOps.hs:889-921), so the same `GoalShape` note in
 -- `AgdaMCP.Tools.Load` applies and other constructors are violations. The
--- judgement is independent of the normalization, so the normalised shape (for
+-- judgement is independent of the normalization, so the normalized shape (for
 -- requests without a normalization) can only differ in the type's rendering.
 resolveGoalType ::
   ProtocolViolation Response ->
@@ -567,14 +567,14 @@ renderGoalResponse (GoalDisplayed (GoalDisplay goalId goalType detail)) =
  where
   goalLines =
     renderShape (goalName goalId) (goalTypeStated goalType)
-      : normalisedLine
-  -- The normalised rendering is shown only when it differs textually from
+      : normalizedLine
+  -- The normalized rendering is shown only when it differs textually from
   -- the stated one. The shapes can't disagree (see `resolveGoalType`), so
   -- sort goals never show the line.
-  normalisedLine =
-    case (goalTypeStated goalType, goalTypeNormalised goalType) of
-      (GoalOfType stated, Just (GoalOfType normalised))
-        | normalised /= stated -> ["normalised: " <> normalised]
+  normalizedLine =
+    case (goalTypeStated goalType, goalTypeNormalized goalType) of
+      (GoalOfType stated, Just (GoalOfType normalized))
+        | normalized /= stated -> ["normalized: " <> normalized]
       _ -> []
 
 goalSection :: Text -> [Text] -> [Text]
