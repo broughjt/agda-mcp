@@ -126,7 +126,6 @@ giveTool =
   toolHandler
     "give"
     ( Just
-        -- TODO:
         "Fill one or more goals in an Agda source file. Takes the file `path` and a non-empty list of `gives`, each consisting of a goal interaction ID and an expression. The file must be the currently loaded file. Agda tracks goals for one file at a time, so goal interaction IDs are only valid for the most recently loaded file, and a give against any other file is refused and returns that file's fresh load result to give against instead. Gives are checked in order as an atomic batch: if one is rejected, subsequent gives are skipped and no source edits are written. Before writing, the server verifies that the file on disk still matches the source Agda checked; if it changed, all edits are refused. Every checked outcome is followed by a reload to resync. Interaction IDs may change, so use the goals in the fresh result. Successful gives write Agda’s elaborated, pretty-printed expressions, which may differ from the submitted text. The result reports both when they differ. Relative paths are resolved against the server process’s working directory. Prefer an absolute path when that directory may be ambiguous."
     )
     ( InputSchema
@@ -218,7 +217,8 @@ data GiveOutcome
     -- changed since it was loaded), so the recorded goal spans are unreliable
     -- and all edits were refused.
     GiveFileChanged
-  | -- Reading or writing the file failed (deleted, permissions, disk full, -- ...).
+  | -- Reading or writing the file failed (for example, because the file was
+    -- deleted, permissions changed, or the disk was full).
     GiveIOError Text
   deriving (Show)
 
@@ -257,7 +257,7 @@ data GiveRejection = GiveRejection
   }
   deriving (Show)
 
--- Position in a batch of gives, consisting of the number of dicarded gives that
+-- Position in a batch of gives, consisting of the number of discarded gives that
 -- had already been checked, and the number of gives which were skipped without
 -- being checked.
 data BatchPosition = BatchPosition
@@ -424,9 +424,13 @@ giveSingle path goal expression = do
         -- thinking about when agents should force.
         IOTCM path None Direct (Cmd_give WithoutForce goal noRange expression)
   parsed <- fromProtocolResult $ parseGiveResponses goal responses
-  resolved <-
-    liftTCM $ resolveGive path goal (Text.pack expression) responses parsed
-  fromProtocolResult resolved
+  case parsed of
+    Left err -> Left <$> liftTCM (resolveGiveFailure path goal err)
+    Right elaborated -> do
+      resolved <-
+        liftTCM $
+          resolveGiveEdit goal (Text.pack expression) responses elaborated
+      Right <$> fromProtocolResult resolved
 
 -- An edit directive resulting from the application of a give command,
 -- consisting of the interaction id, the hole's span, the submitted expression,
@@ -439,34 +443,35 @@ data Edit = Edit
   }
   deriving (Show)
 
-resolveGive ::
+resolveGiveFailure ::
   FilePath ->
   InteractionId ->
-  Text ->
-  [Response] ->
-  Either TCErr String ->
-  TCM
-    ( Either
-        (ProtocolViolation Response)
-        (Either GiveFailure Edit)
-    )
-resolveGive path goal _ _ (Left e)
+  TCErr ->
+  TCM GiveFailure
+resolveGiveFailure path goal e
   | IOException _ _ exception <- e =
-      pure $ Right $ Left $ GiveIOFailed $ Text.pack $ displayException exception
+      pure $ GiveIOFailed $ Text.pack $ displayException exception
   -- A give for a non-existent interaction ID fails `give_gen`'s first fallible
   -- operation, `lookupInteractionPoint` (MetaVars.hs:638-640), with this
   -- dedicated constructor. Match it before rendering so it isn't mistakenly
   -- reported as an error in the submitted expression.
   | TypeError _ _ closure <- e
   , InteractionError (NoSuchInteractionPoint _) <- clValue closure =
-      pure (Right (Left UnknownGoal))
+      pure UnknownGoal
   | otherwise = do
       path' <- liftIO (absolute path)
       interactionPoints <- useR stInteractionPoints
       let holeSpan = BiMap.lookup goal interactionPoints >>= fileSpan path' . ipRange
       e' <- resolveError path' e
-      pure (Right (Left (GiveFailed holeSpan e')))
-resolveGive _ goal submitted responses (Right s) =
+      pure (GiveFailed holeSpan e')
+
+resolveGiveEdit ::
+  InteractionId ->
+  Text ->
+  [Response] ->
+  String ->
+  TCM (Either (ProtocolViolation Response) Edit)
+resolveGiveEdit goal submitted responses elaborated =
   maybe
     missing
     gave
@@ -474,7 +479,7 @@ resolveGive _ goal submitted responses (Right s) =
     <$> getInteractionRange goal
  where
   gave interval =
-    Right (Right (Edit goal (toSpan interval) submitted (Text.pack s)))
+    Right (Edit goal (toSpan interval) submitted (Text.pack elaborated))
   missing = Left (ProtocolViolation "Cmd_give" responses)
 
 -- TODO: Remove the `Text.strip`?
@@ -665,27 +670,38 @@ renderRejectedError (AgdaError message errorSpan warnings) =
 -- e.g. "No file changes were made; 1 earlier give in this call was discarded
 -- and 2 later gives were skipped."
 renderUnapplied :: BatchPosition -> Text
-renderUnapplied (BatchPosition 0 0) = "No file changes were made."
 renderUnapplied (BatchPosition discarded skipped) =
-  "No file changes were made; "
-    <> Text.intercalate " and " (discardedClause <> skippedClause)
-    <> "."
+  case clauses of
+    [] -> "No file changes were made."
+    firstClause : remainingClauses ->
+      "No file changes were made; "
+        <> Text.intercalate
+          " and "
+          ( renderClause True firstClause
+              : map (renderClause False) remainingClauses
+          )
+        <> "."
  where
-  -- "in this call" reads once, on the first clause present.
-  discardedClause =
-    [ gives discarded "earlier" <> " in this call " <> was discarded <> " discarded"
+  -- Each clause is a grammatical subject and predicate. "in this call"
+  -- modifies only the first subject, so it reads once whether one or both
+  -- clauses are present.
+  clauses =
+    [ (numberedGives discarded "earlier", agreement discarded <> " discarded")
     | discarded > 0
     ]
-  skippedClause =
-    [ gives skipped "later"
-        <> (if discarded > 0 then " " else " in this call ")
-        <> was skipped
-        <> " skipped"
-    | skipped > 0
-    ]
-  gives n position =
+      <> [ (numberedGives skipped "later", agreement skipped <> " skipped")
+         | skipped > 0
+         ]
+
+  renderClause includeCall (subject, predicate) =
+    subject
+      <> (if includeCall then " in this call " else " ")
+      <> predicate
+
+  numberedGives n position =
     Text.pack (show n)
       <> " "
       <> position
       <> (if n == 1 then " give" else " gives")
-  was n = if n == 1 then "was" else "were" :: Text
+
+  agreement n = if n == 1 then "was" else "were" :: Text

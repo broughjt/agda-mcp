@@ -19,16 +19,10 @@ import Agda.Syntax.Position qualified
 import Agda.Utils.FileName (AbsolutePath)
 import Agda.Utils.Maybe.Strict qualified as Strict
 
--- A position in the loaded file, as both a 0-based code-point offset into the
--- Agda-normalized source text (what `applyEdits` splices with; see the note
--- in `commit` about normalization) and the 1-based line/column that Agda
--- prints. Agda's `posPos` is 1-based, hence the shift in `toPos`.
-
 -- A position in a loaded file, consisting of a zero-based offset into the
--- Agda-normalized source text (see comment in `commit`) and one-based
--- line/column that Agda prints.
---
--- We do this because Agda's one-based positions are weird.
+-- Agda-normalized source text (what `applyEdits` splices; see the note in
+-- `commit`) and the one-based line/column that Agda prints. Agda's `posPos` is
+-- one-based, hence the subtraction in `toPosition`.
 data Position = Position
   { positionOffset :: Int
   , positionLine :: Int

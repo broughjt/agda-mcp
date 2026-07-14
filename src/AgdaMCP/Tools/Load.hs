@@ -323,15 +323,15 @@ renderContext = concatMap renderContextEntry . reverse
 -- `prettyResponseContext` uses, EmacsTop.hs:365-367).
 renderContextEntry :: ContextEntry -> [Text]
 renderContextEntry
-  ( ContextEntry
-      originalName
-      originalNameInScope
-      reifiedName
-      ty
-      letValue
-      inScope
-      attributes
-    ) =
+  ContextEntry
+    { contextEntryOriginalName = originalName
+    , contextEntryOriginalNameInScope = originalNameInScope
+    , contextEntryReifiedName = reifiedName
+    , contextEntryType = ty
+    , contextEntryLetValue = letValue
+    , contextEntryInScope = inScope
+    , contextEntryAttributes = attributes
+    } =
     concatMap indent $ typingLine : maybeToList letLine
    where
     typingLine = cohesionPrefix <> displayName <> " : " <> ty <> extrasNote
