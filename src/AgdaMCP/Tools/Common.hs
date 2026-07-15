@@ -144,7 +144,7 @@ resolveError path e =
     ParserError (ReadFileError file readError) ->
       pure $
         "Cannot read file "
-          <> Text.pack (filePath (rangeFilePath file))
+          <> Text.pack (filePath $ rangeFilePath file)
           <> ": "
           <> Text.pack (ioeGetErrorString readError)
           <> "."

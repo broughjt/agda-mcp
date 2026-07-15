@@ -207,13 +207,13 @@ tests =
                 *> give (GiveRequest path [(InteractionId 0, "zero"), (InteractionId 1, "suc")])
           rejection <- expectRejected (giveOutcome response)
           rejectedGoal rejection @?= InteractionId 1
-          batchDiscarded (rejectedBatch rejection) @?= 1
-          batchSkipped (rejectedBatch rejection) @?= 0
+          batchIndex (rejectedBatch rejection) @?= 1
+          batchLength (rejectedBatch rejection) @?= 2
           after <- ByteString.readFile path
           after @?= original
           (goals, _, _, _) <- expectLoaded (giveReload response)
           length goals @?= 2
-    , testCase "a middle rejection counts discarded and skipped gives" $
+    , testCase "a middle rejection reports its batch position" $
         withFixture "ThreeHoles.agda" $ \path -> do
           original <- ByteString.readFile path
           response <-
@@ -229,8 +229,8 @@ tests =
                   )
           rejection <- expectRejected (giveOutcome response)
           rejectedGoal rejection @?= InteractionId 1
-          batchDiscarded (rejectedBatch rejection) @?= 1
-          batchSkipped (rejectedBatch rejection) @?= 1
+          batchIndex (rejectedBatch rejection) @?= 1
+          batchLength (rejectedBatch rejection) @?= 3
           after <- ByteString.readFile path
           after @?= original
           (goals, _, _, _) <- expectLoaded (giveReload response)
@@ -245,8 +245,8 @@ tests =
           rejectedGoal rejection @?= InteractionId 0
           agdaErrorSpan (rejectedError rejection) @?= Nothing
           assertBool "the hole's span is reported" (isJust (rejectedSpan rejection))
-          batchDiscarded (rejectedBatch rejection) @?= 0
-          batchSkipped (rejectedBatch rejection) @?= 0
+          batchIndex (rejectedBatch rejection) @?= 0
+          batchLength (rejectedBatch rejection) @?= 1
           after <- ByteString.readFile path
           after @?= original
           (goals, _, _, _) <- expectLoaded (giveReload response)
@@ -440,14 +440,14 @@ tests =
           case giveOutcome response of
             GiveUnknownGoal goal batch -> do
               goal @?= InteractionId 9
-              batchDiscarded batch @?= 0
-              batchSkipped batch @?= 0
+              batchIndex batch @?= 0
+              batchLength batch @?= 1
             other -> assertFailure ("expected GiveUnknownGoal, got " <> show other)
           (goals, _, _, _) <- expectLoaded $ giveReload response
           length goals @?= 1
           after <- ByteString.readFile path
           after @?= original
-    , testCase "bogus goal id mid-batch counts discarded and skipped gives" $
+    , testCase "bogus goal id mid-batch reports its batch position" $
         withFixture "ThreeHoles.agda" $ \path -> do
           original <- ByteString.readFile path
           response <-
@@ -464,8 +464,8 @@ tests =
           case giveOutcome response of
             GiveUnknownGoal goal batch -> do
               goal @?= InteractionId 9
-              batchDiscarded batch @?= 1
-              batchSkipped batch @?= 1
+              batchIndex batch @?= 1
+              batchLength batch @?= 3
             other -> assertFailure ("expected GiveUnknownGoal, got " <> show other)
           after <- ByteString.readFile path
           after @?= original

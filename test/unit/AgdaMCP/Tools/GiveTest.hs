@@ -172,7 +172,7 @@ rejectedTests =
                           Nothing
                           []
                       )
-                      (BatchPosition 0 0)
+                      (BatchPosition 0 1)
                   )
               )
               ( Loaded
@@ -192,12 +192,12 @@ rejectedTests =
                   []
               )
           )
-          @?= "Give rejected for ?1 (at 76:27-32).\n\n\
+          @?= "Give rejected for ?1 (at 76:27-32; give 1 of 1). No file changes were made.\n\n\
               \Expression error (locations are relative to the submitted expression):\n\n\
               \1.1-2: error: [UnequalTerms]\n\
               \𝟏 !=< true ＝ true\n\
               \when checking that the expression ⋆ has type true ＝ true\n\n\
-              \No file changes were made. Reloaded to resync:\n\n\
+              \Reloaded to resync:\n\n\
               \Load succeeded: 2 goals.\n\n\
               \?0 : false ＝ false (at 75:29-34)\n\n\
               \?1 : true ＝ true (at 76:27-32)"
@@ -215,7 +215,7 @@ rejectedTests =
                           , Warning (Nothing, "Second warning")
                           ]
                       )
-                      (BatchPosition 1 0)
+                      (BatchPosition 1 2)
                   )
               )
               ( Loaded
@@ -225,13 +225,13 @@ rejectedTests =
                   []
               )
           )
-          @?= "Give rejected for ?3 (at 40:7-12).\n\n\
+          @?= "Give rejected for ?3 (at 40:7-12; give 2 of 2). No file changes were made.\n\n\
               \Expression error (locations are relative to the submitted expression):\n\n\
               \1.1-5: error: Not in scope: nope\n\n\
               \Warnings:\n\n\
               \First warning\n\
               \Second warning\n\n\
-              \No file changes were made; 1 earlier give in this call was discarded. Reloaded to resync:\n\n\
+              \Reloaded to resync:\n\n\
               \Load succeeded: no goals, 1 warning.\n\n\
               \Warnings:\n\n\
               \Reload warning"
@@ -247,7 +247,7 @@ rejectedTests =
                           Nothing
                           []
                       )
-                      (BatchPosition 0 0)
+                      (BatchPosition 0 1)
                   )
               )
               ( LoadFailed
@@ -258,14 +258,14 @@ rejectedTests =
                   )
               )
           )
-          @?= "Give rejected for ?0.\n\n\
+          @?= "Give rejected for ?0 (give 1 of 1). No file changes were made.\n\n\
               \Expression error (locations are relative to the submitted expression):\n\n\
               \1.1-5: error: Not in scope: nope\n\n\
-              \No file changes were made. Reloaded to resync:\n\n\
+              \Reloaded to resync:\n\n\
               \Load failed:\n\n\
               \Example.agda:3,1-4\n\
               \Not in scope: bad"
-    , testCase "rejection counts both discarded and skipped gives" $
+    , testCase "rejection reports its position in the batch" $
         renderGiveResponse
           ( GiveResponse
               ( GiveRejected
@@ -277,16 +277,15 @@ rejectedTests =
                           Nothing
                           []
                       )
-                      (BatchPosition 1 2)
+                      (BatchPosition 1 4)
                   )
               )
               (Loaded [] [] [] [])
           )
-          @?= "Give rejected for ?2.\n\n\
+          @?= "Give rejected for ?2 (give 2 of 4). No file changes were made.\n\n\
               \Expression error (locations are relative to the submitted expression):\n\n\
               \1.1-5: error: Not in scope: nope\n\n\
-              \No file changes were made; 1 earlier give in this call was \
-              \discarded and 2 later gives were skipped. Reloaded to resync:\n\n\
+              \Reloaded to resync:\n\n\
               \Load succeeded: no goals."
     ]
 
@@ -297,7 +296,7 @@ unknownGoalTests =
     [ testCase "unknown goal followed by the fresh goal list" $
         renderGiveResponse
           ( GiveResponse
-              (GiveUnknownGoal (InteractionId 9) (BatchPosition 0 0))
+              (GiveUnknownGoal (InteractionId 9) (BatchPosition 0 1))
               ( Loaded
                   [ Goal
                       (InteractionId 0)
@@ -310,30 +309,33 @@ unknownGoalTests =
                   []
               )
           )
-          @?= "No such goal ?9 in the loaded file. Goal IDs renumber after \
-              \every edit or reload; use the IDs from the fresh list below.\n\n\
-              \No file changes were made. Reloaded to resync:\n\n\
+          @?= "No such goal ?9 (give 1 of 1). No file changes were made. Goal \
+              \IDs renumber after every edit or reload; use the IDs from the \
+              \fresh list below.\n\n\
+              \Reloaded to resync:\n\n\
               \Load succeeded: 1 goal.\n\n\
               \?0 : false ＝ false (at 75:29-34)"
-    , testCase "unknown goal with earlier gives discarded" $
+    , testCase "unknown goal later in the batch" $
         renderGiveResponse
           ( GiveResponse
-              (GiveUnknownGoal (InteractionId 99) (BatchPosition 2 0))
+              (GiveUnknownGoal (InteractionId 99) (BatchPosition 2 3))
               (Loaded [] [] [] [])
           )
-          @?= "No such goal ?99 in the loaded file. Goal IDs renumber after \
-              \every edit or reload; use the IDs from the fresh list below.\n\n\
-              \No file changes were made; 2 earlier gives in this call were discarded. Reloaded to resync:\n\n\
+          @?= "No such goal ?99 (give 3 of 3). No file changes were made. Goal \
+              \IDs renumber after every edit or reload; use the IDs from the \
+              \fresh list below.\n\n\
+              \Reloaded to resync:\n\n\
               \Load succeeded: no goals."
-    , testCase "unknown goal with later gives skipped" $
+    , testCase "unknown goal early in the batch" $
         renderGiveResponse
           ( GiveResponse
-              (GiveUnknownGoal (InteractionId 5) (BatchPosition 0 3))
+              (GiveUnknownGoal (InteractionId 5) (BatchPosition 0 4))
               (Loaded [] [] [] [])
           )
-          @?= "No such goal ?5 in the loaded file. Goal IDs renumber after \
-              \every edit or reload; use the IDs from the fresh list below.\n\n\
-              \No file changes were made; 3 later gives in this call were skipped. Reloaded to resync:\n\n\
+          @?= "No such goal ?5 (give 1 of 4). No file changes were made. Goal \
+              \IDs renumber after every edit or reload; use the IDs from the \
+              \fresh list below.\n\n\
+              \Reloaded to resync:\n\n\
               \Load succeeded: no goals."
     ]
 

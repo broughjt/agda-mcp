@@ -120,6 +120,7 @@ import AgdaMCP.Tools.Load (
   load,
   renderLoadResponse,
  )
+import Data.Bitraversable (bitraverse)
 
 giveTool :: ToolHandler
 giveTool =
@@ -222,8 +223,9 @@ data GiveOutcome
     GiveIOError Text
   deriving (Show)
 
--- Internal failures of the pre-write staleness guard. Both bugs in agda-mcp;
--- thrown and caught nowhere, so the process dies with debug output on stderr.
+-- Internal failures of the pre-write staleness guard. Both bugs in agda-mcp.
+-- Thrown and caught nowhere so that the process dies with debug output on
+-- stderr.
 data GiveBug
   = -- After a batch of successful gives, locating the loaded source's
     -- fingerprint broke.
@@ -257,12 +259,10 @@ data GiveRejection = GiveRejection
   }
   deriving (Show)
 
--- Position in a batch of gives, consisting of the number of discarded gives that
--- had already been checked, and the number of gives which were skipped without
--- being checked.
+-- Index of the failed give and length of the batch of gives.
 data BatchPosition = BatchPosition
-  { batchDiscarded :: Int
-  , batchSkipped :: Int
+  { batchIndex :: Int
+  , batchLength :: Int
   }
   deriving (Show)
 
@@ -322,7 +322,7 @@ give (GiveRequest path items) = do
   runGive :: (Int, GiveItem) -> ExceptT GiveOutcome SessionM Edit
   runGive (index, (goal, expression)) =
     ExceptT $
-      first (fromFailure goal (BatchPosition index (length items - index - 1)))
+      first (fromFailure goal (BatchPosition index (length items)))
         <$> giveSingle path goal expression
 
   fromFailure :: InteractionId -> BatchPosition -> GiveFailure -> GiveOutcome
@@ -424,13 +424,15 @@ giveSingle path goal expression = do
         -- thinking about when agents should force.
         IOTCM path None Direct (Cmd_give WithoutForce goal noRange expression)
   parsed <- fromProtocolResult $ parseGiveResponses goal responses
-  case parsed of
-    Left err -> Left <$> liftTCM (resolveGiveFailure path goal err)
-    Right elaborated -> do
-      resolved <-
-        liftTCM $
-          resolveGiveEdit goal (Text.pack expression) responses elaborated
-      Right <$> fromProtocolResult resolved
+  bitraverse resolveFailure (resolveSuccess responses) parsed
+ where
+  resolveFailure :: TCErr -> SessionM GiveFailure
+  resolveFailure = liftTCM . resolveGiveFailure path goal
+
+  resolveSuccess :: [Response] -> String -> SessionM Edit
+  resolveSuccess responses elaborated =
+    (liftTCM $ resolveGiveEdit goal (Text.pack expression) responses elaborated)
+      >>= fromProtocolResult
 
 -- An edit directive resulting from the application of a give command,
 -- consisting of the interaction id, the hole's span, the submitted expression,
@@ -459,11 +461,10 @@ resolveGiveFailure path goal e
   , InteractionError (NoSuchInteractionPoint _) <- clValue closure =
       pure UnknownGoal
   | otherwise = do
-      path' <- liftIO (absolute path)
+      path' <- liftIO $ absolute path
       interactionPoints <- useR stInteractionPoints
       let holeSpan = BiMap.lookup goal interactionPoints >>= fileSpan path' . ipRange
-      e' <- resolveError path' e
-      pure (GiveFailed holeSpan e')
+      GiveFailed holeSpan <$> resolveError path' e
 
 resolveGiveEdit ::
   InteractionId ->
@@ -482,6 +483,7 @@ resolveGiveEdit goal submitted responses elaborated =
     Right (Edit goal (toSpan interval) submitted (Text.pack elaborated))
   missing = Left (ProtocolViolation "Cmd_give" responses)
 
+-- TODO: Remove this check entirely?
 -- TODO: Remove the `Text.strip`?
 spanIsHole :: Text -> Bool
 spanIsHole raw =
@@ -580,19 +582,20 @@ renderGiveOutcome (GiveApplied edits) =
 renderGiveOutcome (GiveRejected (GiveRejection goal holeSpan e batch)) =
   "Give rejected for "
     <> goalName goal
-    <> maybe "." (\s -> " (at " <> renderSpan s <> ").") holeSpan
+    <> " ("
+    <> maybe "" (\s -> "at " <> renderSpan s <> "; ") holeSpan
+    <> renderBatchPosition batch
+    <> "). No file changes were made."
     <> "\n\n"
     <> renderRejectedError e
-    <> "\n\n"
-    <> renderUnapplied batch
-    <> " Reloaded to resync:"
+    <> "\n\nReloaded to resync:"
 renderGiveOutcome (GiveUnknownGoal goal batch) =
   "No such goal "
     <> goalName goal
-    <> " in the loaded file. Goal IDs renumber after every edit or reload; \
-       \use the IDs from the fresh list below.\n\n"
-    <> renderUnapplied batch
-    <> " Reloaded to resync:"
+    <> " ("
+    <> renderBatchPosition batch
+    <> "). No file changes were made. Goal IDs renumber after every edit or \
+       \reload; use the IDs from the fresh list below.\n\nReloaded to resync:"
 renderGiveOutcome GiveNotLoaded =
   "Give refused: the file is not the currently loaded file, and goal \
   \interaction IDs are only valid for the most recently loaded file. Nothing \
@@ -667,41 +670,9 @@ renderRejectedError (AgdaError message errorSpan warnings) =
         [] -> []
         _ -> ["Warnings:\n\n" <> Text.intercalate "\n" [w | Warning (_, w) <- warnings]]
 
--- e.g. "No file changes were made; 1 earlier give in this call was discarded
--- and 2 later gives were skipped."
-renderUnapplied :: BatchPosition -> Text
-renderUnapplied (BatchPosition discarded skipped) =
-  case clauses of
-    [] -> "No file changes were made."
-    firstClause : remainingClauses ->
-      "No file changes were made; "
-        <> Text.intercalate
-          " and "
-          ( renderClause True firstClause
-              : map (renderClause False) remainingClauses
-          )
-        <> "."
- where
-  -- Each clause is a grammatical subject and predicate. "in this call"
-  -- modifies only the first subject, so it reads once whether one or both
-  -- clauses are present.
-  clauses =
-    [ (numberedGives discarded "earlier", agreement discarded <> " discarded")
-    | discarded > 0
-    ]
-      <> [ (numberedGives skipped "later", agreement skipped <> " skipped")
-         | skipped > 0
-         ]
-
-  renderClause includeCall (subject, predicate) =
-    subject
-      <> (if includeCall then " in this call " else " ")
-      <> predicate
-
-  numberedGives n position =
-    Text.pack (show n)
-      <> " "
-      <> position
-      <> (if n == 1 then " give" else " gives")
-
-  agreement n = if n == 1 then "was" else "were" :: Text
+renderBatchPosition :: BatchPosition -> Text
+renderBatchPosition (BatchPosition index batchLength) =
+  "give "
+    <> Text.pack (show (index + 1))
+    <> " of "
+    <> Text.pack (show batchLength)
