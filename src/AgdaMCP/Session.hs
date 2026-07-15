@@ -1,8 +1,6 @@
 module AgdaMCP.Session (
-  ProtocolViolation (..),
   Session,
   SessionM,
-  fromProtocolResult,
   liftCommandM,
   liftTCM,
   newSession,
@@ -17,8 +15,6 @@ import Agda.Interaction.Base (
  )
 import Agda.Interaction.Command (CommandM)
 import Agda.Interaction.InteractionTop (runInteraction)
-import Agda.Interaction.JSON (EncodeTCM (..))
-import Agda.Interaction.JSONTop ()
 import Agda.Interaction.Response (Response)
 import Agda.TypeChecking.Monad (
   TCM,
@@ -32,23 +28,9 @@ import Agda.TypeChecking.Monad.Base (
  )
 import Control.Concurrent.STM.TChan (newTChanIO)
 import Control.Concurrent.STM.TVar (newTVarIO)
-import Control.Exception (Exception, throwIO)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (StateT (..), lift, runStateT)
-import Data.Aeson (Value)
 import Data.IORef (modifyIORef', newIORef, readIORef)
-
--- The list of responses didn't match our mental model of the given command.
-data ProtocolViolation a = ProtocolViolation
-  { violationCommand :: String
-  , violationResponses :: [a]
-  }
-  deriving (Foldable, Functor, Show, Traversable)
-
--- A `ProtocolViolation` is always a bug in agda-mcp. If we encounter one we
--- should not attempt to recover, but instead die loudly with good debugging
--- information.
-instance Exception (ProtocolViolation Value)
 
 -- An Agda session as a value, consisting of the type-checker state paired with
 -- the interaction-level command state. `liftCommandM` threads them through one
@@ -92,12 +74,3 @@ runInteractionM command = do
       liftIO $ modifyIORef' collector (response :)
     runInteraction command
   liftIO $ reverse <$> readIORef collector
-
--- Helper for throwing on a potential `ProtocolViolation`, which should be
--- treated as fatal.
-fromProtocolResult ::
-  Either (ProtocolViolation Response) a -> SessionM a
-fromProtocolResult = either throwProtocolViolation pure
- where
-  throwProtocolViolation violation =
-    liftTCM (traverse encodeTCM violation) >>= liftIO . throwIO

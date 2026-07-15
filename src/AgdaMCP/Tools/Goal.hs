@@ -70,10 +70,12 @@ import Agda.TypeChecking.Monad.MetaVars (withInteractionId)
 import Agda.TypeChecking.Pretty (prettyTCM)
 import Agda.Utils.FileName (absolute)
 
-import AgdaMCP.Session (
-  ProtocolViolation (ProtocolViolation),
-  SessionM,
+import AgdaMCP.ResponseProtocol (
+  AgdaResponseMismatch (AgdaResponseMismatch),
   fromProtocolResult,
+ )
+import AgdaMCP.Session (
+  SessionM,
   liftTCM,
   runInteractionM,
  )
@@ -410,12 +412,12 @@ parseGoalTypeResponses ::
   (GoalTypeAux -> Maybe aux) ->
   [Response] ->
   Either
-    (ProtocolViolation Response)
+    (AgdaResponseMismatch Response)
     (Either TCErr (GoalTypePayload aux))
 parseGoalTypeResponses command goalId norm matchAux responses =
   maybe (Left violation) Right (exchange responses)
  where
-  violation = ProtocolViolation command responses
+  violation = AgdaResponseMismatch command responses
 
   exchange
     [ Resp_Status _
@@ -434,7 +436,7 @@ resolvePlainGoal ::
   Maybe Rewrite ->
   [Response] ->
   Either TCErr (GoalTypePayload ()) ->
-  TCM (Either (ProtocolViolation Response) GoalResponse)
+  TCM (Either (AgdaResponseMismatch Response) GoalResponse)
 resolvePlainGoal path goalId normalization responses parsed = case parsed of
   Left e -> resolveFailure violation path goalId e
   Right ((), (ctx, boundary, constraints)) -> runExceptT $ do
@@ -452,7 +454,7 @@ resolvePlainGoal path goalId normalization responses parsed = case parsed of
         GoalDisplay goalId goalType $
           PlainGoal context (map (Text.pack . prettyShow) boundary) constraintTexts
  where
-  violation = ProtocolViolation "Cmd_goal_type_context" responses
+  violation = AgdaResponseMismatch "Cmd_goal_type_context" responses
 
 resolveExpressionGoal ::
   FilePath ->
@@ -462,7 +464,7 @@ resolveExpressionGoal ::
   [Response] ->
   Either TCErr A.Expr ->
   Either TCErr A.Expr ->
-  TCM (Either (ProtocolViolation Response) GoalResponse)
+  TCM (Either (AgdaResponseMismatch Response) GoalResponse)
 resolveExpressionGoal path goalId normalization submitted responses inferResult checkResult =
   case (failedLookup inferResult, failedLookup checkResult) of
     -- A bogus interaction ID fails the lookup in both commands. Require both
@@ -488,7 +490,7 @@ resolveExpressionGoal path goalId normalization submitted responses inferResult 
             GoalDisplay goalId goalType (ExpressionGoal submitted have checks)
  where
   violation =
-    ProtocolViolation "Cmd_goal_type_context_infer/check" responses
+    AgdaResponseMismatch "Cmd_goal_type_context_infer/check" responses
 
   failedLookup = either noSuchInteractionPoint (const Nothing)
 
@@ -515,11 +517,11 @@ noSuchInteractionPoint e
   | otherwise = Nothing
 
 resolveFailure ::
-  ProtocolViolation Response ->
+  AgdaResponseMismatch Response ->
   FilePath ->
   InteractionId ->
   TCErr ->
-  TCM (Either (ProtocolViolation Response) GoalResponse)
+  TCM (Either (AgdaResponseMismatch Response) GoalResponse)
 resolveFailure violation path goalId e = case noSuchInteractionPoint e of
   Just failedGoal
     | failedGoal == goalId -> pure $ Right $ GoalUnknown goalId
@@ -540,10 +542,10 @@ resolveGoalError path e = do
 -- judgement is independent of the normalization, so the normalized shape (for
 -- requests without a normalization) can only differ in the type's rendering.
 resolveGoalType ::
-  ProtocolViolation Response ->
+  AgdaResponseMismatch Response ->
   InteractionId ->
   Maybe Rewrite ->
-  ExceptT (ProtocolViolation Response) TCM GoalType
+  ExceptT (AgdaResponseMismatch Response) TCM GoalType
 resolveGoalType violation goalId maybeNormalization =
   GoalType
     <$> shapeAt (fromMaybe AsIs maybeNormalization)

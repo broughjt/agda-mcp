@@ -94,10 +94,12 @@ import AgdaMCP.Position (
   renderSpan,
   toSpan,
  )
-import AgdaMCP.Session (
-  ProtocolViolation (ProtocolViolation),
-  SessionM,
+import AgdaMCP.ResponseProtocol (
+  AgdaResponseMismatch (AgdaResponseMismatch),
   fromProtocolResult,
+ )
+import AgdaMCP.Session (
+  SessionM,
   liftTCM,
   runInteractionM,
  )
@@ -396,10 +398,10 @@ failed := DisplayInfo (Info_Error)
           Status
 -}
 parseLoadResponses ::
-  [Response] -> Either (ProtocolViolation Response) LoadResponse'
+  [Response] -> Either (AgdaResponseMismatch Response) LoadResponse'
 parseLoadResponses responses = maybe (Left violation) Right (exchange responses)
  where
-  violation = ProtocolViolation "Cmd_load" responses
+  violation = AgdaResponseMismatch "Cmd_load" responses
 
   -- The prelude `Status` is emitted right after `cmd_load'` has cleared
   -- `theCurrentFile`, so it must report the file as not yet checked. Further,
@@ -437,7 +439,7 @@ resolveLoad ::
   FilePath ->
   [Response] ->
   LoadResponse' ->
-  TCM (Either (ProtocolViolation Response) LoadResponse)
+  TCM (Either (AgdaResponseMismatch Response) LoadResponse)
 resolveLoad path responses response = do
   path' <- liftIO (absolute path)
   case response of
@@ -460,11 +462,11 @@ resolveLoad path responses response = do
     LoadError err -> Right . LoadFailed <$> resolveError path' err
     LoadNotRegistered -> pure (Right LoadStale)
  where
-  violation = ProtocolViolation "Cmd_load" responses
+  violation = AgdaResponseMismatch "Cmd_load" responses
 
   toGoal ::
     OutputConstraint Expr InteractionId ->
-    ExceptT (ProtocolViolation Response) TCM Goal
+    ExceptT (AgdaResponseMismatch Response) TCM Goal
   toGoal (OfType pointId ty) =
     -- Render in the interaction point's scope, as the Emacs and JSON
     -- frontends both do (showGoals, BasicOps.hs:830-836; JSONTop.hs:309).
@@ -486,7 +488,7 @@ resolveLoad path responses response = do
       getResponseContext AsIs pointId
         >>= resolveContext pointId
 
-  spanOf :: InteractionId -> ExceptT (ProtocolViolation Response) TCM Span
+  spanOf :: InteractionId -> ExceptT (AgdaResponseMismatch Response) TCM Span
   spanOf pointId =
     lift (getInteractionRange pointId)
       >>= maybe
@@ -498,7 +500,7 @@ resolveLoad path responses response = do
   toHiddenMetavariable ::
     AbsolutePath ->
     OutputConstraint Expr NamedMeta ->
-    ExceptT (ProtocolViolation Response) TCM HiddenMetavariable
+    ExceptT (AgdaResponseMismatch Response) TCM HiddenMetavariable
   toHiddenMetavariable file constraint = case constraint of
     OfType metavariable ty ->
       hiddenMetavariable metavariable $

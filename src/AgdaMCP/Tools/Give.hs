@@ -96,10 +96,12 @@ import AgdaMCP.Position (
   spanText,
   toSpan,
  )
-import AgdaMCP.Session (
-  ProtocolViolation (ProtocolViolation),
-  SessionM,
+import AgdaMCP.ResponseProtocol (
+  AgdaResponseMismatch (AgdaResponseMismatch),
   fromProtocolResult,
+ )
+import AgdaMCP.Session (
+  SessionM,
   liftCommandM,
   liftTCM,
   runInteractionM,
@@ -471,7 +473,7 @@ resolveGiveEdit ::
   Text ->
   [Response] ->
   String ->
-  TCM (Either (ProtocolViolation Response) Edit)
+  TCM (Either (AgdaResponseMismatch Response) Edit)
 resolveGiveEdit goal submitted responses elaborated =
   maybe
     missing
@@ -481,7 +483,7 @@ resolveGiveEdit goal submitted responses elaborated =
  where
   gave interval =
     Right (Edit goal (toSpan interval) submitted (Text.pack elaborated))
-  missing = Left (ProtocolViolation "Cmd_give" responses)
+  missing = Left (AgdaResponseMismatch "Cmd_give" responses)
 
 -- TODO: Remove this check entirely?
 -- TODO: Remove the `Text.strip`?
@@ -541,10 +543,10 @@ is a protocol violation.
 parseGiveResponses ::
   InteractionId ->
   [Response] ->
-  Either (ProtocolViolation Response) (Either TCErr String)
+  Either (AgdaResponseMismatch Response) (Either TCErr String)
 parseGiveResponses goal responses = maybe (Left violation) Right (exchange responses)
  where
-  violation = ProtocolViolation "Cmd_give" responses
+  violation = AgdaResponseMismatch "Cmd_give" responses
 
   exchange rest = given rest <|> givenThenIOFailed rest <|> failed rest
 

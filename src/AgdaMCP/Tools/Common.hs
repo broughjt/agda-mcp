@@ -74,9 +74,9 @@ type instance MCPHandlerUser = ()
 -- inside `modifyMVar` over the whole server state), so the get/run/put sequence
 -- is atomic.
 --
--- A `ProtocolViolation` thrown mid-action (a bug in agda-mcp; see
--- `AgdaMCP.Session`) skips the put and propagates out of the handler, killing
--- the process. We deliberately catch it nowhere.
+-- An `AgdaResponseMismatch` thrown mid-action (a bug in agda-mcp; see
+-- `AgdaMCP.ResponseProtocol`) skips the put and propagates out of the handler,
+-- killing the process. We deliberately catch it nowhere.
 withSession :: SessionM a -> MCPServerT a
 withSession action = do
   -- Side note: I think the shape of `withSession` is an instance of a more
@@ -130,6 +130,7 @@ targetIsLoaded path = do
   current <- liftCommandM $ gets theCurrentFile
   pure $ Just path' == (currentFilePath <$> current)
 
+-- TODO: Use `extract` naming scheme
 resolveError :: AbsolutePath -> TCErr -> TCM AgdaError
 resolveError path e =
   AgdaError
