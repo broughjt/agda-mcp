@@ -83,7 +83,7 @@ type instance MCPHandlerUser = ()
 -- sequence is atomic.
 --
 -- An `AgdaResponseMismatch` thrown mid-action (a bug in agda-mcp; see
--- `AgdaMCP.ResponseProtocol`) skips the put and propagates out of the handler,
+-- `AgdaMCP.Repsonse`) skips the put and propagates out of the handler,
 -- killing the process. We deliberately catch it nowhere.
 withSession :: CommandM a -> MCPServerT a
 withSession action = do

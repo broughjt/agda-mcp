@@ -1,4 +1,4 @@
-module AgdaMCP.ResponseProtocol (
+module AgdaMCP.Repsonse (
   AgdaResponseMismatch (..),
   throwMismatch,
 ) where

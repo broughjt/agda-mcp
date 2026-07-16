@@ -94,7 +94,7 @@ import AgdaMCP.Position (
   spanText,
   toSpan,
  )
-import AgdaMCP.ResponseProtocol (
+import AgdaMCP.Repsonse (
   AgdaResponseMismatch (AgdaResponseMismatch),
   throwMismatch,
  )

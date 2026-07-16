@@ -92,7 +92,7 @@ import AgdaMCP.Position (
   renderSpan,
   toSpan,
  )
-import AgdaMCP.ResponseProtocol (
+import AgdaMCP.Repsonse (
   AgdaResponseMismatch (AgdaResponseMismatch),
   throwMismatch,
  )

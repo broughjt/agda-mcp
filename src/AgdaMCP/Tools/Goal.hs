@@ -68,7 +68,7 @@ import Agda.TypeChecking.Monad.MetaVars (withInteractionId)
 import Agda.TypeChecking.Pretty (prettyTCM)
 import Agda.Utils.FileName (absolute)
 
-import AgdaMCP.ResponseProtocol (
+import AgdaMCP.Repsonse (
   AgdaResponseMismatch (AgdaResponseMismatch),
   throwMismatch,
  )
