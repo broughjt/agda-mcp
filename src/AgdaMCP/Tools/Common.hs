@@ -13,6 +13,7 @@ module AgdaMCP.Tools.Common (
   renderAgdaError,
   resolveError,
   targetIsLoaded,
+  textToolHandle,
   withSession,
 ) where
 
@@ -29,10 +30,14 @@ import Data.Set (Set)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import MCP.Server (
+  CallToolResult,
   MCPHandlerState,
   MCPHandlerUser,
   MCPServerState (..),
   MCPServerT,
+  ProcessResult (..),
+  toolTextError,
+  toolTextResult,
  )
 import System.IO.Error (ioeGetErrorString)
 
@@ -90,6 +95,20 @@ withSession action = do
   (result, session) <- liftIO $ runCommandM action (mcp_handler_state state)
   put state {mcp_handler_state = session}
   pure result
+
+textToolHandle ::
+  (FromJSON p) =>
+  (p -> CommandM q) ->
+  (q -> Text) ->
+  (Maybe (Map Text Value) -> MCPServerT (ProcessResult CallToolResult))
+textToolHandle handle renderResponse =
+  either
+    (pure . ProcessSuccess . toolTextError)
+    ( fmap (ProcessSuccess . toolTextResult . (: []) . renderResponse)
+        . withSession
+        . handle
+    )
+    . parseArguments
 
 -- JSON parse helpers
 

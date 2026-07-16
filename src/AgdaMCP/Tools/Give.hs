@@ -40,11 +40,8 @@ import Data.Text.Encoding (encodeUtf8)
 import Data.Text.Lazy qualified as LazyText
 import MCP.Server (
   InputSchema (..),
-  ProcessResult (..),
   ToolHandler,
   toolHandler,
-  toolTextError,
-  toolTextResult,
  )
 import System.AtomicWrite.Writer.ByteString (atomicWriteFile)
 
@@ -106,11 +103,10 @@ import AgdaMCP.Tools.Common (
   AgdaError (AgdaError),
   Warning (Warning),
   failedTail,
-  parseArguments,
   renderGoalId,
   resolveError,
   targetIsLoaded,
-  withSession,
+  textToolHandle,
  )
 import AgdaMCP.Tools.Load (
   LoadRequest (..),
@@ -180,14 +176,7 @@ giveTool =
         )
         (Just ["path", "gives"])
     )
-    ( either
-        (pure . ProcessSuccess . toolTextError)
-        ( fmap (ProcessSuccess . toolTextResult . (: []) . renderGiveResponse)
-            . withSession
-            . give
-        )
-        . parseArguments
-    )
+    (textToolHandle give renderGiveResponse)
 
 data GiveRequest = GiveRequest FilePath [GiveItem]
 

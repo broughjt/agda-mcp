@@ -27,11 +27,8 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import MCP.Server (
   InputSchema (..),
-  ProcessResult (..),
   ToolHandler,
   toolHandler,
-  toolTextError,
-  toolTextResult,
  )
 
 import Agda.Interaction.Base (
@@ -106,10 +103,9 @@ import AgdaMCP.Tools.Common (
   Warning (..),
   failedTail,
   locatedWarnings,
-  parseArguments,
   renderGoalId,
   resolveError,
-  withSession,
+  textToolHandle,
  )
 
 loadTool :: ToolHandler
@@ -145,14 +141,7 @@ loadTool =
         )
         (Just ["path"])
     )
-    ( either
-        (pure . ProcessSuccess . toolTextError)
-        ( fmap (ProcessSuccess . toolTextResult . (: []) . renderLoadResponse)
-            . withSession
-            . load
-        )
-        . parseArguments
-    )
+    (textToolHandle load renderLoadResponse)
 
 data LoadRequest = LoadRequest FilePath
 

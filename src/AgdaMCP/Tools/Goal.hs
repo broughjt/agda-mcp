@@ -23,11 +23,8 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import MCP.Server (
   InputSchema (..),
-  ProcessResult (..),
   ToolHandler,
   toolHandler,
-  toolTextError,
-  toolTextResult,
  )
 
 import Agda.Interaction.Base (
@@ -80,12 +77,11 @@ import AgdaMCP.Tools.Common (
   AgdaError,
   agdaErrorSpan,
   failedTail,
-  parseArguments,
   renderAgdaError,
   renderGoalId,
   resolveError,
   targetIsLoaded,
-  withSession,
+  textToolHandle,
  )
 import AgdaMCP.Tools.Load (
   ContextEntry,
@@ -175,14 +171,7 @@ goalTool =
         )
         (Just ["path", "goal"])
     )
-    ( either
-        (pure . ProcessSuccess . toolTextError)
-        ( fmap (ProcessSuccess . toolTextResult . (: []) . renderGoalResponse)
-            . withSession
-            . goal
-        )
-        . parseArguments
-    )
+    (textToolHandle goal renderGoalResponse)
 
 data GoalRequest
   = GoalRequest FilePath InteractionId (Maybe Rewrite) (Maybe String)
