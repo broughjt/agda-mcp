@@ -41,6 +41,7 @@ import Agda.Interaction.Base (
   Rewrite (..),
  )
 import Agda.Interaction.BasicOps (typeOfMeta)
+import Agda.Interaction.Command (CommandM)
 import Agda.Interaction.Output (OutputForm)
 import Agda.Interaction.Response (
   DisplayInfo_boot (..),
@@ -72,20 +73,16 @@ import Agda.Utils.FileName (absolute)
 
 import AgdaMCP.ResponseProtocol (
   AgdaResponseMismatch (AgdaResponseMismatch),
-  fromProtocolResult,
+  throwMismatch,
  )
-import AgdaMCP.Session (
-  SessionM,
-  liftTCM,
-  runInteractionM,
- )
+import AgdaMCP.Session (runInteractionM)
 import AgdaMCP.Tools.Common (
   AgdaError,
   agdaErrorSpan,
   failedTail,
-  goalName,
   parseArguments,
   renderAgdaError,
+  renderGoalId,
   resolveError,
   targetIsLoaded,
   withSession,
@@ -276,7 +273,7 @@ data GoalDetail
       }
   deriving (Eq, Show)
 
-goal :: GoalRequest -> SessionM GoalResponse
+goal :: GoalRequest -> CommandM GoalResponse
 goal (GoalRequest path goalId normalization maybeExpression) = do
   -- Goal interaction IDs are only meaningful against a load result the caller
   -- has seen (see `targetIsLoaded`). Without this check Agda would load the
@@ -297,16 +294,17 @@ goal (GoalRequest path goalId normalization maybeExpression) = do
         command $
           Cmd_goal_type_context normalization' goalId noRange ""
     parsed <-
-      fromProtocolResult $
-        parseGoalTypeResponses
-          "Cmd_goal_type_context"
-          goalId
-          normalization'
-          plainAux
-          responses
+      lift $
+        either throwMismatch pure $
+          parseGoalTypeResponses
+            "Cmd_goal_type_context"
+            goalId
+            normalization'
+            plainAux
+            responses
     resolved <-
-      liftTCM $ resolvePlainGoal path goalId normalization responses parsed
-    fromProtocolResult resolved
+      lift $ resolvePlainGoal path goalId normalization responses parsed
+    lift $ either throwMismatch pure resolved
 
   -- Both interactions run unconditionally, since inference and checking are
   -- independent. A failed command doesn't change the session state, so a failed
@@ -317,27 +315,29 @@ goal (GoalRequest path goalId normalization maybeExpression) = do
         command $
           Cmd_goal_type_context_infer normalization' goalId noRange expression
     inferParsed <-
-      fromProtocolResult $
-        parseGoalTypeResponses
-          "Cmd_goal_type_context_infer"
-          goalId
-          normalization'
-          inferAux
-          inferResponses
+      lift $
+        either throwMismatch pure $
+          parseGoalTypeResponses
+            "Cmd_goal_type_context_infer"
+            goalId
+            normalization'
+            inferAux
+            inferResponses
     checkResponses <-
       runInteractionM $
         command $
           Cmd_goal_type_context_check normalization' goalId noRange expression
     checkParsed <-
-      fromProtocolResult $
-        parseGoalTypeResponses
-          "Cmd_goal_type_context_check"
-          goalId
-          normalization'
-          checkAux
-          checkResponses
+      lift $
+        either throwMismatch pure $
+          parseGoalTypeResponses
+            "Cmd_goal_type_context_check"
+            goalId
+            normalization'
+            checkAux
+            checkResponses
     resolved <-
-      liftTCM $
+      lift $
         resolveExpressionGoal
           path
           goalId
@@ -346,7 +346,7 @@ goal (GoalRequest path goalId normalization maybeExpression) = do
           (inferResponses <> checkResponses)
           (fst <$> inferParsed)
           (fst <$> checkParsed)
-    fromProtocolResult resolved
+    lift $ either throwMismatch pure resolved
 
   -- A plain query's payload carries no auxiliary information
   -- (`interpret Cmd_goal_type_context`, InteractionTop.hs:724-725).
@@ -568,7 +568,7 @@ renderGoalResponse (GoalNotLoaded reload) =
     <> renderLoadResponse reload
 renderGoalResponse (GoalUnknown goalId) =
   "No such goal "
-    <> goalName goalId
+    <> renderGoalId goalId
     <> " in the loaded file. Goal IDs renumber after every edit or reload; \
        \use the IDs from the most recent load result."
 renderGoalResponse (GoalFailed e) =
@@ -596,7 +596,7 @@ renderGoalResponse (GoalDisplayed (GoalDisplay goalId goalType detail)) =
         ]
  where
   goalLines =
-    renderShape (goalName goalId) (goalTypeStated goalType)
+    renderShape (renderGoalId goalId) (goalTypeStated goalType)
       : normalizedLine
 
   -- The normalized rendering is shown only when it differs textually from

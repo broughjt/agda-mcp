@@ -1,6 +1,6 @@
 -- Integration tests which drive `load`, `give`, and `goal` against the real
--- Agda library using `SessionM`. Fixtures are copied to a temporary directory
--- per test (give actually edits the file, etc).
+-- Agda library as `CommandM` workflows. Fixtures are copied to a temporary
+-- directory per test (give actually edits the file, etc).
 module Main (main) where
 
 import Test.Tasty (defaultMain, testGroup)

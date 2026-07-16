@@ -26,7 +26,7 @@ import Control.Exception (
 import Control.Monad (when)
 import Control.Monad.Except (ExceptT (..), runExceptT)
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad.State (gets)
+import Control.Monad.State (gets, lift)
 import Data.Aeson (FromJSON (parseJSON), Value, object, withObject, (.:), (.=))
 import Data.Aeson.Types qualified as Aeson
 import Data.Bifunctor (Bifunctor (first))
@@ -55,6 +55,7 @@ import Agda.Interaction.Base (
   Interaction' (Cmd_give),
   UseForce (WithoutForce),
  )
+import Agda.Interaction.Command (CommandM)
 import Agda.Interaction.Response (
   DisplayInfo_boot (..),
   GiveResult (..),
@@ -98,20 +99,15 @@ import AgdaMCP.Position (
  )
 import AgdaMCP.ResponseProtocol (
   AgdaResponseMismatch (AgdaResponseMismatch),
-  fromProtocolResult,
+  throwMismatch,
  )
-import AgdaMCP.Session (
-  SessionM,
-  liftCommandM,
-  liftTCM,
-  runInteractionM,
- )
+import AgdaMCP.Session (runInteractionM)
 import AgdaMCP.Tools.Common (
   AgdaError (AgdaError),
   Warning (Warning),
   failedTail,
-  goalName,
   parseArguments,
+  renderGoalId,
   resolveError,
   targetIsLoaded,
   withSession,
@@ -303,7 +299,7 @@ parseGiveItem = withObject "give" $ \o -> do
 -- back the in-flight gives by reloading the (untouched) file, and report the
 -- failure. If each give is successful, we write the accumulated edits back to
 -- disk.
-give :: GiveRequest -> SessionM GiveResponse
+give :: GiveRequest -> CommandM GiveResponse
 give (GiveRequest path items) = do
   -- Without the loaded-file check Agda would load the file implicitly and
   -- interpret the IDs against fresh interaction points the caller never saw.
@@ -318,10 +314,10 @@ give (GiveRequest path items) = do
  where
   -- All gives succeeded; fetch the loaded source's fingerprint and commit the
   -- edits.
-  checkedCommit :: [Edit] -> SessionM GiveOutcome
+  checkedCommit :: [Edit] -> CommandM GiveOutcome
   checkedCommit edits = loadedSourceHash path >>= liftIO . flip commit edits
 
-  runGive :: (Int, GiveItem) -> ExceptT GiveOutcome SessionM Edit
+  runGive :: (Int, GiveItem) -> ExceptT GiveOutcome CommandM Edit
   runGive (index, (goal, expression)) =
     ExceptT $
       first (fromFailure goal (BatchPosition index (length items)))
@@ -375,7 +371,7 @@ give (GiveRequest path items) = do
   -- to report the fresh goals, the sad paths discard any in-memory gives and
   -- sync Agda's state with the contents on disk, and `GiveNotLoaded` gets the
   -- initial load whose goal IDs the caller was missing.
-  resync :: GiveOutcome -> SessionM GiveResponse
+  resync :: GiveOutcome -> CommandM GiveResponse
   resync outcome = GiveResponse outcome <$> load (LoadRequest path)
 
   fromIOError :: (Exception e) => e -> IO GiveOutcome
@@ -385,7 +381,7 @@ give (GiveRequest path items) = do
 -- that Agda checked. Gives only run after `targetIsLoaded` confirmed the
 -- target is the loaded current file, so every broken link here is an agda-mcp
 -- bug.
-loadedSourceHash :: FilePath -> SessionM Hash
+loadedSourceHash :: FilePath -> CommandM Hash
 loadedSourceHash path = do
   -- `parseSource` reads the file with `readTextFile` (Imports.hs:165) and
   -- hashes exactly that text into the interface (`iSourceHash = hashText
@@ -393,14 +389,14 @@ loadedSourceHash path = do
   -- the module has warnings such as open holes (Import.hs:467, warnings only
   -- skip `storeDecodedModule`).
   path' <- liftIO $ absolute path
-  current <- liftCommandM $ gets theCurrentFile
+  current <- gets theCurrentFile
   case current of
     Nothing -> bug "no file is loaded (`theCurrentFile` is `Nothing`)"
     Just file
       | currentFilePath file /= path' ->
           bug ("the loaded file is " <> filePath (currentFilePath file))
       | otherwise -> do
-          visited <- liftTCM $ getVisitedModule $ currentFileModule file
+          visited <- lift $ getVisitedModule $ currentFileModule file
           case visited of
             Nothing ->
               bug $
@@ -409,14 +405,14 @@ loadedSourceHash path = do
                   <> " has no visited interface"
             Just moduleInfo -> pure $ iSourceHash $ miInterface moduleInfo
  where
-  bug :: String -> SessionM a
+  bug :: String -> CommandM a
   bug = liftIO . throwIO . FingerprintUnavailable path
 
 giveSingle ::
   FilePath ->
   InteractionId ->
   String ->
-  SessionM (Either GiveFailure Edit)
+  CommandM (Either GiveFailure Edit)
 giveSingle path goal expression = do
   responses <-
     runInteractionM $
@@ -425,16 +421,17 @@ giveSingle path goal expression = do
         -- checks) as an optional tool argument. Follow-up; wants its own
         -- thinking about when agents should force.
         IOTCM path None Direct (Cmd_give WithoutForce goal noRange expression)
-  parsed <- fromProtocolResult $ parseGiveResponses goal responses
+  parsed <- lift $ either throwMismatch pure $ parseGiveResponses goal responses
   bitraverse resolveFailure (resolveSuccess responses) parsed
  where
-  resolveFailure :: TCErr -> SessionM GiveFailure
-  resolveFailure = liftTCM . resolveGiveFailure path goal
+  resolveFailure :: TCErr -> CommandM GiveFailure
+  resolveFailure = lift . resolveGiveFailure path goal
 
-  resolveSuccess :: [Response] -> String -> SessionM Edit
+  resolveSuccess :: [Response] -> String -> CommandM Edit
   resolveSuccess responses elaborated =
-    (liftTCM $ resolveGiveEdit goal (Text.pack expression) responses elaborated)
-      >>= fromProtocolResult
+    lift $
+      resolveGiveEdit goal (Text.pack expression) responses elaborated
+        >>= either throwMismatch pure
 
 -- An edit directive resulting from the application of a give command,
 -- consisting of the interaction id, the hole's span, the submitted expression,
@@ -583,7 +580,7 @@ renderGiveOutcome (GiveApplied edits) =
   count = Text.pack (show (length edits))
 renderGiveOutcome (GiveRejected (GiveRejection goal holeSpan e batch)) =
   "Give rejected for "
-    <> goalName goal
+    <> renderGoalId goal
     <> " ("
     <> maybe "" (\s -> "at " <> renderSpan s <> "; ") holeSpan
     <> renderBatchPosition batch
@@ -593,7 +590,7 @@ renderGiveOutcome (GiveRejected (GiveRejection goal holeSpan e batch)) =
     <> "\n\nReloaded to resync:"
 renderGiveOutcome (GiveUnknownGoal goal batch) =
   "No such goal "
-    <> goalName goal
+    <> renderGoalId goal
     <> " ("
     <> renderBatchPosition batch
     <> "). No file changes were made. Goal IDs renumber after every edit or \
@@ -639,7 +636,7 @@ renderAppliedEdit edit
         , "  (was at " <> renderSpan (editSpan edit) <> ")"
         ]
  where
-  header = goalName (editGoal edit)
+  header = renderGoalId $ editGoal edit
   submitted = editSubmitted edit
   written = editText edit
 

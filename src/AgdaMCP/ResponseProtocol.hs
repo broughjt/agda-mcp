@@ -1,6 +1,6 @@
 module AgdaMCP.ResponseProtocol (
   AgdaResponseMismatch (..),
-  fromProtocolResult,
+  throwMismatch,
 ) where
 
 import Control.Exception (Exception, throwIO)
@@ -11,7 +11,7 @@ import Agda.Interaction.JSON (EncodeTCM (encodeTCM))
 import Agda.Interaction.JSONTop ()
 import Agda.Interaction.Response (Response)
 
-import AgdaMCP.Session (SessionM, liftTCM)
+import Agda.TypeChecking.Monad (TCM)
 
 -- A list of responses emitted by Agda did not match our mental model for the
 -- pattern of possible responses.
@@ -23,12 +23,9 @@ data AgdaResponseMismatch a = AgdaResponseMismatch
 
 instance Exception (AgdaResponseMismatch Value)
 
--- An `AgdaResponseMismatch` is always a bug in agda-mcp. If we encounter one,
--- we encode the raw responses while their type-checking state is available and
--- then die loudly with the resulting debugging information.
-fromProtocolResult ::
-  Either (AgdaResponseMismatch Response) a -> SessionM a
-fromProtocolResult = either throwMismatch pure
- where
-  throwMismatch mismatch =
-    liftTCM (traverse encodeTCM mismatch) >>= liftIO . throwIO
+--- An `AgdaResponseMismatch` is always a bug in agda-mcp. If we encounter one,
+--- we encode the raw responses to JSON while their type-checking state is
+--- available in the type-checking monad and then die loudly with the resulting
+--- debugging information.
+throwMismatch :: AgdaResponseMismatch Response -> TCM a
+throwMismatch mismatch = traverse encodeTCM mismatch >>= liftIO . throwIO

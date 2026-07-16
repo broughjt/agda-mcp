@@ -7,7 +7,7 @@ module AgdaMCP.Tools.Common (
   NonFatalError (..),
   Warning (..),
   failedTail,
-  goalName,
+  renderGoalId,
   locatedWarnings,
   parseArguments,
   renderAgdaError,
@@ -17,7 +17,7 @@ module AgdaMCP.Tools.Common (
 ) where
 
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad.State (get, gets, put, runStateT)
+import Control.Monad.State (get, gets, put)
 import Data.Aeson (FromJSON, Value)
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Aeson.Types qualified as Aeson
@@ -40,6 +40,7 @@ import Agda.Interaction.Base (
   CommandState (theCurrentFile),
   CurrentFile (currentFilePath),
  )
+import Agda.Interaction.Command (CommandM)
 import Agda.Interaction.Response (
   DisplayInfo_boot (..),
   Info_Error_boot (..),
@@ -63,30 +64,34 @@ import Agda.TypeChecking.Pretty.Warning (filterTCWarnings)
 import Agda.Utils.FileName (AbsolutePath, absolute, filePath)
 
 import AgdaMCP.Position (Span, fileSpan)
-import AgdaMCP.Session (Session, SessionM, liftCommandM)
+import AgdaMCP.Session (Session, runCommandM)
 
 type instance MCPHandlerState = Session
 type instance MCPHandlerUser = ()
 
--- Run a session action against the session stored in the MCP server state,
--- storing the successor session back. The transports layer never run two
--- handlers concurrently (stdio is a serial loop and HTTP runs each handler
--- inside `modifyMVar` over the whole server state), so the get/run/put sequence
--- is atomic.
+-- Tool construction helpers
+
+-- Run a `CommandM` action against the session stored in the MCP server state,
+-- storing the successor session back. The transports layer will never run two
+-- handlers concurrently (stdio is a serial loop, while HTTP runs each handler
+-- inside an `modifyMVar` over the whole server state), so the get/run/put
+-- sequence is atomic.
 --
 -- An `AgdaResponseMismatch` thrown mid-action (a bug in agda-mcp; see
 -- `AgdaMCP.ResponseProtocol`) skips the put and propagates out of the handler,
 -- killing the process. We deliberately catch it nowhere.
-withSession :: SessionM a -> MCPServerT a
+withSession :: CommandM a -> MCPServerT a
 withSession action = do
   -- Side note: I think the shape of `withSession` is an instance of a more
   -- general pattern of doing a stateful computation on a projection of a larger
   -- state. Looking around, I think this may have something to do with Haskell's
   -- lenses and the `zoom` operation.
   state <- get
-  (result, session) <- liftIO $ runStateT action (mcp_handler_state state)
+  (result, session) <- liftIO $ runCommandM action (mcp_handler_state state)
   put state {mcp_handler_state = session}
   pure result
+
+-- JSON parse helpers
 
 -- Tool arguments arrive from the MCP layer as a map of top-level fields.
 -- Rebuild the JSON object and decode it with the request type's `FromJSON`
@@ -115,19 +120,21 @@ newtype Warning = Warning (Maybe Span, Text)
 newtype NonFatalError = NonFatalError (Maybe Span, Text)
   deriving (Eq, Show)
 
+-- Text response rendering helpers
+
 -- A goal's user-facing name (e.g. `?0`).
-goalName :: InteractionId -> Text
-goalName goal = "?" <> Text.pack (show (interactionId goal))
+renderGoalId :: InteractionId -> Text
+renderGoalId goal = "?" <> Text.pack (show (interactionId goal))
 
 -- Whether the given path is the currently loaded file. Goal interaction IDs
 -- are only meaningful against a load result the caller has seen, so
 -- goal-targeting tools may only address the loaded current file. This is the
 -- same absolute-path comparison `runInteraction` uses to decide whether to
 -- load the file implicitly (InteractionTop.hs:257-259).
-targetIsLoaded :: FilePath -> SessionM Bool
+targetIsLoaded :: FilePath -> CommandM Bool
 targetIsLoaded path = do
   path' <- liftIO $ absolute path
-  current <- liftCommandM $ gets theCurrentFile
+  current <- gets theCurrentFile
   pure $ Just path' == (currentFilePath <$> current)
 
 -- TODO: Use `extract` naming scheme

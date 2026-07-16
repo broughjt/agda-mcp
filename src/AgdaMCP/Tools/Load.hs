@@ -41,6 +41,7 @@ import Agda.Interaction.Base (
   Rewrite (AsIs),
  )
 import Agda.Interaction.BasicOps (getResponseContext)
+import Agda.Interaction.Command (CommandM)
 import Agda.Interaction.Output (OutputConstraint)
 import Agda.Interaction.Response (
   DisplayInfo_boot (..),
@@ -96,21 +97,17 @@ import AgdaMCP.Position (
  )
 import AgdaMCP.ResponseProtocol (
   AgdaResponseMismatch (AgdaResponseMismatch),
-  fromProtocolResult,
+  throwMismatch,
  )
-import AgdaMCP.Session (
-  SessionM,
-  liftTCM,
-  runInteractionM,
- )
+import AgdaMCP.Session (runInteractionM)
 import AgdaMCP.Tools.Common (
   AgdaError (AgdaError),
   NonFatalError (..),
   Warning (..),
   failedTail,
-  goalName,
   locatedWarnings,
   parseArguments,
+  renderGoalId,
   resolveError,
   withSession,
  )
@@ -247,13 +244,13 @@ data HiddenMetavariable = HiddenMetavariable
   }
   deriving (Eq, Show)
 
-load :: LoadRequest -> SessionM LoadResponse
+load :: LoadRequest -> CommandM LoadResponse
 load (LoadRequest path) = do
   responses <-
     runInteractionM $ const $ IOTCM path None Direct (Cmd_load path [])
-  parsed <- fromProtocolResult $ parseLoadResponses responses
-  resolved <- liftTCM $ resolveLoad path responses parsed
-  fromProtocolResult resolved
+  parsed <- lift $ either throwMismatch pure $ parseLoadResponses responses
+  resolved <- lift $ resolveLoad path responses parsed
+  lift $ either throwMismatch pure resolved
 
 renderLoadResponse :: LoadResponse -> Text
 renderLoadResponse (Loaded goals hiddenMetavariables warnings errors) =
@@ -305,7 +302,7 @@ loadSection title items = [title <> "\n\n" <> Text.intercalate "\n" items]
 renderGoal :: Goal -> Text
 renderGoal (Goal goalId s shape context) =
   Text.intercalate "\n" $
-    ( renderShape (goalName goalId) shape
+    ( renderShape (renderGoalId goalId) shape
         <> " (at "
         <> renderSpan s
         <> ")"

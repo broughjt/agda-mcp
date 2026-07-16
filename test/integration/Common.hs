@@ -14,7 +14,6 @@ module Common (
   withHoleGiven,
 ) where
 
-import Control.Monad.State (evalStateT)
 import Data.ByteString (ByteString)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -24,8 +23,10 @@ import System.FilePath ((</>))
 import System.IO.Temp (withSystemTempDirectory)
 import Test.Tasty.HUnit (assertFailure)
 
+import Agda.Interaction.Command (CommandM)
+
 import AgdaMCP.Position (Position (..), Span (..))
-import AgdaMCP.Session (SessionM, newSession)
+import AgdaMCP.Session (newSession, runCommandM)
 import AgdaMCP.Tools.Common (AgdaError, NonFatalError, Warning)
 import AgdaMCP.Tools.Give (GiveOutcome (..), GiveRejection)
 import AgdaMCP.Tools.Load (Goal, HiddenMetavariable, LoadResponse (..))
@@ -49,8 +50,8 @@ withFixtureDirectory names action =
 
 -- We use one session per test. Multi-step scenarios use a single session, which
 -- is exactly how the server works in production.
-runSession :: SessionM a -> IO a
-runSession action = newSession >>= evalStateT action
+runSession :: CommandM a -> IO a
+runSession action = newSession >>= fmap fst . runCommandM action
 
 expectLoaded ::
   LoadResponse ->
