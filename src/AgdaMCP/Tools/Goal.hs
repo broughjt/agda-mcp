@@ -68,7 +68,7 @@ import Agda.TypeChecking.Monad.MetaVars (withInteractionId)
 import Agda.TypeChecking.Pretty (prettyTCM)
 import Agda.Utils.FileName (absolute)
 
-import AgdaMCP.Repsonse (
+import AgdaMCP.Response (
   AgdaResponseMismatch (AgdaResponseMismatch),
   throwMismatch,
  )
@@ -406,7 +406,7 @@ parseGoalTypeResponses ::
 parseGoalTypeResponses command goalId norm matchAux responses =
   maybe (Left violation) Right (exchange responses)
  where
-  violation = AgdaResponseMismatch command responses
+  violation = AgdaResponseMismatch command responses Nothing
 
   exchange
     [ Resp_Status _
@@ -443,7 +443,7 @@ resolvePlainGoal path goalId normalization responses parsed = case parsed of
         GoalDisplay goalId goalType $
           PlainGoal context (map (Text.pack . prettyShow) boundary) constraintTexts
  where
-  violation = AgdaResponseMismatch "Cmd_goal_type_context" responses
+  violation = AgdaResponseMismatch "Cmd_goal_type_context" responses Nothing
 
 resolveExpressionGoal ::
   FilePath ->
@@ -479,7 +479,7 @@ resolveExpressionGoal path goalId normalization submitted responses inferResult 
             GoalDisplay goalId goalType (ExpressionGoal submitted have checks)
  where
   violation =
-    AgdaResponseMismatch "Cmd_goal_type_context_infer/check" responses
+    AgdaResponseMismatch "Cmd_goal_type_context_infer/check" responses Nothing
 
   failedLookup = either noSuchInteractionPoint (const Nothing)
 

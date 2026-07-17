@@ -92,7 +92,7 @@ import AgdaMCP.Position (
   renderSpan,
   toSpan,
  )
-import AgdaMCP.Repsonse (
+import AgdaMCP.Response (
   AgdaResponseMismatch (AgdaResponseMismatch),
   throwMismatch,
  )
@@ -387,7 +387,7 @@ parseLoadResponses ::
   [Response] -> Either (AgdaResponseMismatch Response) LoadResponse'
 parseLoadResponses responses = maybe (Left violation) Right (exchange responses)
  where
-  violation = AgdaResponseMismatch "Cmd_load" responses
+  violation = AgdaResponseMismatch "Cmd_load" responses Nothing
 
   -- The prelude `Status` is emitted right after `cmd_load'` has cleared
   -- `theCurrentFile`, so it must report the file as not yet checked. Further,
@@ -448,7 +448,7 @@ resolveLoad path responses response = do
     LoadError err -> Right . LoadFailed <$> resolveError path' err
     LoadNotRegistered -> pure (Right LoadStale)
  where
-  violation = AgdaResponseMismatch "Cmd_load" responses
+  violation = AgdaResponseMismatch "Cmd_load" responses Nothing
 
   toGoal ::
     OutputConstraint Expr InteractionId ->

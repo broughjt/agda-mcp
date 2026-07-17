@@ -94,7 +94,7 @@ import AgdaMCP.Position (
   spanText,
   toSpan,
  )
-import AgdaMCP.Repsonse (
+import AgdaMCP.Response (
   AgdaResponseMismatch (AgdaResponseMismatch),
   throwMismatch,
  )
@@ -469,7 +469,7 @@ resolveGiveEdit goal submitted responses elaborated =
  where
   gave interval =
     Right (Edit goal (toSpan interval) submitted (Text.pack elaborated))
-  missing = Left (AgdaResponseMismatch "Cmd_give" responses)
+  missing = Left (AgdaResponseMismatch "Cmd_give" responses Nothing)
 
 -- TODO: Remove this check entirely?
 -- TODO: Remove the `Text.strip`?
@@ -532,7 +532,7 @@ parseGiveResponses ::
   Either (AgdaResponseMismatch Response) (Either TCErr String)
 parseGiveResponses goal responses = maybe (Left violation) Right (exchange responses)
  where
-  violation = AgdaResponseMismatch "Cmd_give" responses
+  violation = AgdaResponseMismatch "Cmd_give" responses Nothing
 
   exchange rest = given rest <|> givenThenIOFailed rest <|> failed rest
 
