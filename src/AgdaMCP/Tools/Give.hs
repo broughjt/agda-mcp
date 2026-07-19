@@ -84,7 +84,6 @@ import AgdaMCP.Position (
   spanStart,
   toSpan,
  )
-import AgdaMCP.Session (runInteractionM)
 import AgdaMCP.Tools.Common (
   AgdaError (AgdaError),
   Warning (Warning),
@@ -389,13 +388,15 @@ giveSingle ::
   String ->
   CommandM (Either GiveFailure Edit)
 giveSingle path goal expression = do
-  responses <-
-    runInteractionM $
-      const $
-        -- TODO: Expose `UseForce` (the Emacs `C-u` give, skipping the safety
-        -- checks) as an optional tool argument. Follow-up; wants its own
-        -- thinking about when agents should force.
-        IOTCM path None Direct (Cmd_give WithoutForce goal noRange expression)
+  -- TODO:
+  responses <- error "un"
+  -- responses <-
+  --   runInteractionM $
+  --     const $
+  --       -- TODO: Expose `UseForce` (the Emacs `C-u` give, skipping the safety
+  --       -- checks) as an optional tool argument. Follow-up; wants its own
+  --       -- thinking about when agents should force.
+  --       IOTCM path None Direct (Cmd_give WithoutForce goal noRange expression)
   parsed <- error "un" -- TODO: lift $ either throwMismatch pure $ parseGiveResponses goal responses
   bitraverse resolveFailure (resolveSuccess responses) parsed
  where

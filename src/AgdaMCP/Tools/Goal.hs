@@ -64,7 +64,6 @@ import Agda.TypeChecking.Monad.Base (
 import Agda.TypeChecking.Monad.MetaVars (withInteractionId)
 import Agda.Utils.FileName (absolute)
 
-import AgdaMCP.Session (runInteractionM)
 import AgdaMCP.Tools.Common (
   AgdaError,
   agdaErrorSpan,
@@ -267,10 +266,12 @@ goal (GoalRequest path goalId normalization maybeExpression) = do
   command interaction = const $ IOTCM path None Direct interaction
 
   plainGoal = do
-    responses <-
-      runInteractionM $
-        command $
-          Cmd_goal_type_context normalization' goalId noRange ""
+    -- TODO:
+    responses <- error "un"
+    -- responses <-
+    --   runInteractionM $
+    --     command $
+    --       Cmd_goal_type_context normalization' goalId noRange ""
     -- TODO:
     error "un"
   -- parsed <-
@@ -290,10 +291,12 @@ goal (GoalRequest path goalId normalization maybeExpression) = do
   -- independent. A failed command doesn't change the session state, so a failed
   -- infer doesn't break or skip the check.
   expressionGoal expression = do
-    inferResponses <-
-      runInteractionM $
-        command $
-          Cmd_goal_type_context_infer normalization' goalId noRange expression
+    -- TODO:
+    inferResponses <- error "un"
+    -- inferResponses <-
+    --   runInteractionM $
+    --     command $
+    --       Cmd_goal_type_context_infer normalization' goalId noRange expression
     inferParsed <- error "un"
     -- lift $
     --   either throwMismatch pure $
@@ -303,10 +306,12 @@ goal (GoalRequest path goalId normalization maybeExpression) = do
     --       normalization'
     --       inferAux
     --       inferResponses
-    checkResponses <-
-      runInteractionM $
-        command $
-          Cmd_goal_type_context_check normalization' goalId noRange expression
+    checkResponses <- error "un"
+    -- TODO:
+    -- checkResponses <-
+    --   runInteractionM $
+    --     command $
+    --       Cmd_goal_type_context_check normalization' goalId noRange expression
     checkParsed <- error "un"
     -- lift $
     -- either throwMismatch pure $

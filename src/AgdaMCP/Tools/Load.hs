@@ -90,7 +90,6 @@ import AgdaMCP.Position (
   Span,
   toSpan,
  )
-import AgdaMCP.Session (runInteractionM)
 import AgdaMCP.Tools.Common (
   AgdaError (AgdaError),
   NonFatalError (..),
@@ -226,8 +225,10 @@ data HiddenMetavariable = HiddenMetavariable
 
 load :: LoadRequest -> CommandM LoadResponse
 load (LoadRequest path) = do
-  responses <-
-    runInteractionM $ const $ IOTCM path None Direct (Cmd_load path [])
+  -- TODO:
+  -- responses <-
+  --   runInteractionM $ const $ IOTCM path None Direct (Cmd_load path [])
+  responses <- error "un"
   parsed <- error "un" -- lift $ either throwMismatch pure $ parseLoadResponses responses
   resolved <- lift $ resolveLoad path responses parsed
   error "un"

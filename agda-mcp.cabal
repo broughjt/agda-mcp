@@ -17,6 +17,7 @@ library
     AgdaMCP.Session
     AgdaMCP.Model
     AgdaMCP.Commands.Load
+    AgdaMCP.Commands.Context
     AgdaMCP.Tools
     AgdaMCP.Tools.Common
     AgdaMCP.Tools.Give

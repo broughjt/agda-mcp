@@ -2,7 +2,6 @@ module AgdaMCP.Session (
   Session,
   newSession,
   runCommandM,
-  runInteractionM,
   catchTCErr,
 ) where
 
@@ -65,14 +64,15 @@ runCommandM action (Session tcState commandState) = do
     runTCM initEnv tcState (runStateT action commandState)
   pure (result, Session tcState' commandState')
 
+-- TODO: Remove
 -- Run one interaction command and collect the emitted list of responses.
-runInteractionM :: IOTCM -> CommandM [Response]
-runInteractionM command = do
-  collector <- liftIO $ newIORef []
-  lift $ setInteractionOutputCallback $ \response ->
-    liftIO $ modifyIORef' collector (response :)
-  runInteraction command
-  liftIO $ reverse <$> readIORef collector
+-- runInteractionM :: IOTCM -> CommandM [Response]
+-- runInteractionM command = do
+--   collector <- liftIO $ newIORef []
+--   lift $ setInteractionOutputCallback $ \response ->
+--     liftIO $ modifyIORef' collector (response :)
+--   runInteraction command
+--   liftIO $ reverse <$> readIORef collector
 
 -- runInteraction' :: IOTCM -> CommandM
 
