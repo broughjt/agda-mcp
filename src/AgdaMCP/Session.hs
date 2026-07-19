@@ -3,6 +3,7 @@ module AgdaMCP.Session (
   newSession,
   runCommandM,
   runInteractionM,
+  catchTCErr,
 ) where
 
 import Agda.Interaction.Base (
@@ -14,15 +15,17 @@ import Agda.Interaction.Base (
 import Agda.Interaction.Command (CommandM)
 import Agda.Interaction.InteractionTop (runInteraction)
 import Agda.Interaction.Response (Response)
-import Agda.TypeChecking.Monad (setInteractionOutputCallback)
-import Agda.TypeChecking.Monad.Base (
+import Agda.TypeChecking.Monad (
+  TCErr (..),
   TCState,
   initEnv,
   initStateIO,
   runTCM,
+  setInteractionOutputCallback,
  )
 import Control.Concurrent.STM.TChan (newTChanIO)
 import Control.Concurrent.STM.TVar (newTVarIO)
+import Control.Monad.Error.Class (catchError, throwError)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (lift, runStateT)
 import Data.IORef (modifyIORef', newIORef, readIORef)
@@ -66,3 +69,17 @@ runInteractionM command = do
     liftIO $ modifyIORef' collector (response :)
   runInteraction command
   liftIO $ reverse <$> readIORef collector
+
+-- runInteraction' :: IOTCM -> CommandM
+
+{- | Catch a 'TCErr'.
+
+`PatternErr` is exempt, since it is used for an Agda-internal backtracking
+control flow mechanism. One of these escaping to us would be a bug in Agda
+code, which we should treat as a bug in our code and die loudly.
+-}
+catchTCErr :: CommandM a -> (TCErr -> CommandM a) -> CommandM a
+catchTCErr action handler = action `catchError` handler'
+ where
+  handler' e@PatternErr {} = throwError e
+  handler' e = handler e

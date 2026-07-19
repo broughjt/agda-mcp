@@ -1,22 +1,21 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module AgdaMCP.Position (
   Position (..),
   Span (..),
-  fileSpan,
-  renderPosition,
-  renderSpan,
-  spanLength,
-  spanText,
+  toPosition,
   toSpan,
+  rangePath,
+  rangeSpan,
+  rangePathSpan,
 ) where
 
-import Control.Monad (guard)
-import Data.Text (Text)
-import Data.Text qualified as Text
-
+import Agda.Syntax.Position (
+  Range,
+  RangeFile (..),
+  rangeFile,
+  rangeToInterval,
+ )
 import Agda.Syntax.Position qualified
-import Agda.Utils.FileName (AbsolutePath)
+import Agda.Utils.FileName (filePath)
 import Agda.Utils.Maybe.Strict qualified as Strict
 
 -- A position in a loaded file, consisting of a zero-based offset into the
@@ -51,30 +50,48 @@ toSpan i =
     (toPosition (Agda.Syntax.Position.iStart i))
     (toPosition (Agda.Syntax.Position.iEnd i))
 
-fileSpan :: AbsolutePath -> Agda.Syntax.Position.Range -> Maybe Span
-fileSpan p r = do
-  rangeFile <- Strict.toLazy $ Agda.Syntax.Position.rangeFile r
-  guard $ Agda.Syntax.Position.rangeFilePath rangeFile == p
-  toSpan <$> Agda.Syntax.Position.rangeToInterval r
+-- fileSpan :: AbsolutePath -> Agda.Syntax.Position.Range -> Maybe Span
+-- fileSpan p r = do
+--   rangeFile <- Strict.toLazy $ Agda.Syntax.Position.rangeFile r
+--   guard $ Agda.Syntax.Position.rangeFilePath rangeFile == p
+--   toSpan <$> Agda.Syntax.Position.rangeToInterval r
 
-spanText :: Text -> Span -> Text
-spanText t s =
-  Text.take
-    (spanLength s)
-    (Text.drop (positionOffset (spanStart s)) t)
+-- rangeFile' :: Range' p -> Maybe p
+-- rangeFile' NoRange = Nothing
+-- rangeFile' (Range p _) = Just p
 
-spanLength :: Span -> Int
-spanLength s = positionOffset (spanEnd s) - positionOffset (spanStart s)
+rangePath :: Range -> Maybe FilePath
+rangePath = fmap (filePath . rangeFilePath) . Strict.toLazy . rangeFile
 
-renderSpan :: Span -> Text
-renderSpan s
-  | positionLine start == positionLine end =
-      renderPosition start <> "-" <> Text.pack (show (positionColumn end))
-  | otherwise = renderPosition start <> "-" <> renderPosition end
- where
-  start = spanStart s
-  end = spanEnd s
+rangeSpan :: Range -> Maybe Span
+rangeSpan = fmap toSpan . rangeToInterval
 
-renderPosition :: Position -> Text
-renderPosition (Position _ l c) =
-  Text.pack (show l) <> ":" <> Text.pack (show c)
+rangePathSpan :: Agda.Syntax.Position.Range -> Maybe (FilePath, Span)
+rangePathSpan r = (,) <$> rangePath r <*> rangeSpan r
+
+-- rangeMaybeToFileSpan Agda.Syntax.Position.NoRange = error "unimplemented"
+-- rangeMaybeToFileSpan r@(Agda.Syntax.Position.Range a b) =
+--   let foo = rangeToInterval r
+--    in error "unimplemented"
+
+-- spanText :: Text -> Span -> Text
+-- spanText t s =
+--   Text.take
+--     (spanLength s)
+--     (Text.drop (positionOffset (spanStart s)) t)
+
+-- spanLength :: Span -> Int
+-- spanLength s = positionOffset (spanEnd s) - positionOffset (spanStart s)
+
+-- renderSpan :: Span -> Text
+-- renderSpan s
+--   | positionLine start == positionLine end =
+--       renderPosition start <> "-" <> Text.pack (show (positionColumn end))
+--   | otherwise = renderPosition start <> "-" <> renderPosition end
+--  where
+--   start = spanStart s
+--   end = spanEnd s
+
+-- renderPosition :: Position -> Text
+-- renderPosition (Position _ l c) =
+--   Text.pack (show l) <> ":" <> Text.pack (show c)

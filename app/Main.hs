@@ -3,5 +3,132 @@ module Main (main) where
 import AgdaMCP.Server (runServer)
 import AgdaMCP.Session (newSession)
 
+-- Here, I will attempt to give an account of how frontends interaction with Agda, and then describe which parts we use, replicate, and drop. All file:line citations are Agda v2.8.0.
+--
+-- The main entry point is the `repl` function (Interaction/AgdaTop.hs), which operates similarly to JSON-RPC over stdin/stdout. Each request is a constructor of the `Interaction` sum type (Interaction/Base.hs), wrapped in an `IOTCM` value also carrying a file path and highlighting settings. The client is expected to render requests in Haskell `Show` syntax (`repl` calls `parseIOTCM`, which literally calls `reads`, Base.hs:372-379). During its initialization, `repl` installs a response callback via `setInteractionOutputCallback`. The Emacs frontend sets this to a `lispifyResponse` function which serializes to S-expressions, piped to an IO action to print lines. Similarly, the JSON frontend uses a `jsonifyResponse` function.
+--
+-- The RPC is not unary--responses come back streaming. The rationale is that the backend can, for example, provide incremental highlighting information as loading makes progress. For example, consider the following exchange. First, the client sends a load request
+--
+-- IOTCM "/path/to/source/Data/Sigma/Properties/Equivalence.lagda.typ" None Direct (Cmd_load "/path/to/source/Data/Sigma/Properties/Equivalence.lagda.typ" [])
+--
+-- Then while performing the load, Agda sends back (prettified, each responses actually occupies a single line):
+--
+-- ```
+-- {
+--   "kind": "Status",
+--   "status": {
+--     "checked": false,
+--     "showImplicitArguments": false,
+--     "showIrrelevantArguments": false
+--   }
+-- }
+-- {
+--   "kind": "ClearRunningInfo"
+-- }
+-- {
+--   "kind": "ClearHighlighting",
+--   "tokenBased": "NotOnlyTokenBased"
+-- }
+-- {
+--   "debugLevel": 1,
+--   "kind": "RunningInfo",
+--   "message": "Checking Data.Sigma.Properties.Equivalence (/path/to/barb/source/Data/Sigma/Properties/Equivalence.lagda.typ).\n"
+-- }
+-- {
+--   "kind": "Status",
+--   "status": {
+--     "checked": false,
+--     "showImplicitArguments": false,
+--     "showIrrelevantArguments": false
+--   }
+-- }
+-- {
+--   "info": {
+--     "errors": [],
+--     "invisibleGoals": [],
+--     "kind": "AllGoalsWarnings",
+--     "visibleGoals": [
+--       {
+--         "constraintObj": {
+--           "id": 0,
+--           "range": [
+--             {
+--               "end": {
+--                 "col": 30,
+--                 "line": 691,
+--                 "pos": 22760
+--               },
+--               "start": {
+--                 "col": 26,
+--                 "line": 691,
+--                 "pos": 22756
+--               }
+--             }
+--           ]
+--         },
+--         "kind": "OfType",
+--         "type": "(curry ∘ uncurry') f ＝ identity f"
+--       }
+--     ],
+--     "warnings": []
+--   },
+--   "kind": "DisplayInfo"
+-- }
+-- {
+--   "interactionPoints": [
+--     {
+--       "id": 0,
+--       "range": [
+--         {
+--           "end": {
+--             "col": 30,
+--             "line": 691,
+--             "pos": 22760
+--           },
+--           "start": {
+--             "col": 26,
+--             "line": 691,
+--             "pos": 22756
+--           }
+--         }
+--       ]
+--     }
+--   ],
+--   "kind": "InteractionPoints"
+-- }
+-- ```
+--
+-- Note that the responses are imperative in the sense that they direct the client to perform specific actions. Response constructors include `Response_ClearHighlightingInfo`, `Response_DisplayInfo`, and `Response_JumpToError` for example. For us, this makes for an awkward interface boundary. We cannot just write a handler which follows the instructions indicated by each response, since we do not have any long-lived editor state to mutate. For each agent request, we need to return a single (textual) response summarizing queried information and updated state.
+--
+-- Luckily, we are calling Agda as a library instead of talking to it over one of these RPC channels, and so we can interface with the layer just below the interaction layer--namely, the collection of utility functions the interaction layer itself calls (`cmd_load'`, `give_gen`, the `Agda.Interaction.BasicOps` queries, ...). We can hold `TCState` and `CommandState` ourselves instead of using channels and callbacks to talk to a thread which maintains it for us. To do that safely we need to understand exactly what the interaction layer does between `repl` and the utility function calls. The stack in `repl` is `maybeAbort runInteraction`, where `runInteraction` dispatches through `interpret` and wraps everything in `handleCommand`. Taking the three layers in turn:
+--
+-- `maybeAbort` (InteractionTop.hs:304-375) reads the command queue, snapshots `(TCState, CommandState)`, executes the command in `runTCM` with the snapshot while `race`ing it against an abort signal, and writes the final states back on success.
+-- TODO: Revisit when we rewrite `runCommandM` and join back to previous paragraph
+-- We do not support `Cmd_abort`, and without the abort race what remains--per-command `runTCM` re-entry over a state snapshot--is exactly what `AgdaMCP.Session.runCommandM` already does. The queue exists only to feed the loop and to deliver aborts mid-command; `runInteraction` never reads it. So there is nothing here to replicate.
+--
+-- `runInteraction` (InteractionTop.hs:254-286) does five separable things:
+--
+-- 1. Implicit load: a non-`independent` command (:412-419) targeting a file other than `theCurrentFile` loads that file first (:257-263). We deliberately refuse instead, telling the client to reload TODO: Rewrite when we implement this.
+-- 2. Module-name reapplication (:265, :278): the `IOTCM` handed around the interaction layer is a *function* `Maybe TopLevelModuleName -> IOTCM' Range`, because ranges inside a command are only correct once the module name is supplied. Moot for us while we construct commands with `const` and `noRange`, but it becomes live the moment we pass a real range. TODO: Edit when we implement `give`.
+-- 3. `withCurrentFile` (:977-981): sets `envCurrentPath` from `theCurrentFile` around `interpret`. Its consumers are declaration-level scope-checking paths that do `fromMaybe __IMPOSSIBLE__` on it (Monad/Env.hs:30-33; ConcreteToAbstract.hs:1623, :2717), so we replicate it rather than gamble that those paths are unreachable from interactive commands. TODO: Revisit when we write give
+-- 4. `Resp_InteractionPoints` emission after the commands in the `updateInteractionPointsAfter` table (:424-466, :269-273), guarded by the condition that the file is still current. We can just query this information directly when we want it.
+-- 5. `onFail` (:284-286): if an `independent` command (i.e. a load) fails, set `theCurrentFile = Nothing`. This runs in the *error* path and is state management, not display, so we must replicate it. See the description in src/AgdaMCP/Commands/Load.hs for an example.
+--
+-- `handleCommand` (InteractionTop.hs:159-246) does three things on error:
+--
+-- 1. Error response sequence emission: `handleErr` emits `DisplayInfo`/`JumpToError`/`HighlightingInfo`/`Status` responses built from error highlighting and unsolved-meta highlighting (:216-244). We can catch the same error ourselves and consume the `TCErr` directly, so we are not missing anything.
+-- 2. `TCState` rollback preserving persistent state (:161, :178-181): restore the pre-command `TCState` but keep the failed run's `stPersistentState` (successfully loaded interfaces, for example). This we *do* need--but it is already built into TCM's `catchError`, whose instance performs the identical reset (Base.hs:6133-6146). `handleCommand` in fact *opts out* of the built-in rollback, catching with `catchError_` (which "preserves the state of the failing computation", TypeChecking/Monad/Base.hs:6186-6190) purely so that `handleErr` can inspect the failed state for highlighting, and then manually redoes the reset `catchError` would have done. We render errors from the `TCErr` itself, which carries its own captured `TCState` (restored by `renderError` during printing, TypeChecking/Error.hs:161-172), so we never need the failed state. A plain `catchError` reaches the identical end state with none of the machinery.
+-- 3. `handleNastyErrors` (:194-211): converts non-`TCErr` exceptions into displayed errors (#637) and rethrows `AsyncCancelled` (abort). We drop it: an unexpected exception is a bug in agda-mcp and should kill the process (see the failure taxonomy in .scratch/PLAN.md). Environmental failures still arrive as `TCErr`s, because `TCMT`'s `liftIO` wraps escaped `IOException`s into `TCErr.IOException` (Base.hs:6096-6106)--e.g. the source file disappearing mid-session remains a catchable outcome, not a crash.
+--
+-- Why does a plain `catchError` roll anything back? `CommandM = StateT CommandState TCM`, and its two components keep state in different representations with different rollback stories:
+--
+-- - `CommandState` is a genuine `StateT` layer: state is threaded through return values (`s -> m (a, s)`), so a thrown `TCErr` destroys the updated state along with the `(a, s')` pair that was the only thing carrying it. mtl's `catchError = liftCatch catchError`, and `liftCatch` necessarily resumes the handler from the state at the catch site--this is the "uniformity property" noted at `liftCatch` (Control.Monad.Signatures): a lifting defined uniformly over an arbitrary base catch is handed only the exception, so the entry state is the only state it can pass to the handler. Rollback of `theCurrentFile`, `theInteractionPoints`, etc. is therefore mechanical, not a choice Agda made.
+-- - `TCState` is not a transformer layer at all: it is an `IORef` in `TCMT`'s reader (Base.hs:6031, :6112-6115), its mutations survive exceptions, and rollback is *policy* in TCM's `MonadError` instance--restore the saved state, keep `stPersistentState`, and skip the reset entirely for `PatternErr` (Base.hs:6133-6146).
+--
+-- So wrapping an interactive command in a plain `catchError` is transactional over both states, with two deliberate leaks: `stPersistentState` survives from the failed run (the point of #2174), and a `PatternErr` rolls back `CommandState` but not `TCState`. A `PatternErr` escaping an interactive command is an Agda-internal invariant violation, so we rethrow it rather than treat it as an Agda outcome. One last consequence worth remembering: our `catchError` handler runs in the rolled-back `TCState`, which is safe for error rendering only because the `TCErr` carries its captured state--querying the current interactive state from the handler would see pre-command data, not the failed command's effects.
+
+-- TODO: State that our goal is to stay faithful to the Emacs frontend, and only depart from it when we're making an agda-mcp specific *improvement*, or when something is really hard and not worth fixing.
+-- TODO: We are careful to obtain this data in the same manner as the two frontends extraction and rendering helpers, citing the relevant source and
+
 main :: IO ()
 main = newSession >>= runServer

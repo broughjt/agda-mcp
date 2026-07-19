@@ -16,6 +16,8 @@ library
     AgdaMCP.Position
     AgdaMCP.Response
     AgdaMCP.Session
+    AgdaMCP.Model
+    AgdaMCP.Commands.Load
     AgdaMCP.Tools
     AgdaMCP.Tools.Common
     AgdaMCP.Tools.Give
