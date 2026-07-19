@@ -14,7 +14,6 @@ module AgdaMCP.Tools.Give (
   renderGiveResponse,
 ) where
 
-import Control.Applicative ((<|>))
 import Control.Exception (
   Exception,
   Handler (..),
@@ -53,12 +52,6 @@ import Agda.Interaction.Base (
   UseForce (WithoutForce),
  )
 import Agda.Interaction.Command (CommandM)
-import Agda.Interaction.Response (
-  DisplayInfo_boot (..),
-  GiveResult (..),
-  Response,
-  Response_boot (..),
- )
 import Agda.Syntax.Common (InteractionId (..))
 import Agda.Syntax.Common.Pretty (prettyShow)
 import Agda.Syntax.Position (noRange)
@@ -84,27 +77,18 @@ import Agda.Utils.FileName (absolute, filePath)
 import Agda.Utils.Hash (Hash, hashText)
 import Agda.Utils.IO.UTF8 (ReadException, readTextFile)
 
+import Agda.Interaction.Response (Response)
 import AgdaMCP.Position (
   Span,
-  fileSpan,
   positionOffset,
-  renderSpan,
-  spanLength,
   spanStart,
-  spanText,
   toSpan,
- )
-import AgdaMCP.Response (
-  AgdaResponseMismatch (AgdaResponseMismatch),
-  throwMismatch,
  )
 import AgdaMCP.Session (runInteractionM)
 import AgdaMCP.Tools.Common (
   AgdaError (AgdaError),
   Warning (Warning),
-  failedTail,
   renderGoalId,
-  resolveError,
   targetIsLoaded,
   textToolHandle,
  )
@@ -332,14 +316,16 @@ give (GiveRequest path items) = do
         let source = LazyText.toStrict lazySource
         if hashText lazySource /= expected
           then pure GiveFileChanged
-          else case find (not . spanIsHole . spanText source . editSpan) edits of
+          else case find
+            (not . spanIsHole . (error "un" {- TODO: spanText source -}) . editSpan)
+            edits of
             Just bad ->
               throwIO $
                 SpanNotHole
                   path
                   (editGoal bad)
                   (editSpan bad)
-                  (spanText source (editSpan bad))
+                  (error "un") -- TODO: (spanText source (editSpan bad))
                   expected
             Nothing -> do
               -- Note: we write UTF-8 with LF endings regardless of platform.
@@ -410,7 +396,7 @@ giveSingle path goal expression = do
         -- checks) as an optional tool argument. Follow-up; wants its own
         -- thinking about when agents should force.
         IOTCM path None Direct (Cmd_give WithoutForce goal noRange expression)
-  parsed <- lift $ either throwMismatch pure $ parseGiveResponses goal responses
+  parsed <- error "un" -- TODO: lift $ either throwMismatch pure $ parseGiveResponses goal responses
   bitraverse resolveFailure (resolveSuccess responses) parsed
  where
   resolveFailure :: TCErr -> CommandM GiveFailure
@@ -420,7 +406,7 @@ giveSingle path goal expression = do
   resolveSuccess responses elaborated =
     lift $
       resolveGiveEdit goal (Text.pack expression) responses elaborated
-        >>= either throwMismatch pure
+        >>= error "un" -- TODO: either throwMismatch pure
 
 -- An edit directive resulting from the application of a give command,
 -- consisting of the interaction id, the hole's span, the submitted expression,
@@ -451,15 +437,19 @@ resolveGiveFailure path goal e
   | otherwise = do
       path' <- liftIO $ absolute path
       interactionPoints <- useR stInteractionPoints
-      let holeSpan = BiMap.lookup goal interactionPoints >>= fileSpan path' . ipRange
-      GiveFailed holeSpan <$> resolveError path' e
+      -- TODO:
+      error "un"
+
+-- let holeSpan = BiMap.lookup goal interactionPoints >>= fileSpan path' . ipRange
+-- GiveFailed holeSpan <$> resolveError path' e
 
 resolveGiveEdit ::
   InteractionId ->
   Text ->
   [Response] ->
   String ->
-  TCM (Either (AgdaResponseMismatch Response) Edit)
+  -- TODO: (AgdaResponseMismatch Response)
+  TCM (Either () Edit)
 resolveGiveEdit goal submitted responses elaborated =
   maybe
     missing
@@ -469,7 +459,7 @@ resolveGiveEdit goal submitted responses elaborated =
  where
   gave interval =
     Right (Edit goal (toSpan interval) submitted (Text.pack elaborated))
-  missing = Left (AgdaResponseMismatch "Cmd_give" responses Nothing)
+  missing = error "un" -- TODO: Left (AgdaResponseMismatch "Cmd_give" responses Nothing)
 
 -- TODO: Remove this check entirely?
 -- TODO: Remove the `Text.strip`?
@@ -491,7 +481,7 @@ applyEdits source edits =
  where
   splice text edit =
     let (before, rest) = Text.splitAt (positionOffset (spanStart (editSpan edit))) text
-        after = Text.drop (spanLength (editSpan edit)) rest
+        after = error "un" -- TODO: Text.drop (spanLength (editSpan edit)) rest
      in before <> editText edit <> after
 
 {- The grammar of a Cmd_give response list, following the Agda 2.8.0 source:
@@ -526,33 +516,34 @@ such calls with `GiveNotLoaded` before sending any Cmd_give, using the same
 absolute-path comparison (`targetIsLoaded`), so a prelude-shaped response here
 is a protocol violation.
 -}
-parseGiveResponses ::
-  InteractionId ->
-  [Response] ->
-  Either (AgdaResponseMismatch Response) (Either TCErr String)
-parseGiveResponses goal responses = maybe (Left violation) Right (exchange responses)
- where
-  violation = AgdaResponseMismatch "Cmd_give" responses Nothing
+-- TODO:
+-- parseGiveResponses ::
+--   InteractionId ->
+--   [Response] ->
+--   -- TODO: (AgdaResponseMismatch Response)
+--   Either () (Either TCErr String)
+-- parseGiveResponses goal responses = maybe (Left violation) Right (exchange responses)
+--  where
+--   violation = error "un" -- TODO: AgdaResponseMismatch "Cmd_give" responses Nothing
+--   exchange rest = given rest <|> givenThenIOFailed rest <|> failed rest
 
-  exchange rest = given rest <|> givenThenIOFailed rest <|> failed rest
+--   given
+--     ( Resp_GiveAction goal' (Give_String s)
+--         : Resp_Status _
+--         : Resp_DisplayInfo (Info_AllGoalsWarnings _ _)
+--         : [Resp_InteractionPoints _]
+--       )
+--       | goal' == goal = Just (Right s)
+--   given _ = Nothing
 
-  given
-    ( Resp_GiveAction goal' (Give_String s)
-        : Resp_Status _
-        : Resp_DisplayInfo (Info_AllGoalsWarnings _ _)
-        : [Resp_InteractionPoints _]
-      )
-      | goal' == goal = Just (Right s)
-  given _ = Nothing
+--   givenThenIOFailed
+--     (Resp_GiveAction goal' (Give_String _) : rest)
+--       | goal' == goal
+--       , Just e@IOException {} <- error "un" -- TODO: failedTail id rest =
+--           Just (Left e)
+--   givenThenIOFailed _ = Nothing
 
-  givenThenIOFailed
-    (Resp_GiveAction goal' (Give_String _) : rest)
-      | goal' == goal
-      , Just e@IOException {} <- failedTail id rest =
-          Just (Left e)
-  givenThenIOFailed _ = Nothing
-
-  failed = failedTail Left
+--   failed = error "un" -- TODO: failedTail Left
 
 renderGiveResponse :: GiveResponse -> Text
 renderGiveResponse (GiveResponse outcome reloaded) =
@@ -568,15 +559,17 @@ renderGiveOutcome (GiveApplied edits) =
  where
   count = Text.pack (show (length edits))
 renderGiveOutcome (GiveRejected (GiveRejection goal holeSpan e batch)) =
-  "Give rejected for "
-    <> renderGoalId goal
-    <> " ("
-    <> maybe "" (\s -> "at " <> renderSpan s <> "; ") holeSpan
-    <> renderBatchPosition batch
-    <> "). No file changes were made."
-    <> "\n\n"
-    <> renderRejectedError e
-    <> "\n\nReloaded to resync:"
+  -- TODO: renderSpan doesn't compile
+  error "un"
+-- "Give rejected for "
+--   <> renderGoalId goal
+--   <> " ("
+--   <> maybe "" (\s -> "at " <> renderSpan s <> "; ") holeSpan
+--   <> renderBatchPosition batch
+--   <> "). No file changes were made."
+--   <> "\n\n"
+--   <> renderRejectedError e
+--   <> "\n\nReloaded to resync:"
 renderGiveOutcome (GiveUnknownGoal goal batch) =
   "No such goal "
     <> renderGoalId goal
@@ -602,28 +595,30 @@ renderGiveOutcome (GiveIOError e) =
 renderAppliedEdit :: Edit -> Text
 renderAppliedEdit edit
   | submitted == written =
-      header
-        <> if "\n" `Text.isInfixOf` written
-          then
-            " :=\n"
-              <> indent 2 written
-              <> "\n  (was at "
-              <> renderSpan (editSpan edit)
-              <> ")"
-          else
-            " := "
-              <> written
-              <> " (was at "
-              <> renderSpan (editSpan edit)
-              <> ")"
-  | otherwise =
-      Text.intercalate
-        "\n"
-        [ header <> ":"
-        , renderExpression "submitted" submitted
-        , renderExpression "written" written
-        , "  (was at " <> renderSpan (editSpan edit) <> ")"
-        ]
+      -- Error
+      error "un"
+  -- header
+  --   <> if "\n" `Text.isInfixOf` written
+  --     then
+  --       " :=\n"
+  --         <> indent 2 written
+  --         <> "\n  (was at "
+  --         <> renderSpan (editSpan edit)
+  --         <> ")"
+  --     else
+  --       " := "
+  --         <> written
+  --         <> " (was at "
+  --         <> renderSpan (editSpan edit)
+  --         <> ")"
+  | otherwise = error "un" -- TODO:
+  -- Text.intercalate
+  --   "\n"
+  --   [ header <> ":"
+  --   , renderExpression "submitted" submitted
+  --   , renderExpression "written" written
+  --   , "  (was at " <> renderSpan (editSpan edit) <> ")"
+  --   ]
  where
   header = renderGoalId $ editGoal edit
   submitted = editSubmitted edit
@@ -647,16 +642,18 @@ indent width text =
 
 renderRejectedError :: AgdaError -> Text
 renderRejectedError (AgdaError message errorSpan warnings) =
-  Text.intercalate "\n\n" $
-    [ maybe
-        "Expression error (locations are relative to the submitted expression):"
-        (\s -> "Agda error at " <> renderSpan s <> ":")
-        errorSpan
-    , message
-    ]
-      <> case warnings of
-        [] -> []
-        _ -> ["Warnings:\n\n" <> Text.intercalate "\n" [w | Warning (_, w) <- warnings]]
+  error "un"
+
+-- Text.intercalate "\n\n" $
+--   [ maybe
+--       "Expression error (locations are relative to the submitted expression):"
+--       (\s -> "Agda error at " <> renderSpan s <> ":")
+--       errorSpan
+--   , message
+--   ]
+--     <> case warnings of
+--       [] -> []
+--       _ -> ["Warnings:\n\n" <> Text.intercalate "\n" [w | Warning (_, w) <- warnings]]
 
 renderBatchPosition :: BatchPosition -> Text
 renderBatchPosition (BatchPosition index batchLength) =

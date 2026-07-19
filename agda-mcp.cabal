@@ -14,7 +14,6 @@ library
   hs-source-dirs: src
   exposed-modules:
     AgdaMCP.Position
-    AgdaMCP.Response
     AgdaMCP.Session
     AgdaMCP.Model
     AgdaMCP.Commands.Load

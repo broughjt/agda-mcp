@@ -12,7 +12,6 @@ module AgdaMCP.Tools.Goal (
 ) where
 
 import Control.Monad (when)
-import Control.Monad.Except (ExceptT, runExceptT, throwError)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (lift)
 import Data.Aeson (FromJSON (parseJSON), Value, object, withObject, (.:), (.=))
@@ -34,10 +33,8 @@ import Agda.Interaction.Base (
     Cmd_goal_type_context_check,
     Cmd_goal_type_context_infer
   ),
-  OutputConstraint_boot (..),
   Rewrite (..),
  )
-import Agda.Interaction.BasicOps (typeOfMeta)
 import Agda.Interaction.Command (CommandM)
 import Agda.Interaction.Output (OutputForm)
 import Agda.Interaction.Response (
@@ -51,7 +48,7 @@ import Agda.Interaction.Response (
 import Agda.Syntax.Abstract qualified as A
 import Agda.Syntax.Abstract.Pretty (prettyATop)
 import Agda.Syntax.Common (InteractionId (..))
-import Agda.Syntax.Common.Pretty (prettyShow, render)
+import Agda.Syntax.Common.Pretty (render)
 import Agda.Syntax.Concrete qualified as C
 import Agda.Syntax.Position (noRange)
 import Agda.TypeChecking.Monad (TCM)
@@ -65,21 +62,14 @@ import Agda.TypeChecking.Monad.Base (
   TypeError (InteractionError),
  )
 import Agda.TypeChecking.Monad.MetaVars (withInteractionId)
-import Agda.TypeChecking.Pretty (prettyTCM)
 import Agda.Utils.FileName (absolute)
 
-import AgdaMCP.Response (
-  AgdaResponseMismatch (AgdaResponseMismatch),
-  throwMismatch,
- )
 import AgdaMCP.Session (runInteractionM)
 import AgdaMCP.Tools.Common (
   AgdaError,
   agdaErrorSpan,
-  failedTail,
   renderAgdaError,
   renderGoalId,
-  resolveError,
   targetIsLoaded,
   textToolHandle,
  )
@@ -92,7 +82,6 @@ import AgdaMCP.Tools.Load (
   renderContext,
   renderLoadResponse,
   renderShape,
-  resolveContext,
  )
 
 goalTool :: ToolHandler
@@ -282,18 +271,20 @@ goal (GoalRequest path goalId normalization maybeExpression) = do
       runInteractionM $
         command $
           Cmd_goal_type_context normalization' goalId noRange ""
-    parsed <-
-      lift $
-        either throwMismatch pure $
-          parseGoalTypeResponses
-            "Cmd_goal_type_context"
-            goalId
-            normalization'
-            plainAux
-            responses
-    resolved <-
-      lift $ resolvePlainGoal path goalId normalization responses parsed
-    lift $ either throwMismatch pure resolved
+    -- TODO:
+    error "un"
+  -- parsed <-
+  --   lift $
+  --     either throwMismatch pure $
+  --       parseGoalTypeResponses
+  --         "Cmd_goal_type_context"
+  --         goalId
+  --         normalization'
+  --         plainAux
+  --         responses
+  -- resolved <-
+  --   lift $ resolvePlainGoal path goalId normalization responses parsed
+  -- lift $ either throwMismatch pure resolved
 
   -- Both interactions run unconditionally, since inference and checking are
   -- independent. A failed command doesn't change the session state, so a failed
@@ -303,28 +294,28 @@ goal (GoalRequest path goalId normalization maybeExpression) = do
       runInteractionM $
         command $
           Cmd_goal_type_context_infer normalization' goalId noRange expression
-    inferParsed <-
-      lift $
-        either throwMismatch pure $
-          parseGoalTypeResponses
-            "Cmd_goal_type_context_infer"
-            goalId
-            normalization'
-            inferAux
-            inferResponses
+    inferParsed <- error "un"
+    -- lift $
+    --   either throwMismatch pure $
+    --     parseGoalTypeResponses
+    --       "Cmd_goal_type_context_infer"
+    --       goalId
+    --       normalization'
+    --       inferAux
+    --       inferResponses
     checkResponses <-
       runInteractionM $
         command $
           Cmd_goal_type_context_check normalization' goalId noRange expression
-    checkParsed <-
-      lift $
-        either throwMismatch pure $
-          parseGoalTypeResponses
-            "Cmd_goal_type_context_check"
-            goalId
-            normalization'
-            checkAux
-            checkResponses
+    checkParsed <- error "un"
+    -- lift $
+    -- either throwMismatch pure $
+    --   parseGoalTypeResponses
+    --     "Cmd_goal_type_context_check"
+    --     goalId
+    --     normalization'
+    --     checkAux
+    --     checkResponses
     resolved <-
       lift $
         resolveExpressionGoal
@@ -335,7 +326,8 @@ goal (GoalRequest path goalId normalization maybeExpression) = do
           (inferResponses <> checkResponses)
           (fst <$> inferParsed)
           (fst <$> checkParsed)
-    lift $ either throwMismatch pure resolved
+    error "un"
+  -- lift $ either throwMismatch pure resolved
 
   -- A plain query's payload carries no auxiliary information
   -- (`interpret Cmd_goal_type_context`, InteractionTop.hs:724-725).
@@ -401,13 +393,14 @@ parseGoalTypeResponses ::
   (GoalTypeAux -> Maybe aux) ->
   [Response] ->
   Either
-    (AgdaResponseMismatch Response)
+    ()
+    -- TODO: (AgdaResponseMismatch Response)
     (Either TCErr (GoalTypePayload aux))
 parseGoalTypeResponses command goalId norm matchAux responses =
   maybe (Left violation) Right (exchange responses)
  where
-  violation = AgdaResponseMismatch command responses Nothing
-
+  -- TODO:
+  violation = error "un" -- AgdaResponseMismatch command responses Nothing
   exchange
     [ Resp_Status _
       , Resp_DisplayInfo
@@ -417,33 +410,35 @@ parseGoalTypeResponses command goalId norm matchAux responses =
       , norm' == norm
       , Just aux' <- matchAux aux =
           Just (Right (aux', (ctx, boundary, constraints)))
-  exchange rest = failedTail Left rest
+  exchange rest = error "un" -- TODO: failedTail Left rest
 
-resolvePlainGoal ::
-  FilePath ->
-  InteractionId ->
-  Maybe Rewrite ->
-  [Response] ->
-  Either TCErr (GoalTypePayload ()) ->
-  TCM (Either (AgdaResponseMismatch Response) GoalResponse)
-resolvePlainGoal path goalId normalization responses parsed = case parsed of
-  Left e -> resolveFailure violation path goalId e
-  Right ((), (ctx, boundary, constraints)) -> runExceptT $ do
-    goalType <- resolveGoalType violation goalId normalization
-    context <- lift $ resolveContext goalId ctx
-    -- The boundary and the constraints render exactly as Agda's own frontends
-    -- render them: `pretty` for boundary faces (JSONTop.hs:396) and
-    -- `prettyTCM` in the goal's scope for constraints (EmacsTop.hs:241-246).
-    constraintTexts <-
-      lift $
-        withInteractionId goalId $
-          traverse (fmap (Text.pack . render) . prettyTCM) constraints
-    pure $
-      GoalDisplayed $
-        GoalDisplay goalId goalType $
-          PlainGoal context (map (Text.pack . prettyShow) boundary) constraintTexts
- where
-  violation = AgdaResponseMismatch "Cmd_goal_type_context" responses Nothing
+-- TODO:
+-- resolvePlainGoal ::
+--   FilePath ->
+--   InteractionId ->
+--   Maybe Rewrite ->
+--   [Response] ->
+--   Either TCErr (GoalTypePayload ()) ->
+--   -- TODO: (AgdaResponseMismatch Response)
+--   TCM (Either () GoalResponse)
+-- resolvePlainGoal path goalId normalization responses parsed = case parsed of
+--   Left e -> resolveFailure violation path goalId e
+--   Right ((), (ctx, boundary, constraints)) -> runExceptT $ do
+--     goalType <- resolveGoalType violation goalId normalization
+--     context <- lift $ resolveContext goalId ctx
+--     -- The boundary and the constraints render exactly as Agda's own frontends
+--     -- render them: `pretty` for boundary faces (JSONTop.hs:396) and
+--     -- `prettyTCM` in the goal's scope for constraints (EmacsTop.hs:241-246).
+--     constraintTexts <-
+--       lift $
+--         withInteractionId goalId $
+--           traverse (fmap (Text.pack . render) . prettyTCM) constraints
+--     pure $
+--       GoalDisplayed $
+--         GoalDisplay goalId goalType $
+--           PlainGoal context (map (Text.pack . prettyShow) boundary) constraintTexts
+--  where
+--   violation = AgdaResponseMismatch "Cmd_goal_type_context" responses Nothing
 
 resolveExpressionGoal ::
   FilePath ->
@@ -453,7 +448,8 @@ resolveExpressionGoal ::
   [Response] ->
   Either TCErr A.Expr ->
   Either TCErr A.Expr ->
-  TCM (Either (AgdaResponseMismatch Response) GoalResponse)
+  -- TODO: (AgdaResponseMismatch Response)
+  TCM (Either () GoalResponse)
 resolveExpressionGoal path goalId normalization submitted responses inferResult checkResult =
   case (failedLookup inferResult, failedLookup checkResult) of
     -- A bogus interaction ID fails the lookup in both commands. Require both
@@ -465,21 +461,28 @@ resolveExpressionGoal path goalId normalization submitted responses inferResult 
       | otherwise -> pure $ Left violation
     (Just _, Nothing) -> pure $ Left violation
     (Nothing, Just _) -> pure $ Left violation
-    (Nothing, Nothing) -> case firstIOFailure of
-      -- An IOException is environmental rather than a failure to infer or
-      -- check the submitted expression. Treat the whole query as failed so
-      -- the renderer does not claim its location is expression-relative.
-      Just e -> Right <$> resolveGoalError path e
-      Nothing -> runExceptT $ do
-        goalType <- resolveGoalType violation goalId normalization
-        have <- lift $ resolveResult inferResult
-        checks <- lift $ resolveResult checkResult
-        pure $
-          GoalDisplayed $
-            GoalDisplay goalId goalType (ExpressionGoal submitted have checks)
+    (Nothing, Nothing) ->
+      -- case firstIOFailure of
+      -- TODO:
+      error "un"
  where
-  violation =
-    AgdaResponseMismatch "Cmd_goal_type_context_infer/check" responses Nothing
+  -- TODO: was intented in the `case` expression
+  --
+  -- An IOException is environmental rather than a failure to infer or
+  -- check the submitted expression. Treat the whole query as failed so
+  -- the renderer does not claim its location is expression-relative.
+  -- Just e -> Right <$> resolveGoalError path e
+  -- Nothing -> runExceptT $ do
+  --   goalType <- resolveGoalType violation goalId normalization
+  --   have <- lift $ resolveResult inferResult
+  --   checks <- lift $ resolveResult checkResult
+  --   pure $
+  --     GoalDisplayed $
+  --       GoalDisplay goalId goalType (ExpressionGoal submitted have checks)
+
+  violation = error "un"
+  -- TODO:
+  -- AgdaResponseMismatch "Cmd_goal_type_context_infer/check" responses Nothing
 
   failedLookup = either noSuchInteractionPoint (const Nothing)
 
@@ -490,7 +493,7 @@ resolveExpressionGoal path goalId normalization submitted responses inferResult 
 
   resolveResult (Left e) = do
     path' <- liftIO (absolute path)
-    Left <$> resolveError path' e
+    Left <$> error "un" -- TODO: resolveError path' e
   resolveResult (Right expr) =
     Right . Text.pack . render <$> withInteractionId goalId (prettyATop expr)
 
@@ -505,23 +508,26 @@ noSuchInteractionPoint e
       Just goalId
   | otherwise = Nothing
 
-resolveFailure ::
-  AgdaResponseMismatch Response ->
-  FilePath ->
-  InteractionId ->
-  TCErr ->
-  TCM (Either (AgdaResponseMismatch Response) GoalResponse)
-resolveFailure violation path goalId e = case noSuchInteractionPoint e of
-  Just failedGoal
-    | failedGoal == goalId -> pure $ Right $ GoalUnknown goalId
-    | otherwise -> pure $ Left violation
-  Nothing -> Right <$> resolveGoalError path e
+-- TODO:
+-- resolveFailure ::
+--   AgdaResponseMismatch Response ->
+--   FilePath ->
+--   InteractionId ->
+--   TCErr ->
+--   TCM (Either (AgdaResponseMismatch Response) GoalResponse)
+-- resolveFailure violation path goalId e = case noSuchInteractionPoint e of
+--   Just failedGoal
+--     | failedGoal == goalId -> pure $ Right $ GoalUnknown goalId
+--     | otherwise -> pure $ Left violation
+--   Nothing -> Right <$> resolveGoalError path e
 
-resolveGoalError :: FilePath -> TCErr -> TCM GoalResponse
-resolveGoalError path e = do
-  path' <- liftIO $ absolute path
-  GoalFailed <$> resolveError path' e
+-- TODO:
+-- resolveGoalError :: FilePath -> TCErr -> TCM GoalResponse
+-- resolveGoalError path e = do
+--   path' <- liftIO $ absolute path
+--   GoalFailed <$> resolveError path' e
 
+-- TODO:
 -- The goal's type isn't part of the `Goal_GoalType` payload, so we query it
 -- with `typeOfMeta` and render in the interaction point's scope, as JSONTop
 -- does (`prettyTypeOfMeta`, JSONTop.hs:392-398). `typeOfMeta` reports goals
@@ -530,24 +536,24 @@ resolveGoalError path e = do
 -- `AgdaMCP.Tools.Load` applies and other constructors are violations. The
 -- judgement is independent of the normalization, so the normalized shape (for
 -- requests without a normalization) can only differ in the type's rendering.
-resolveGoalType ::
-  AgdaResponseMismatch Response ->
-  InteractionId ->
-  Maybe Rewrite ->
-  ExceptT (AgdaResponseMismatch Response) TCM GoalType
-resolveGoalType violation goalId maybeNormalization =
-  GoalType
-    <$> shapeAt (fromMaybe AsIs maybeNormalization)
-    <*> traverse shapeAt (maybe (Just Normalised) (const Nothing) maybeNormalization)
- where
-  shapeAt normalization = do
-    form <- lift $ withInteractionId goalId $ typeOfMeta normalization goalId
-    case form of
-      OfType _ ty ->
-        GoalOfType . Text.pack . render
-          <$> lift (withInteractionId goalId $ prettyATop ty)
-      JustSort _ -> pure GoalSort
-      _ -> throwError violation
+-- resolveGoalType ::
+--   AgdaResponseMismatch Response ->
+--   InteractionId ->
+--   Maybe Rewrite ->
+--   ExceptT (AgdaResponseMismatch Response) TCM GoalType
+-- resolveGoalType violation goalId maybeNormalization =
+--   GoalType
+--     <$> shapeAt (fromMaybe AsIs maybeNormalization)
+--     <*> traverse shapeAt (maybe (Just Normalised) (const Nothing) maybeNormalization)
+--  where
+--   shapeAt normalization = do
+--     form <- lift $ withInteractionId goalId $ typeOfMeta normalization goalId
+--     case form of
+--       OfType _ ty ->
+--         GoalOfType . Text.pack . render
+--           <$> lift (withInteractionId goalId $ prettyATop ty)
+--       JustSort _ -> pure GoalSort
+--       _ -> throwError violation
 
 renderGoalResponse :: GoalResponse -> Text
 renderGoalResponse (GoalNotLoaded reload) =

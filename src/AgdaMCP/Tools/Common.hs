@@ -6,12 +6,9 @@ module AgdaMCP.Tools.Common (
   AgdaError (..),
   NonFatalError (..),
   Warning (..),
-  failedTail,
   renderGoalId,
-  locatedWarnings,
   parseArguments,
   renderAgdaError,
-  resolveError,
   targetIsLoaded,
   textToolHandle,
   withSession,
@@ -26,7 +23,6 @@ import Data.Bifunctor (first)
 import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Maybe (fromMaybe)
-import Data.Set (Set)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import MCP.Server (
@@ -39,7 +35,6 @@ import MCP.Server (
   toolTextError,
   toolTextResult,
  )
-import System.IO.Error (ioeGetErrorString)
 
 import Agda.Interaction.Base (
   CommandState (theCurrentFile),
@@ -55,20 +50,9 @@ import Agda.Interaction.Response (
   Status (..),
  )
 import Agda.Syntax.Common (InteractionId (..))
-import Agda.Syntax.Common.Pretty (render)
-import Agda.Syntax.Parser.Monad (ParseError (ReadFileError))
-import Agda.Syntax.Position (getRange, rangeFilePath)
-import Agda.TypeChecking.Errors (getAllWarningsOfTCErr, renderError)
-import Agda.TypeChecking.Monad (TCM)
-import Agda.TypeChecking.Monad.Base (
-  TCErr (ParserError),
-  TCWarning (tcWarningRange),
- )
-import Agda.TypeChecking.Pretty (prettyTCM)
-import Agda.TypeChecking.Pretty.Warning (filterTCWarnings)
-import Agda.Utils.FileName (AbsolutePath, absolute, filePath)
 
-import AgdaMCP.Position (Span, fileSpan)
+import Agda.Utils.FileName (absolute)
+import AgdaMCP.Position (Span)
 import AgdaMCP.Session (Session, runCommandM)
 
 type instance MCPHandlerState = Session
@@ -156,37 +140,38 @@ targetIsLoaded path = do
   current <- gets theCurrentFile
   pure $ Just path' == (currentFilePath <$> current)
 
--- TODO: Use `extract` naming scheme
-resolveError :: AbsolutePath -> TCErr -> TCM AgdaError
-resolveError path e =
-  AgdaError
-    <$> message
-    <*> pure (fileSpan path $ getRange e)
-    <*> (map Warning <$> (getAllWarningsOfTCErr e >>= locatedWarnings path))
- where
-  -- Agda's own rendering of `ReadFileError` includes the text of the raw
-  -- Haskell exception, which repeats the path and adds `openBinaryFile`
-  -- noise. We special-case this and render the reason ourselves.
-  message = case e of
-    ParserError (ReadFileError file readError) ->
-      pure $
-        "Cannot read file "
-          <> Text.pack (filePath $ rangeFilePath file)
-          <> ": "
-          <> Text.pack (ioeGetErrorString readError)
-          <> "."
-    _ -> Text.pack <$> renderError e
+-- TODO: Remove
+-- -- TODO: Use `extract` naming scheme
+-- resolveError :: AbsolutePath -> TCErr -> TCM AgdaError
+-- resolveError path e =
+--   AgdaError
+--     <$> message
+--     <*> pure (fileSpan path $ getRange e)
+--     <*> (map Warning <$> (getAllWarningsOfTCErr e >>= locatedWarnings path))
+--  where
+--   -- Agda's own rendering of `ReadFileError` includes the text of the raw
+--   -- Haskell exception, which repeats the path and adds `openBinaryFile`
+--   -- noise. We special-case this and render the reason ourselves.
+--   message = case e of
+--     ParserError (ReadFileError file readError) ->
+--       pure $
+--         "Cannot read file "
+--           <> Text.pack (filePath $ rangeFilePath file)
+--           <> ": "
+--           <> Text.pack (ioeGetErrorString readError)
+--           <> "."
+--     _ -> Text.pack <$> renderError e
 
 -- Apply Agda's own warning filtering (removes unsolved-constraint warnings in
 -- the case that there are no "interesting" constraints), then pair each
 -- rendered warning with its span.
-locatedWarnings :: AbsolutePath -> Set TCWarning -> TCM [(Maybe Span, Text)]
-locatedWarnings path warnings =
-  filterTCWarnings warnings >>= traverse locate
- where
-  locate warning =
-    ((,) (fileSpan path (tcWarningRange warning)) . Text.pack . render)
-      <$> prettyTCM warning
+-- locatedWarnings :: AbsolutePath -> Set TCWarning -> TCM [(Maybe Span, Text)]
+-- locatedWarnings path warnings =
+--   filterTCWarnings warnings >>= traverse locate
+--  where
+--   locate warning =
+--     ((,) (fileSpan path (tcWarningRange warning)) . Text.pack . render)
+--       <$> prettyTCM warning
 
 -- Render the error message followed by a warnings section, as a list of
 -- lines. The span is not rendered, since the message already carries Agda's own
@@ -198,21 +183,3 @@ renderAgdaError (AgdaError message _ warnings) =
   section :: Text -> [Text] -> [Text]
   section _ [] = []
   section title items = "" : title : items
-
--- The error tail shared by the load and give grammars (handleErr,
--- InteractionTop.hs:216-242). `handleErr` only ever wraps `Info_GenericError`
--- (:236), and the other `Info_Error` constructors are unreachable from our
--- commands (`Info_CompilationError` only from Cmd_compile :491,
--- `Info_Highlighting{Parse,ScopeCheck}Error` only from Cmd_highlight :631-633),
--- so they fall through to `Nothing` and become protocol violations.
-failedTail :: (TCErr -> a) -> [Response] -> Maybe a
-failedTail wrap (Resp_DisplayInfo (Info_Error (Info_GenericError e)) : rest) = case rest of
-  [ Resp_JumpToError {}
-    , Resp_HighlightingInfo _ KeepHighlighting _ _
-    , Resp_Status status
-    ]
-      | not (sChecked status) -> Just (wrap e)
-  [Resp_HighlightingInfo _ KeepHighlighting _ _, Resp_Status status]
-    | not (sChecked status) -> Just (wrap e)
-  _ -> Nothing
-failedTail _ _ = Nothing

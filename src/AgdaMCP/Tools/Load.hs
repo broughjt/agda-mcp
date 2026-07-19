@@ -88,23 +88,14 @@ import Agda.Utils.FileName (AbsolutePath, absolute)
 
 import AgdaMCP.Position (
   Span,
-  fileSpan,
-  renderSpan,
   toSpan,
- )
-import AgdaMCP.Response (
-  AgdaResponseMismatch (AgdaResponseMismatch),
-  throwMismatch,
  )
 import AgdaMCP.Session (runInteractionM)
 import AgdaMCP.Tools.Common (
   AgdaError (AgdaError),
   NonFatalError (..),
   Warning (..),
-  failedTail,
-  locatedWarnings,
   renderGoalId,
-  resolveError,
   textToolHandle,
  )
 
@@ -237,9 +228,11 @@ load :: LoadRequest -> CommandM LoadResponse
 load (LoadRequest path) = do
   responses <-
     runInteractionM $ const $ IOTCM path None Direct (Cmd_load path [])
-  parsed <- lift $ either throwMismatch pure $ parseLoadResponses responses
+  parsed <- error "un" -- lift $ either throwMismatch pure $ parseLoadResponses responses
   resolved <- lift $ resolveLoad path responses parsed
-  lift $ either throwMismatch pure resolved
+  error "un"
+
+-- lift $ either throwMismatch pure resolved
 
 renderLoadResponse :: LoadResponse -> Text
 renderLoadResponse (Loaded goals hiddenMetavariables warnings errors) =
@@ -290,13 +283,15 @@ loadSection title items = [title <> "\n\n" <> Text.intercalate "\n" items]
 
 renderGoal :: Goal -> Text
 renderGoal (Goal goalId s shape context) =
-  Text.intercalate "\n" $
-    ( renderShape (renderGoalId goalId) shape
-        <> " (at "
-        <> renderSpan s
-        <> ")"
-    )
-      : renderContext context
+  error "un"
+
+-- Text.intercalate "\n" $
+--   ( renderShape (renderGoalId goalId) shape
+--       <> " (at "
+--       <> renderSpan s
+--       <> ")"
+--   )
+--     : renderContext context
 
 -- Render a goal's context as indented lines. `resolveContext` gives us
 -- outermost-first telescope order, which `Goal` preserves as structure. The
@@ -351,8 +346,10 @@ renderContextEntry
 
 renderHiddenMetavariable :: HiddenMetavariable -> Text
 renderHiddenMetavariable (HiddenMetavariable name maybeSpan shape) =
-  renderShape name shape
-    <> maybe "" (\s -> " (at " <> renderSpan s <> ")") maybeSpan
+  error "un"
+
+-- renderShape name shape
+--   <> maybe "" (\s -> " (at " <> renderSpan s <> ")") maybeSpan
 
 renderShape :: Text -> GoalShape -> Text
 renderShape name (GoalOfType ty) = name <> " : " <> ty
@@ -384,10 +381,10 @@ failed := DisplayInfo (Info_Error)
           Status
 -}
 parseLoadResponses ::
-  [Response] -> Either (AgdaResponseMismatch Response) LoadResponse'
+  [Response] -> Either () LoadResponse'
 parseLoadResponses responses = maybe (Left violation) Right (exchange responses)
  where
-  violation = AgdaResponseMismatch "Cmd_load" responses Nothing
+  violation = error "un" -- AgdaResponseMismatch "Cmd_load" responses Nothing
 
   -- The prelude `Status` is emitted right after `cmd_load'` has cleared
   -- `theCurrentFile`, so it must report the file as not yet checked. Further,
@@ -417,7 +414,7 @@ parseLoadResponses responses = maybe (Left violation) Right (exchange responses)
     | not (sChecked status) = Just LoadNotRegistered
   loaded _ _ _ _ = Nothing
 
-  failed = failedTail LoadError
+  failed = error "un" -- failedTail LoadError
 
 -- Extract everything a `LoadResponse` needs while in the context of the
 -- type-checking monad.
@@ -425,7 +422,7 @@ resolveLoad ::
   FilePath ->
   [Response] ->
   LoadResponse' ->
-  TCM (Either (AgdaResponseMismatch Response) LoadResponse)
+  TCM (Either () LoadResponse)
 resolveLoad path responses response = do
   path' <- liftIO (absolute path)
   case response of
@@ -440,19 +437,22 @@ resolveLoad path responses response = do
       when (any ((`notElem` pointIds) . goalId) goals) $
         throwError violation
 
-      hiddenMetavariables <- traverse (toHiddenMetavariable path') hidden
-      lift $
-        Loaded goals hiddenMetavariables
-          <$> (map Warning <$> locatedWarnings path' (tcWarnings warnings))
-          <*> (map NonFatalError <$> locatedWarnings path' (nonFatalErrors warnings))
-    LoadError err -> Right . LoadFailed <$> resolveError path' err
+      -- TODO:
+      hiddenMetavariables <- error "un" -- traverse (toHiddenMetavariable path') hidden
+      -- TODO:
+      error "un"
+    -- lift $
+    --   Loaded goals hiddenMetavariables
+    --     <$> (map Warning <$> locatedWarnings path' (tcWarnings warnings))
+    --     <*> (map NonFatalError <$> locatedWarnings path' (nonFatalErrors warnings))
+    LoadError err -> error "un" -- Right . LoadFailed <$> resolveError path' err
     LoadNotRegistered -> pure (Right LoadStale)
  where
-  violation = AgdaResponseMismatch "Cmd_load" responses Nothing
-
+  -- TODO:
+  violation = error "un" -- AgdaResponseMismatch "Cmd_load" responses Nothing
   toGoal ::
     OutputConstraint Expr InteractionId ->
-    ExceptT (AgdaResponseMismatch Response) TCM Goal
+    ExceptT () TCM Goal
   toGoal (OfType pointId ty) =
     -- Render in the interaction point's scope, as the Emacs and JSON
     -- frontends both do (showGoals, BasicOps.hs:830-836; JSONTop.hs:309).
@@ -474,7 +474,7 @@ resolveLoad path responses response = do
       getResponseContext AsIs pointId
         >>= resolveContext pointId
 
-  spanOf :: InteractionId -> ExceptT (AgdaResponseMismatch Response) TCM Span
+  spanOf :: InteractionId -> ExceptT () TCM Span
   spanOf pointId =
     lift (getInteractionRange pointId)
       >>= maybe
@@ -483,29 +483,31 @@ resolveLoad path responses response = do
         (pure . toSpan)
         . Agda.Syntax.Position.rangeToInterval
 
-  toHiddenMetavariable ::
-    AbsolutePath ->
-    OutputConstraint Expr NamedMeta ->
-    ExceptT (AgdaResponseMismatch Response) TCM HiddenMetavariable
-  toHiddenMetavariable file constraint = case constraint of
-    OfType metavariable ty ->
-      hiddenMetavariable metavariable $
-        GoalOfType . Text.pack . render
-          <$> lift (withMetaId (nmid metavariable) $ prettyATop ty)
-    JustSort metavariable ->
-      hiddenMetavariable metavariable (pure GoalSort)
-    -- Unreachable; see the `GoalShape` note.
-    _ -> throwError violation
-   where
-    hiddenMetavariable metavariable shape =
-      HiddenMetavariable
-        <$> renderedName metavariable
-        <*> (fileSpan file <$> lift (getMetaRange (nmid metavariable)))
-        <*> shape
+-- TODO:
+-- toHiddenMetavariable ::
+--   AbsolutePath ->
+--   OutputConstraint Expr NamedMeta ->
+--   ExceptT () TCM HiddenMetavariable
+-- toHiddenMetavariable file constraint = case constraint of
+--   OfType metavariable ty ->
+--     hiddenMetavariable metavariable $
+--       GoalOfType . Text.pack . render
+--         <$> lift (withMetaId (nmid metavariable) $ prettyATop ty)
+--   JustSort metavariable ->
+--     hiddenMetavariable metavariable (pure GoalSort)
+--   -- Unreachable; see the `GoalShape` note.
+--   _ -> throwError violation
+--  where
+--   hiddenMetavariable metavariable shape =
+--     error "un"
+--   -- HiddenMetavariable
+--   --   <$> renderedName metavariable
+--   --   <*> (fileSpan file <$> lift (getMetaRange (nmid metavariable)))
+--   --   <*> shape
 
-    renderedName metavariable =
-      Text.pack . render
-        <$> lift (withMetaId (nmid metavariable) $ prettyATop metavariable)
+--   renderedName metavariable =
+--     Text.pack . render
+--       <$> lift (withMetaId (nmid metavariable) $ prettyATop metavariable)
 
 -- Convert raw response context entries into `ContextEntry`s, rendering in the
 -- interaction point's scope.
