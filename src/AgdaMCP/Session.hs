@@ -48,7 +48,11 @@ newSession = do
   -- over a channel, but we deliberately avoid that here.
   queue <- CommandQueue <$> newTChanIO <*> newTVarIO Nothing
   tcState <- initStateIO
-  pure $ Session tcState $ initCommandState queue
+  -- Set a no-op callback. The default one has `__IMPOSSIBLE__`s
+  -- (TypeChecking/Monad/Base.hs:6361).
+  ((), tcState') <-
+    runTCM initEnv tcState $ setInteractionOutputCallback $ const $ pure ()
+  pure $ Session tcState' $ initCommandState queue
 
 -- Run a `CommandM` action against the current session state (just `TCState` and
 -- `CommandState`), producing the next session state. The trick we're pulling is

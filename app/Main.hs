@@ -98,6 +98,8 @@ import AgdaMCP.Session (newSession)
 -- }
 -- ```
 --
+-- TODO: on from here
+--
 -- Note that the responses are imperative in the sense that they direct the client to perform specific actions. Response constructors include `Response_ClearHighlightingInfo`, `Response_DisplayInfo`, and `Response_JumpToError` for example. For us, this makes for an awkward interface boundary. We cannot just write a handler which follows the instructions indicated by each response, since we do not have any long-lived editor state to mutate. For each agent request, we need to return a single (textual) response summarizing queried information and updated state.
 --
 -- Luckily, we are calling Agda as a library instead of talking to it over one of these RPC channels, and so we can interface with the layer just below the interaction layer--namely, the collection of utility functions the interaction layer itself calls (`cmd_load'`, `give_gen`, the `Agda.Interaction.BasicOps` queries, ...). We can hold `TCState` and `CommandState` ourselves instead of using channels and callbacks to talk to a thread which maintains it for us. To do that safely we need to understand exactly what the interaction layer does between `repl` and the utility function calls. The stack in `repl` is `maybeAbort runInteraction`, where `runInteraction` dispatches through `interpret` and wraps everything in `handleCommand`. Taking the three layers in turn:
