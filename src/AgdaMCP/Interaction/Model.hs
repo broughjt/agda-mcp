@@ -1,10 +1,14 @@
 module AgdaMCP.Interaction.Model (
+  -- Goals
   Goal (..),
   GoalShape (..),
   HiddenMetavariable (..),
+  ContextEntry (..),
+  -- Errors/warnings
   Error (..),
   Warning (..),
   NonFatalError (..),
+  -- Positions
   Position (..),
   Span (..),
   extractError,
@@ -73,7 +77,87 @@ data HiddenMetavariable = HiddenMetavariable
   }
   deriving (Eq, Show)
 
--- data ContextEntry = ContextEntry
+{-
+Relevant Agda code:
+
+- `ResponseContextEntry` Interaction/Response/Base.hs:147-153
+- `ArgInfo` Syntax/Common.hs:2464-2472
+- the `Info_Context` of `lispifyDisplayInfo` Interaction/EmacsTop.hs:196-198
+- `prettyResponseContext` Interaction/EmacsTop.hs:324-373
+- `encodeTCM` for `ResponseContextEntry` Interaction/JSONTop.hs:96-102
+
+The Emacs frontend uses the original name, the reified name, and whether the
+original name is in scope to render the binding, in one of three forms:
+
+x : Nat        (when original == reified)
+x = x₁ : Nat   (when original != reified and the original is in scope)
+x₁ : Nat       (otherwise, i.e. when the original is not in scope)
+
+For example, in `f x = λ x → {!!}` the inner x renders in the first form and
+the shadowed outer x in the second. The third form arises for
+machine-generated binders (e.g. variables generated in a fresh case split).
+
+The reified-in-scope flag is used to append a "not in scope" modifier in
+parentheses. The shadowed outer x would render as:
+
+x = x₁ : Nat   (not in scope)
+
+For something like `g = let longname = zero; v = suc zero in {!!}`, Emacs uses
+the let-binding value to render:
+
+longname : Nat
+longname = zero
+v : Nat
+v = suc longname
+
+There is a bunch of extra information in the `ArgInfo` record attached to
+`respType` in `ResponseContextEntry`. A bunch of that information is not used in
+the Emacs `prettyResponseContext` renderer, so we leave it out. Examining
+`prettyResponseContext` closely, it renders:
+
+- cohesion
+- polarity
+- erased
+- relevance
+- is instance
+
+These are the other fields we include here, even though I don't understand what
+they do besides "is instance".
+-}
+data ContextEntry = ContextEntry
+  { contextEntryOriginalName :: Text
+  {- ^ The user's name for the binding (`respOrigName` in
+  `ResponseContextEntry`).
+  -}
+  , contextEntryReifiedName :: Text
+  {- ^ The user's original name for the binding, unless that name is shadowed in
+  the scope of the goal, in which case the first free variant (x₁, x₂, etc.).
+  -}
+  , contextEntryOriginalInScope :: Bool
+  -- ^ Whether the original name is in scope.
+  , contextEntryReifiedInScope :: Bool
+  {- ^ Whether the reified name is in scope (`respInScope` in
+  `ResponseContextEntry`).
+  -}
+  , contextEntryType :: Text
+  {- ^ The type of the binding (at the requested normalization, `respType` in
+  `ResponseContextEntry`).
+  -}
+  , contextEntryLetValue :: Maybe Text
+  {- ^ The value when this is a let binding (`respLetValue` in
+  `ResponseContextEntry`)
+  -}
+  , contextEntryIsInstance :: Bool
+  -- ^ Whether the variable is considered by instance search.
+  , contextEntryCohesion :: Maybe Text
+  , contextEntryPolarity :: Maybe Text
+  , contextEntryErased :: Bool
+  , contextEntryRelevance :: Maybe Text
+  -- I don't understand what these last four are for but they are here for
+  -- completeness. I think they all arise from some of the more exotic type
+  -- theory features Agda supports, but I haven't used any of these features
+  -- yet.
+  }
 
 -- Errors
 
