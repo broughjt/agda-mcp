@@ -158,6 +158,7 @@ data ContextEntry = ContextEntry
   -- theory features Agda supports, but I haven't used any of these features
   -- yet.
   }
+  deriving (Eq, Show)
 
 -- Errors
 
