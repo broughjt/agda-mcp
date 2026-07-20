@@ -48,15 +48,6 @@ data Goal = Goal
   }
   deriving (Eq, Show)
 
--- TODO: Explain `interpret Cmd_metas` calls `getGoals'` which calls
--- `typesOfVisibleMetas` and `typesOfHiddenMetas`. These in turn (transitively)
--- call `typeOfMetaMI`. `typeOfMetaMI` only builds `OutputConstraints` with the
--- `HasType` and `JustSort` constructors, so these are the only
--- `OutputConstraints` that will show up in goals obtained from `Cmd_meta`.
-
--- Later: Emacs rendering of `Resp_DisplayInfo (Info_AllGoalsWarnings)` calls
--- `showGoals` which calls
-
 -- Goals and hidden metavariables use only two of `OutputConstraint`'s
 -- constructors. The goals response list is built exclusively by `typeOfMetaMI`
 -- (BasicOps.hs:889-921), which does cases on `Judgement`'s two
@@ -64,6 +55,12 @@ data Goal = Goal
 -- remaining `OutputConstraint` constructors are used when reifying constraints
 -- (`Cmd_constraints`, the `Cmd_goal_type_context*` family of commands), never
 -- for goals.
+
+-- TODO: Explain `interpret Cmd_metas` calls `getGoals'` which calls
+-- `typesOfVisibleMetas` and `typesOfHiddenMetas`. These in turn (transitively)
+-- call `typeOfMetaMI`. `typeOfMetaMI` only builds `OutputConstraints` with the
+-- `HasType` and `JustSort` constructors, so these are the only
+-- `OutputConstraints` that will show up in goals obtained from `Cmd_meta`.
 data GoalShape
   = GoalOfType Text
   | GoalSort

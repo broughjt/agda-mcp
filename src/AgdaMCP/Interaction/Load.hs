@@ -56,9 +56,10 @@ import AgdaMCP.Interaction.Model (
   extractWarning,
   rangeSpan,
  )
+import Data.Text (Text)
 
 -- `Cmd_load` takes a path to load and a list of command-line arguments to apply.
-data Request = Request {requestPath :: FilePath, requestArguments :: [String]}
+data Request = Request {requestPath :: FilePath, requestArguments :: [Text]}
 
 -- To the best of my understanding, there are three paths the execution of a `Cmd_load` can take: success, failure, and stale. Besides the interaction layer's general code described in the Main.hs comment, this execution amounts to the body of the `Cmd_load` case of `interpret`, which consists of a call to `cmd_load'` followed by a callback which runs `interpret Cmd_metas`. The first part of `cmd_load'` emits a prelude of responses which is shared by all three paths:
 --
@@ -95,7 +96,7 @@ load = runCommandM . loadInternal
 loadInternal :: Request -> CommandM Response
 loadInternal (Request path arguments) =
   ( do
-      cmd_load' path arguments True TypeCheck $ const $ pure ()
+      cmd_load' path (map Text.unpack arguments) True TypeCheck $ const $ pure ()
       -- `cmd_load'` clears `theCurrentFile` as its first action and resets it
       -- only inside the `when (t == t')` block, so after a non-throwing return
       -- `theCurrentFile` is `Just` exactly when the fresh path was
@@ -151,7 +152,7 @@ extractGoal constraint = do
   throwInteractionPointNoRange :: InteractionId -> TCM a
   throwInteractionPointNoRange pointId = do
     points <- getInteractionPoints
-    ranges <- traverse (fmap prettyShow . getInteractionRange) points
+    ranges <- traverse (fmap (Text.pack . prettyShow) . getInteractionRange) points
     liftIO $
       throwIO $
         InteractionPointNoRangeBug $
@@ -184,6 +185,7 @@ extractVisibleMetavariable constraint =
       . throwIO
       . UnexpectedGoalConstraintBug
       . UnexpectedGoalConstraint
+      . Text.pack
       . render
 
 extractHiddenMetavariable ::
@@ -203,6 +205,7 @@ extractHiddenMetavariable constraint =
           . throwIO
           . UnexpectedGoalConstraintBug
           . UnexpectedGoalConstraint
+          . Text.pack
           . render
  where
   toHiddenMetavariable :: NamedMeta -> GoalShape -> TCM HiddenMetavariable
@@ -221,10 +224,10 @@ data LoadBug
   deriving (Show)
 
 data InteractionPointNoRange
-  = InteractionPointNoRange InteractionId [(InteractionId, String)]
+  = InteractionPointNoRange InteractionId [(InteractionId, Text)]
   deriving (Show)
 
-data UnexpectedGoalConstraint = UnexpectedGoalConstraint String
+data UnexpectedGoalConstraint = UnexpectedGoalConstraint Text
   deriving (Show)
 
 instance Exception LoadBug
