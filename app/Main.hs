@@ -114,7 +114,7 @@ import AgdaMCP (
 --
 -- `maybeAbort` (InteractionTop.hs:304-375) reads the command queue, snapshots `(TCState, CommandState)`, executes the command in `runTCM` with the snapshot while `race`ing it against an abort signal, and writes the final states back on success.
 -- TODO: Revisit when we rewrite `runCommandM` and join back to previous paragraph
--- We do not support `Cmd_abort`, and without the abort race what remains--per-command `runTCM` re-entry over a state snapshot--is exactly what `AgdaMCP.Session.runCommandM` already does. The queue exists only to feed the loop and to deliver aborts mid-command; `runInteraction` never reads it. So there is nothing here to replicate.
+-- We do not support `Cmd_abort`, and without the abort race what remains: TODO:
 --
 -- `runInteraction` (InteractionTop.hs:254-286) does five separable things:
 --

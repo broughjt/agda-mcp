@@ -26,10 +26,6 @@ import Test.Tasty.HUnit (assertFailure)
 
 import Agda.Interaction.Command (CommandM)
 
--- TODO(step 6): the harness runs `CommandM` tool handlers through the
--- Commands-internal bridge until the tool layer is rewired over `ToolM`;
--- `runSession` then becomes `runStateT`/`runToolM` over ToolM handlers and
--- this import goes away.
 import AgdaMCP.Commands.Internal (runCommandM)
 import AgdaMCP.Position (Position (..), Span (..))
 import AgdaMCP.Session (newSession)

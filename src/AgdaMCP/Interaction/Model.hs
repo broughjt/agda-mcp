@@ -5,6 +5,8 @@ module AgdaMCP.Interaction.Model (
   Error (..),
   Warning (..),
   NonFatalError (..),
+  Position (..),
+  Span (..),
   extractError,
   extractWarning,
   extractNonFatalError,
@@ -44,6 +46,7 @@ data Goal = Goal
   , goalSpan :: Span
   , goalShape :: GoalShape
   }
+  deriving (Eq, Show)
 
 -- TODO: Explain `interpret Cmd_metas` calls `getGoals'` which calls
 -- `typesOfVisibleMetas` and `typesOfHiddenMetas`. These in turn (transitively)
@@ -60,15 +63,18 @@ data Goal = Goal
 -- constructors. `HasType` becomes `OfType` and `IsSort` becomes `JustSort`. The
 -- remaining `OutputConstraint` constructors are used when reifying constraints
 -- (`Cmd_constraints`, the `Cmd_goal_type_context*` family of commands), never
+-- for goals.
 data GoalShape
   = GoalOfType Text
   | GoalSort
+  deriving (Eq, Show)
 
 data HiddenMetavariable = HiddenMetavariable
   { hiddenMetavariableName :: Text
   , hiddenMetavariableSpan :: Maybe Span
   , hiddenMetavariableShape :: GoalShape
   }
+  deriving (Eq, Show)
 
 -- Errors
 
@@ -122,9 +128,11 @@ extractWarning' warning = (pathSpan,) <$> message
 -- Positions and Spans
 
 -- A position in a loaded file, consisting of a zero-based offset into the
--- Agda-normalized source text (what `applyEdits` splices; see the note in
--- `commit`) and the one-based line/column that Agda prints. Agda's `posPos` is
--- one-based, hence the subtraction in `toPosition`.
+-- Agda-normalized source text (`posPos` counts code points of the source
+-- after Agda's line-ending normalization, so file edits must splice against
+-- that same normalized text) and the one-based line/column that Agda
+-- prints. Agda's `posPos` is one-based, hence the subtraction in
+-- `toPosition`.
 data Position = Position
   { positionOffset :: Int
   , positionLine :: Int

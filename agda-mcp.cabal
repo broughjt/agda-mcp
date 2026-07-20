@@ -14,7 +14,6 @@ library
   hs-source-dirs: src
   exposed-modules:
     AgdaMCP
-  other-modules:
     AgdaMCP.Interaction
     AgdaMCP.Interaction.Context
     AgdaMCP.Interaction.Internal

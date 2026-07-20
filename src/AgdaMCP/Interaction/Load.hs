@@ -1,4 +1,8 @@
-module AgdaMCP.Interaction.Load (Request (..), Response (..), load) where
+module AgdaMCP.Interaction.Load (
+  Request (..),
+  Response (..),
+  load,
+) where
 
 import Agda.Interaction.Base (
   CommandState (..),
@@ -39,7 +43,7 @@ import Data.Maybe (isJust)
 import Data.Set qualified as Set
 import Data.Text qualified as Text
 
-import AgdaMCP.Interaction.Internal (catchTCErr)
+import AgdaMCP.Interaction.Internal (InteractionM, catchTCErr, runCommandM)
 import AgdaMCP.Interaction.Model (
   Error,
   Goal (..),
@@ -85,8 +89,11 @@ data Response
     -- so Agda discarded the interaction state.
     ResponseStale
 
-load :: Request -> CommandM Response
-load (Request path arguments) =
+load :: Request -> InteractionM Response
+load = runCommandM . loadInternal
+
+loadInternal :: Request -> CommandM Response
+loadInternal (Request path arguments) =
   ( do
       cmd_load' path arguments True TypeCheck $ const $ pure ()
       -- `cmd_load'` clears `theCurrentFile` as its first action and resets it
