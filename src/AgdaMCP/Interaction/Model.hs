@@ -73,6 +73,8 @@ data HiddenMetavariable = HiddenMetavariable
   }
   deriving (Eq, Show)
 
+-- data ContextEntry = ContextEntry
+
 -- Errors
 
 data Error = Error
