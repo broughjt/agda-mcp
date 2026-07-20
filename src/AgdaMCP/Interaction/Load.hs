@@ -60,6 +60,7 @@ import Data.Text (Text)
 
 -- `Cmd_load` takes a path to load and a list of command-line arguments to apply.
 data Request = Request {requestPath :: FilePath, requestArguments :: [Text]}
+  deriving (Eq, Show)
 
 -- To the best of my understanding, there are three paths the execution of a `Cmd_load` can take: success, failure, and stale. Besides the interaction layer's general code described in the Main.hs comment, this execution amounts to the body of the `Cmd_load` case of `interpret`, which consists of a call to `cmd_load'` followed by a callback which runs `interpret Cmd_metas`. The first part of `cmd_load'` emits a prelude of responses which is shared by all three paths:
 --
@@ -89,6 +90,7 @@ data Response
   | -- The stale path: the file changed on disk while it was being type checked,
     -- so Agda discarded the interaction state.
     ResponseStale
+  deriving (Eq, Show)
 
 load :: Request -> InteractionM Response
 load = runCommandM . loadInternal

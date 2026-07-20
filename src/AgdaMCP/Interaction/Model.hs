@@ -4,6 +4,7 @@ module AgdaMCP.Interaction.Model (
   GoalShape (..),
   HiddenMetavariable (..),
   ContextEntry (..),
+  GoalReport (..),
   -- Errors/warnings
   Error (..),
   Warning (..),
@@ -14,6 +15,7 @@ module AgdaMCP.Interaction.Model (
   extractError,
   extractWarning,
   extractNonFatalError,
+  matchNoSuchInteractionPoint,
   rangeSpan,
 ) where
 
@@ -32,7 +34,14 @@ import Agda.Syntax.Position (
   rangeToInterval,
  )
 import Agda.TypeChecking.Errors (renderError)
-import Agda.TypeChecking.Monad (TCErr, TCM, TCWarning)
+import Agda.TypeChecking.Monad (
+  InteractionError (..),
+  TCErr (..),
+  TCM,
+  TCWarning,
+  TypeError (..),
+  clValue,
+ )
 import Agda.TypeChecking.Pretty (prettyTCM)
 import Agda.TypeChecking.Pretty.Warning (
   filterTCWarnings,
@@ -160,6 +169,27 @@ data ContextEntry = ContextEntry
   }
   deriving (Eq, Show)
 
+-- The shared payload of the `Cmd_goal_type_context*` family, which is collected
+-- in `cmd_goal_type_context_and` (InteractionTop.hs:1061-1067). It bundles the
+-- goal type, boundary faces, context, constraints mentioning the goal's
+-- metavariable.
+--
+-- Note the goal type is not part of Agda's `Goal_GoalType` payload. Both
+-- frontends re-query it at render time via `typeOfMeta` (`prettyTypeOfMeta`,
+-- EmacsTop.hs:378 / JSONTop.hs:395). We carry it explicitly as a `GoalShape`,
+-- the same shape load's goal inventory uses.
+data GoalReport = GoalReport
+  { goalReportShape :: GoalShape
+  -- ^ The goal type from `typeOfMeta` at the requested normalization.
+  , goalReportBoundary :: [Text]
+  -- ^ The boundary faces from `getIPBoundary`. Empty for a non-cubical goal.
+  , goalReportContext :: [ContextEntry]
+  -- ^ The goal's context from `getResponseContext`.
+  , goalReportConstraints :: [Text]
+  -- ^ Constraints mentioning this goal's metavariable from `getConstraintsMentioning`.
+  }
+  deriving (Eq, Show)
+
 -- Errors
 
 data Error = Error
@@ -193,6 +223,20 @@ extractError e =
     getAllWarningsOfTCErr e
       >>= filterTCWarnings
       >>= traverse extractWarning
+
+-- Classify the `TCErr` that a `withInteractionId` call throws when its
+-- interaction id does not correspond to an interaction point:
+-- `lookupInteractionPoint` (TypeChecking/Monad/MetaVars.hs:635-640) fails with
+-- `InteractionError (NoSuchInteractionPoint _)`. The adjacent
+-- `NoActionForInteractionPoint` (the point exists but was never connected to a
+-- meta) is a different condition and deliberately not matched here. Shared by
+-- every wrapper that resolves a caller-supplied interaction id.
+matchNoSuchInteractionPoint :: TCErr -> Maybe InteractionId
+matchNoSuchInteractionPoint e = case e of
+  TypeError {tcErrClosErr = closure}
+    | InteractionError (NoSuchInteractionPoint badId) <- clValue closure ->
+        Just badId
+  _ -> Nothing
 
 extractWarning :: TCWarning -> TCM Warning
 extractWarning = fmap Warning . extractWarning'

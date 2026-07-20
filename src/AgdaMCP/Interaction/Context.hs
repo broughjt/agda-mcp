@@ -2,6 +2,7 @@ module AgdaMCP.Interaction.Context (
   Request (..),
   Response (..),
   context,
+  extractContext,
 ) where
 
 import Agda.Interaction.Base (Rewrite)
@@ -28,11 +29,8 @@ import Agda.Syntax.Common.Pretty (prettyShow, render)
 import Agda.Syntax.Concrete.Name (NameInScope (..), isInScope)
 import Agda.TypeChecking.Errors (verbalize)
 import Agda.TypeChecking.Monad (
-  InteractionError (..),
-  TCErr (..),
+  TCErr,
   TCM,
-  TypeError (..),
-  clValue,
   currentModality,
   withInteractionId,
  )
@@ -40,12 +38,18 @@ import Control.Monad.State (lift)
 import Data.Text qualified as Text
 
 import AgdaMCP.Interaction.Internal (InteractionM, catchTCErr, runCommandM)
-import AgdaMCP.Interaction.Model (ContextEntry (..), Error, extractError)
+import AgdaMCP.Interaction.Model (
+  ContextEntry (..),
+  Error,
+  extractError,
+  matchNoSuchInteractionPoint,
+ )
 
 data Request = Request
   { requestNormalization :: Rewrite
   , requestGoalId :: InteractionId
   }
+  deriving (Eq, Show)
 
 data Response
   = -- The context of the goal.
@@ -58,6 +62,7 @@ data Response
     ResponseUnknownId InteractionId
   | -- Any other `TCErr`.
     ResponseError Error
+  deriving (Eq, Show)
 
 context :: Request -> InteractionM Response
 context = runCommandM . contextInternal
@@ -72,17 +77,12 @@ contextInternal (Request norm goalId) =
   (ResponseOk <$> liftLocalState (extractContext norm goalId))
     `catchTCErr` handler
  where
-  -- A non-existent interaction id fails `withInteractionId`'s
-  -- `lookupInteractionPoint` (TypeChecking/Monad/MetaVars.hs:635-640) with
-  -- `InteractionError (NoSuchInteractionPoint _)`. Note the adjacent
-  -- `NoActionForInteractionPoint` is a different condition (the point exists
-  -- but was never connected to a meta) and deliberately not classified here.
+  -- A non-existent interaction id is classified by `matchNoSuchInteractionPoint`
+  -- (see its comment); any other `TCErr` becomes a generic `ResponseError`.
   handler :: TCErr -> CommandM Response
-  handler e = case e of
-    TypeError {tcErrClosErr = closure}
-      | InteractionError (NoSuchInteractionPoint badId) <- clValue closure ->
-          pure $ ResponseUnknownId badId
-    _ -> ResponseError <$> lift (extractError e)
+  handler e = case matchNoSuchInteractionPoint e of
+    Just badId -> pure $ ResponseUnknownId badId
+    Nothing -> ResponseError <$> lift (extractError e)
 
 -- The extraction mirrors `prettyResponseContext` (EmacsTop.hs:324-373). Also
 -- see the comment above `ContextEntry`.

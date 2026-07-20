@@ -16,6 +16,9 @@ library
     AgdaMCP
     AgdaMCP.Interaction
     AgdaMCP.Interaction.Context
+    AgdaMCP.Interaction.Goal
+    AgdaMCP.Interaction.GoalCheck
+    AgdaMCP.Interaction.GoalInfer
     AgdaMCP.Interaction.Internal
     AgdaMCP.Interaction.Load
     AgdaMCP.Interaction.Model
