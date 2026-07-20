@@ -13,17 +13,16 @@ build-type: Simple
 library
   hs-source-dirs: src
   exposed-modules:
-    AgdaMCP.Position
-    AgdaMCP.Session
-    AgdaMCP.Model
-    AgdaMCP.Commands.Load
-    AgdaMCP.Commands.Context
+    AgdaMCP
+  other-modules:
+    AgdaMCP.Interaction
+    AgdaMCP.Interaction.Context
+    AgdaMCP.Interaction.Internal
+    AgdaMCP.Interaction.Load
+    AgdaMCP.Interaction.Model
     AgdaMCP.Tools
-    AgdaMCP.Tools.Common
-    AgdaMCP.Tools.Give
-    AgdaMCP.Tools.Goal
+    AgdaMCP.Tools.Internal
     AgdaMCP.Tools.Load
-    AgdaMCP.Server
   build-depends:
       Agda == 2.8.*,
       aeson,
@@ -44,7 +43,8 @@ executable agda-mcp
   hs-source-dirs: app
   build-depends:
       agda-mcp,
-      base >= 4.18 && < 5
+      base >= 4.18 && < 5,
+      mcp,
   default-language: GHC2021
   ghc-options:
       -Wall

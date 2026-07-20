@@ -1,4 +1,4 @@
-module AgdaMCP.Commands.Load (Request (..), Response (..), load) where
+module AgdaMCP.Interaction.Load (Request (..), Response (..), load) where
 
 import Agda.Interaction.Base (
   CommandState (..),
@@ -32,7 +32,15 @@ import Agda.TypeChecking.Monad.MetaVars (
   getInteractionPoints,
   getInteractionRange,
  )
-import AgdaMCP.Model (
+import Control.Exception (Exception, throwIO)
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad.State (gets, lift, modify)
+import Data.Maybe (isJust)
+import Data.Set qualified as Set
+import Data.Text qualified as Text
+
+import AgdaMCP.Interaction.Internal (catchTCErr)
+import AgdaMCP.Interaction.Model (
   Error,
   Goal (..),
   GoalShape (..),
@@ -42,15 +50,8 @@ import AgdaMCP.Model (
   extractError,
   extractNonFatalError,
   extractWarning,
+  rangeSpan,
  )
-import AgdaMCP.Position (rangeSpan)
-import AgdaMCP.Session (catchTCErr)
-import Control.Exception (Exception, throwIO)
-import Control.Monad.IO.Class (liftIO)
-import Control.Monad.State (gets, lift, modify)
-import Data.Maybe (isJust)
-import Data.Set qualified as Set
-import Data.Text qualified as Text
 
 -- `Cmd_load` takes a path to load and a list of command-line arguments to apply.
 data Request = Request {requestPath :: FilePath, requestArguments :: [String]}

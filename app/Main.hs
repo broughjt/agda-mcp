@@ -1,7 +1,15 @@
 module Main (main) where
 
-import AgdaMCP.Server (runServer)
-import AgdaMCP.Session (newSession)
+import MCP.Server (initMCPServerState, serveStdio)
+import System.IO (BufferMode (..), hSetBuffering, stderr, stdin, stdout)
+
+import AgdaMCP (
+  capabilities,
+  handlers,
+  implementation,
+  instructions,
+  newToolState,
+ )
 
 -- Here, I will attempt to give an account of how frontends interaction with Agda, and then describe which parts we use, replicate, and drop. All file:line citations are Agda v2.8.0.
 --
@@ -133,4 +141,15 @@ import AgdaMCP.Session (newSession)
 -- TODO: We are careful to obtain this data in the same manner as the two frontends extraction and rendering helpers, citing the relevant source and
 
 main :: IO ()
-main = newSession >>= runServer
+main = do
+  toolState <- newToolState
+  hSetBuffering stderr LineBuffering
+  serveStdio stdin stdout $
+    initMCPServerState
+      toolState
+      Nothing
+      Nothing
+      capabilities
+      implementation
+      (Just instructions)
+      handlers

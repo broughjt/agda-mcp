@@ -14,6 +14,7 @@ module Common (
   withHoleGiven,
 ) where
 
+import Control.Monad.State (runStateT)
 import Data.ByteString (ByteString)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -25,8 +26,13 @@ import Test.Tasty.HUnit (assertFailure)
 
 import Agda.Interaction.Command (CommandM)
 
+-- TODO(step 6): the harness runs `CommandM` tool handlers through the
+-- Commands-internal bridge until the tool layer is rewired over `ToolM`;
+-- `runSession` then becomes `runStateT`/`runToolM` over ToolM handlers and
+-- this import goes away.
+import AgdaMCP.Commands.Internal (runCommandM)
 import AgdaMCP.Position (Position (..), Span (..))
-import AgdaMCP.Session (newSession, runCommandM)
+import AgdaMCP.Session (newSession)
 import AgdaMCP.Tools.Common (AgdaError, NonFatalError, Warning)
 import AgdaMCP.Tools.Give (GiveOutcome (..), GiveRejection)
 import AgdaMCP.Tools.Load (Goal, HiddenMetavariable, LoadResponse (..))
@@ -51,7 +57,7 @@ withFixtureDirectory names action =
 -- We use one session per test. Multi-step scenarios use a single session, which
 -- is exactly how the server works in production.
 runSession :: CommandM a -> IO a
-runSession action = newSession >>= fmap fst . runCommandM action
+runSession action = newSession >>= fmap fst . runStateT (runCommandM action)
 
 expectLoaded ::
   LoadResponse ->

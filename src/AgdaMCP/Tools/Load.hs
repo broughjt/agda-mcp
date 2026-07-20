@@ -1,101 +1,16 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module AgdaMCP.Tools.Load (
-  ContextEntry (..),
-  ContextEntryAttributes (..),
-  Goal (..),
-  GoalShape (..),
-  HiddenMetavariable (..),
-  LoadRequest (..),
-  LoadResponse (..),
-  load,
   loadTool,
-  renderContext,
-  renderLoadResponse,
-  renderShape,
-  resolveContext,
 ) where
 
-import Control.Monad (when)
-import Control.Monad.Except (ExceptT, runExceptT, throwError)
-import Control.Monad.IO.Class (liftIO)
-import Control.Monad.State (lift)
-import Data.Aeson (FromJSON (parseJSON), object, withObject, (.:), (.=))
+import Data.Aeson (object, (.=))
 import Data.Map qualified as Map
-import Data.Maybe (catMaybes, maybeToList)
 import Data.Text (Text)
-import Data.Text qualified as Text
 import MCP.Server (
   InputSchema (..),
   ToolHandler,
   toolHandler,
- )
-
-import Agda.Interaction.Base (
-  IOTCM' (..),
-  Interaction' (Cmd_load),
-  OutputConstraint_boot (..),
-  Rewrite (AsIs),
- )
-import Agda.Interaction.BasicOps (getResponseContext)
-import Agda.Interaction.Command (CommandM)
-import Agda.Interaction.Output (OutputConstraint)
-import Agda.Interaction.Response (
-  DisplayInfo_boot (..),
-  Goals,
-  Response,
-  ResponseContextEntry (..),
-  Response_boot (..),
-  Status (..),
- )
-import Agda.Syntax.Abstract (Expr)
-import Agda.Syntax.Abstract.Pretty (prettyATop)
-import Agda.Syntax.Common (
-  Arg (..),
-  InteractionId,
-  ModalPolarity (MixedPolarity),
-  Modality,
-  getCohesion,
-  getModalPolarity,
-  getQuantity,
-  getRelevance,
-  inverseComposeRelevance,
-  isInstance,
-  isRelevant,
-  modPolarityAnn,
-  moreQuantity,
- )
-import Agda.Syntax.Common.Aspect (TokenBased (..))
-import Agda.Syntax.Common.Pretty (prettyShow, render)
-import Agda.Syntax.Concrete.Name (NameInScope (..), isInScope)
-import Agda.Syntax.Position qualified
-import Agda.TypeChecking.Errors (verbalize)
-import Agda.TypeChecking.Monad (TCM, currentModality)
-import Agda.TypeChecking.Monad.Base (
-  HighlightingLevel (..),
-  HighlightingMethod (..),
-  NamedMeta (..),
-  TCErr,
-  WarningsAndNonFatalErrors (..),
- )
-import Agda.TypeChecking.Monad.MetaVars (
-  getInteractionRange,
-  getMetaRange,
-  withInteractionId,
-  withMetaId,
- )
-import Agda.Utils.FileName (AbsolutePath, absolute)
-
-import AgdaMCP.Position (
-  Span,
-  toSpan,
- )
-import AgdaMCP.Tools.Common (
-  AgdaError (AgdaError),
-  NonFatalError (..),
-  Warning (..),
-  renderGoalId,
-  textToolHandle,
  )
 
 loadTool :: ToolHandler
@@ -131,7 +46,12 @@ loadTool =
         )
         (Just ["path"])
     )
-    (textToolHandle load renderLoadResponse)
+    -- TODO:
+    (error "un")
+
+-- (textToolHandle load renderLoadResponse)
+
+{-
 
 data LoadRequest = LoadRequest FilePath
 
@@ -560,3 +480,4 @@ toContextEntry goalModality entry = do
  where
   nameInScope InScope = True
   nameInScope NotInScope = False
+-}

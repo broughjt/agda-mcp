@@ -1,4 +1,4 @@
-module AgdaMCP.Commands.Context (Request (..), Response (..)) where
+module AgdaMCP.Interaction.Context (Request (..), Response (..)) where
 
 import Agda.Interaction.Base (Rewrite)
 import Agda.Syntax.Common (InteractionId)

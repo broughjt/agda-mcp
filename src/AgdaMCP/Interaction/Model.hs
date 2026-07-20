@@ -1,4 +1,4 @@
-module AgdaMCP.Model (
+module AgdaMCP.Interaction.Model (
   Goal (..),
   GoalShape (..),
   HiddenMetavariable (..),
@@ -8,21 +8,33 @@ module AgdaMCP.Model (
   extractError,
   extractWarning,
   extractNonFatalError,
+  rangeSpan,
 ) where
 
 import Agda.Syntax.Common (InteractionId)
 import Agda.Syntax.Common.Pretty (render)
+import Agda.Syntax.Position (
+  IntervalWithoutFile,
+  Position' (..),
+  PositionWithoutFile,
+  Range,
+  RangeFile (..),
+  getRange,
+  iEnd,
+  iStart,
+  rangeFile,
+  rangeToInterval,
+ )
+import Agda.TypeChecking.Errors (renderError)
 import Agda.TypeChecking.Monad (TCErr, TCM, TCWarning)
 import Agda.TypeChecking.Pretty (prettyTCM)
-import Data.Text (Text)
-
-import Agda.Syntax.Position (getRange)
-import Agda.TypeChecking.Errors (renderError)
 import Agda.TypeChecking.Pretty.Warning (
   filterTCWarnings,
   getAllWarningsOfTCErr,
  )
-import AgdaMCP.Position (Span, rangePathSpan)
+import Agda.Utils.FileName (filePath)
+import Agda.Utils.Maybe.Strict qualified as Strict
+import Data.Text (Text)
 import Data.Text qualified as Text
 
 -- Goals
@@ -106,3 +118,83 @@ extractWarning' warning = (pathSpan,) <$> message
 
   message :: TCM Text
   message = Text.pack . render <$> prettyTCM warning
+
+-- Positions and Spans
+
+-- A position in a loaded file, consisting of a zero-based offset into the
+-- Agda-normalized source text (what `applyEdits` splices; see the note in
+-- `commit`) and the one-based line/column that Agda prints. Agda's `posPos` is
+-- one-based, hence the subtraction in `toPosition`.
+data Position = Position
+  { positionOffset :: Int
+  , positionLine :: Int
+  , positionColumn :: Int
+  }
+  deriving (Eq, Show)
+
+-- A contiguous part of the loaded file with start inclusive and end exclusive.
+data Span = Span
+  { spanStart :: Position
+  , spanEnd :: Position
+  }
+  deriving (Eq, Show)
+
+toPosition :: PositionWithoutFile -> Position
+toPosition p =
+  Position
+    { positionOffset = fromIntegral (posPos p) - 1
+    , positionLine = fromIntegral (posLine p)
+    , positionColumn = fromIntegral (posCol p)
+    }
+
+toSpan :: IntervalWithoutFile -> Span
+toSpan i =
+  Span
+    (toPosition (iStart i))
+    (toPosition (iEnd i))
+
+-- fileSpan :: AbsolutePath -> Agda.Syntax.Position.Range -> Maybe Span
+-- fileSpan p r = do
+--   rangeFile <- Strict.toLazy $ Agda.Syntax.Position.rangeFile r
+--   guard $ Agda.Syntax.Position.rangeFilePath rangeFile == p
+--   toSpan <$> Agda.Syntax.Position.rangeToInterval r
+
+-- rangeFile' :: Range' p -> Maybe p
+-- rangeFile' NoRange = Nothing
+-- rangeFile' (Range p _) = Just p
+
+rangePath :: Range -> Maybe FilePath
+rangePath = fmap (filePath . rangeFilePath) . Strict.toLazy . rangeFile
+
+rangeSpan :: Range -> Maybe Span
+rangeSpan = fmap toSpan . rangeToInterval
+
+rangePathSpan :: Agda.Syntax.Position.Range -> Maybe (FilePath, Span)
+rangePathSpan r = (,) <$> rangePath r <*> rangeSpan r
+
+-- rangeMaybeToFileSpan Agda.Syntax.Position.NoRange = error "unimplemented"
+-- rangeMaybeToFileSpan r@(Agda.Syntax.Position.Range a b) =
+--   let foo = rangeToInterval r
+--    in error "unimplemented"
+
+-- spanText :: Text -> Span -> Text
+-- spanText t s =
+--   Text.take
+--     (spanLength s)
+--     (Text.drop (positionOffset (spanStart s)) t)
+
+-- spanLength :: Span -> Int
+-- spanLength s = positionOffset (spanEnd s) - positionOffset (spanStart s)
+
+-- renderSpan :: Span -> Text
+-- renderSpan s
+--   | positionLine start == positionLine end =
+--       renderPosition start <> "-" <> Text.pack (show (positionColumn end))
+--   | otherwise = renderPosition start <> "-" <> renderPosition end
+--  where
+--   start = spanStart s
+--   end = spanEnd s
+
+-- renderPosition :: Position -> Text
+-- renderPosition (Position _ l c) =
+--   Text.pack (show l) <> ":" <> Text.pack (show c)
