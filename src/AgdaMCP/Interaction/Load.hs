@@ -96,24 +96,27 @@ load :: Request -> InteractionM Response
 load = runCommandM . loadInternal
 
 loadInternal :: Request -> CommandM Response
-loadInternal (Request path arguments) =
-  ( do
-      cmd_load' path (map Text.unpack arguments) True TypeCheck $ const $ pure ()
-      -- `cmd_load'` clears `theCurrentFile` as its first action and resets it
-      -- only inside the `when (t == t')` block, so after a non-throwing return
-      -- `theCurrentFile` is `Just` exactly when the fresh path was
-      -- taken. `isJust` therefore distinguishes the two with no race against
-      -- further disk changes.
-      currentFile <- gets theCurrentFile
-      if isJust currentFile
-        then
-          lift extractResponseOk
-        else
-          pure ResponseStale
-  )
-    `catchTCErr` handler
+loadInternal (Request path arguments) = do
+  -- The catch covers only `cmd_load'` and the staleness read, which are the
+  -- only steps where a `TCErr` is a genuine load outcome. Errors during
+  -- extraction should be treated as bugs in our code.
+  outcome <-
+    ( do
+        cmd_load' path (map Text.unpack arguments) True TypeCheck $ const $ pure ()
+        -- `cmd_load'` clears `theCurrentFile` as its first action and resets it
+        -- only inside the `when (t == t')` block, so after a non-throwing return
+        -- `theCurrentFile` is `Just` exactly when the fresh path was
+        -- taken. `isJust` therefore distinguishes the two with no race against
+        -- further disk changes.
+        Right <$> gets (isJust . theCurrentFile)
+    )
+      `catchTCErr` handler
+  case outcome of
+    Right True -> lift extractResponseOk
+    Right False -> pure ResponseStale
+    Left e -> pure $ ResponseError e
  where
-  handler :: TCErr -> CommandM Response
+  handler :: TCErr -> CommandM (Either Error Bool)
   handler e = do
     -- Even though `cmd_load'` clears `theCurrentFile` during its setup
     -- (:851-853), the automatic state rollback in the `StateT` and `TCM`
@@ -121,7 +124,7 @@ loadInternal (Request path arguments) =
     -- the load throws. The `onFail` clause sets it back to `Nothing` in
     -- `runInteraction`. We match this behavior here.
     modify $ \state -> state {theCurrentFile = Nothing}
-    fmap ResponseError $ lift $ extractError e
+    Left <$> lift (extractError e)
 
 extractResponseOk :: TCM Response
 extractResponseOk = do
