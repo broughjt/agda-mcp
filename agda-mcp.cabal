@@ -16,12 +16,16 @@ library
     AgdaMCP
     AgdaMCP.Interaction
     AgdaMCP.Interaction.Context
+    AgdaMCP.Interaction.ElaborateGive
+    AgdaMCP.Interaction.Give
     AgdaMCP.Interaction.Goal
     AgdaMCP.Interaction.GoalCheck
     AgdaMCP.Interaction.GoalInfer
     AgdaMCP.Interaction.Internal
+    AgdaMCP.Interaction.Intro
     AgdaMCP.Interaction.Load
     AgdaMCP.Interaction.Model
+    AgdaMCP.Interaction.Refine
     AgdaMCP.Tools
     AgdaMCP.Tools.Internal
     AgdaMCP.Tools.Load

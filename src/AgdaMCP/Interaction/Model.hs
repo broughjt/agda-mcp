@@ -5,6 +5,14 @@ module AgdaMCP.Interaction.Model (
   HiddenMetavariable (..),
   ContextEntry (..),
   GoalReport (..),
+  -- Give family
+  GiveAction (..),
+  toGiveAction,
+  -- Command error sums
+  GiveError (..),
+  GoalError (..),
+  IntroError (..),
+  classifyInteractionError,
   -- Errors/warnings
   Error (..),
   Warning (..),
@@ -15,10 +23,10 @@ module AgdaMCP.Interaction.Model (
   extractError,
   extractWarning,
   extractNonFatalError,
-  matchNoSuchInteractionPoint,
   rangeSpan,
 ) where
 
+import Agda.Interaction.Response (GiveResult (..))
 import Agda.Syntax.Common (InteractionId)
 import Agda.Syntax.Common.Pretty (render)
 import Agda.Syntax.Position (
@@ -190,7 +198,55 @@ data GoalReport = GoalReport
   }
   deriving (Eq, Show)
 
--- Errors
+-- How a goal/context command can fail (goal, infer, check, context all share
+-- this).
+data GoalError
+  = GoalUnknownId InteractionId
+  | GoalFailed Error
+  deriving (Eq, Show)
+
+-- Give
+
+-- What to place in the hole once a give/refine/intro/elaborate succeeds. It
+-- duplicates `GiveResult` and exists because Agda's `GiveResult`
+-- (Response/Base.hs:175-178) has no `Eq` or `Show` instances.
+data GiveAction
+  = -- Agda kept the user's own expression text. The `Bool` is whether the
+    -- expression must be parenthesized. Emitted for give/refine when the given
+    -- expression is unchanged and the hole has a real range (`literally` at
+    -- InteractionTop.hs:1010).
+    GiveVerbatim Bool
+  | -- Agda computed a new concrete expression to place (intro, elaborate, or a
+    -- refine that introduced metavariables).
+    GiveComputed Text
+  deriving (Eq, Show)
+
+toGiveAction :: GiveResult -> GiveAction
+toGiveAction (Give_String s) = GiveComputed $ Text.pack s
+toGiveAction Give_Paren = GiveVerbatim True
+toGiveAction Give_NoParen = GiveVerbatim False
+
+-- How a give/refine/elaborate command can fail.
+data GiveError
+  = -- A bogus interaction id (`withInteractionId`'s lookup failed).
+    GiveUnknownId InteractionId
+  | -- Any other `TCErr`. For example, a parse error, `CannotGive`,
+    -- `CannotRefine`, or an ill-typed expression.
+    GiveFailed Error
+  deriving (Eq, Show)
+
+-- Ways in which an intro command can fail. This is a superset of `GiveError`,
+-- since `introTactic` runs before any give and can conclude that no
+-- constructor/lambda applies (`Info_Intro_NotFound`) or that several do
+-- (`Info_Intro_ConstructorUnknown`).
+data IntroError
+  = IntroUnknownId InteractionId
+  | IntroFailed Error
+  | IntroNotFound
+  | IntroAmbiguous [Text]
+  deriving (Eq, Show)
+
+-- Generic errors
 
 data Error = Error
   { agdaErrorMessage :: Text
@@ -224,19 +280,14 @@ extractError e =
       >>= filterTCWarnings
       >>= traverse extractWarning
 
--- Classify the `TCErr` that a `withInteractionId` call throws when its
--- interaction id does not correspond to an interaction point:
--- `lookupInteractionPoint` (TypeChecking/Monad/MetaVars.hs:635-640) fails with
--- `InteractionError (NoSuchInteractionPoint _)`. The adjacent
--- `NoActionForInteractionPoint` (the point exists but was never connected to a
--- meta) is a different condition and deliberately not matched here. Shared by
--- every wrapper that resolves a caller-supplied interaction id.
-matchNoSuchInteractionPoint :: TCErr -> Maybe InteractionId
-matchNoSuchInteractionPoint e = case e of
+-- Helper for classifying missing interaction IDs.
+classifyInteractionError ::
+  (InteractionId -> e) -> (Error -> e) -> TCErr -> TCM e
+classifyInteractionError unknownId failed e = case e of
   TypeError {tcErrClosErr = closure}
     | InteractionError (NoSuchInteractionPoint badId) <- clValue closure ->
-        Just badId
-  _ -> Nothing
+        pure (unknownId badId)
+  _ -> failed <$> extractError e
 
 extractWarning :: TCWarning -> TCM Warning
 extractWarning = fmap Warning . extractWarning'

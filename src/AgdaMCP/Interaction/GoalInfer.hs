@@ -1,6 +1,6 @@
 module AgdaMCP.Interaction.GoalInfer (
   Request (..),
-  Response (..),
+  Response,
   Have (..),
   goalInfer,
 ) where
@@ -12,7 +12,7 @@ import Agda.Syntax.Abstract.Pretty (prettyATop)
 import Agda.Syntax.Common (InteractionId)
 import Agda.Syntax.Common.Pretty (pretty, render)
 import Agda.Syntax.Position (noRange)
-import Agda.TypeChecking.Monad (TCErr, withInteractionId)
+import Agda.TypeChecking.Monad (withInteractionId)
 import Control.Monad.State (lift)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -20,10 +20,9 @@ import Data.Text qualified as Text
 import AgdaMCP.Interaction.Goal (extractGoalReport)
 import AgdaMCP.Interaction.Internal (InteractionM, catchTCErr, runCommandM)
 import AgdaMCP.Interaction.Model (
-  Error,
+  GoalError (..),
   GoalReport,
-  extractError,
-  matchNoSuchInteractionPoint,
+  classifyInteractionError,
  )
 
 data Request = Request
@@ -33,15 +32,10 @@ data Request = Request
   }
   deriving (Eq, Show)
 
-data Response
-  = -- The goal report together with the inferred type of the expression.
-    ResponseOk GoalReport Have
-  | -- The requested goal id did not correspond to an interaction point.
-    ResponseUnknownId InteractionId
-  | -- Any other `TCErr`, including every way the expression can be at fault
-    -- (parse error, unbound name, ill-typed).
-    ResponseError Error
-  deriving (Eq, Show)
+-- `Left` is a bad id or a `TCErr` (every way the expression can be at
+-- fault--for example, parse error, unbound name, ill-typed), while `Right`
+-- pairs the goal report with the inferred "Have" of the user's expression.
+type Response = Either GoalError (GoalReport, Have)
 
 -- The "Have:" part of the goal display (EmacsTop.hs:235-237), consisting of the
 -- inferred type of the user's expression and its actual boundary faces.
@@ -76,11 +70,6 @@ goalInferInternal (Request norm goalId expression) =
               (Text.pack $ render typeDoc)
               (map (Text.pack . render . pretty) faces)
       report <- liftLocalState $ extractGoalReport norm goalId
-      pure $ ResponseOk report have
+      pure $ Right (report, have)
   )
-    `catchTCErr` handler
- where
-  handler :: TCErr -> CommandM Response
-  handler e = case matchNoSuchInteractionPoint e of
-    Just badId -> pure $ ResponseUnknownId badId
-    Nothing -> ResponseError <$> lift (extractError e)
+    `catchTCErr` (fmap Left . lift . classifyInteractionError GoalUnknownId GoalFailed)

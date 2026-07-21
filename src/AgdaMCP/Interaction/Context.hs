@@ -1,6 +1,6 @@
 module AgdaMCP.Interaction.Context (
   Request (..),
-  Response (..),
+  Response,
   context,
   extractContext,
 ) where
@@ -29,7 +29,6 @@ import Agda.Syntax.Common.Pretty (prettyShow, render)
 import Agda.Syntax.Concrete.Name (NameInScope (..), isInScope)
 import Agda.TypeChecking.Errors (verbalize)
 import Agda.TypeChecking.Monad (
-  TCErr,
   TCM,
   currentModality,
   withInteractionId,
@@ -40,9 +39,8 @@ import Data.Text qualified as Text
 import AgdaMCP.Interaction.Internal (InteractionM, catchTCErr, runCommandM)
 import AgdaMCP.Interaction.Model (
   ContextEntry (..),
-  Error,
-  extractError,
-  matchNoSuchInteractionPoint,
+  GoalError (..),
+  classifyInteractionError,
  )
 
 data Request = Request
@@ -51,18 +49,10 @@ data Request = Request
   }
   deriving (Eq, Show)
 
-data Response
-  = -- The context of the goal.
-    --
-    -- Ordered local variables outermost first, then let bindings following the
-    -- output of `contextOfMeta`.
-    ResponseOk [ContextEntry]
-  | -- The requested goal id does not correspond to an interaction point. See
-    -- the comment on the handler in `contextInternal`.
-    ResponseUnknownId InteractionId
-  | -- Any other `TCErr`.
-    ResponseError Error
-  deriving (Eq, Show)
+-- `Left` is a bad id or a `TCErr`, while `Right` is the goal's context, ordered
+-- with local variables outermost first then let bindings, following
+-- `contextOfMeta`.
+type Response = Either GoalError [ContextEntry]
 
 context :: Request -> InteractionM Response
 context = runCommandM . contextInternal
@@ -73,16 +63,11 @@ contextInternal (Request norm goalId) =
   -- `getResponseContext`. We run the query under `liftLocalState`, the idea
   -- being that display commands should not modify `TCState` (apparently
   -- reification can allocate metas, etc.). The Emacs renderer runs under
-  -- `localTCState` for the same reason (EmacsTop.hs:212).
-  (ResponseOk <$> liftLocalState (extractContext norm goalId))
-    `catchTCErr` handler
- where
-  -- A non-existent interaction id is classified by `matchNoSuchInteractionPoint`
-  -- (see its comment); any other `TCErr` becomes a generic `ResponseError`.
-  handler :: TCErr -> CommandM Response
-  handler e = case matchNoSuchInteractionPoint e of
-    Just badId -> pure $ ResponseUnknownId badId
-    Nothing -> ResponseError <$> lift (extractError e)
+  -- `localTCState` for the same reason (EmacsTop.hs:212). A non-existent id is
+  -- classified by `classifyInteractionError`; any other `TCErr` becomes
+  -- `GoalFailed`.
+  (Right <$> liftLocalState (extractContext norm goalId))
+    `catchTCErr` (fmap Left . lift . classifyInteractionError GoalUnknownId GoalFailed)
 
 -- The extraction mirrors `prettyResponseContext` (EmacsTop.hs:324-373). Also
 -- see the comment above `ContextEntry`.

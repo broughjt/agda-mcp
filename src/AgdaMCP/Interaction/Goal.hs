@@ -1,6 +1,6 @@
 module AgdaMCP.Interaction.Goal (
   Request (..),
-  Response (..),
+  Response,
   goal,
   extractGoalReport,
 ) where
@@ -15,7 +15,7 @@ import Agda.Interaction.Command (CommandM, liftLocalState)
 import Agda.Syntax.Abstract.Pretty (prettyATop)
 import Agda.Syntax.Common (InteractionId)
 import Agda.Syntax.Common.Pretty (pretty, render)
-import Agda.TypeChecking.Monad (TCErr, TCM, lookupInteractionId)
+import Agda.TypeChecking.Monad (TCM, lookupInteractionId)
 import Agda.TypeChecking.Pretty (prettyTCM)
 import Control.Exception (Exception, throwIO)
 import Control.Monad.IO.Class (liftIO)
@@ -26,11 +26,10 @@ import Data.Text qualified as Text
 import AgdaMCP.Interaction.Context (extractContext)
 import AgdaMCP.Interaction.Internal (InteractionM, catchTCErr, runCommandM)
 import AgdaMCP.Interaction.Model (
-  Error,
+  GoalError (..),
   GoalReport (..),
   GoalShape (..),
-  extractError,
-  matchNoSuchInteractionPoint,
+  classifyInteractionError,
  )
 
 data Request = Request
@@ -39,14 +38,9 @@ data Request = Request
   }
   deriving (Eq, Show)
 
-data Response
-  = -- The goal type, boundary, context, and constraints for the goal.
-    ResponseOk GoalReport
-  | -- The requested goal id did not correspond to an interaction point.
-    ResponseUnknownId InteractionId
-  | -- Any other `TCErr`.
-    ResponseError Error
-  deriving (Eq, Show)
+-- `Left` is a bad id or a `TCErr`, while `Right` is the goal type, boundary,
+-- context, and constraints for the goal.
+type Response = Either GoalError GoalReport
 
 goal :: Request -> InteractionM Response
 goal = runCommandM . goalInternal
@@ -56,13 +50,8 @@ goalInternal (Request norm goalId) =
   -- `interpret Cmd_goal_type_context` (InteractionTop.hs:724-725) with
   -- `GoalOnly`. Like the context command we run the query under
   -- `liftLocalState` since a display command should not modify `TCState`.
-  (ResponseOk <$> liftLocalState (extractGoalReport norm goalId))
-    `catchTCErr` handler
- where
-  handler :: TCErr -> CommandM Response
-  handler e = case matchNoSuchInteractionPoint e of
-    Just badId -> pure $ ResponseUnknownId badId
-    Nothing -> ResponseError <$> lift (extractError e)
+  (Right <$> liftLocalState (extractGoalReport norm goalId))
+    `catchTCErr` (fmap Left . lift . classifyInteractionError GoalUnknownId GoalFailed)
 
 -- Following the body of `cmd_goal_type_context_and`
 -- (InteractionTop.hs:1063-1067) plus the goal shape both frontends re-query at

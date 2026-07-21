@@ -1,6 +1,6 @@
 module AgdaMCP.Interaction.GoalCheck (
   Request (..),
-  Response (..),
+  Response,
   goalCheck,
 ) where
 
@@ -13,7 +13,7 @@ import Agda.Syntax.Common (InteractionId)
 import Agda.Syntax.Common.Pretty (render)
 import Agda.Syntax.Position (noRange)
 import Agda.Syntax.Translation.InternalToAbstract (reify)
-import Agda.TypeChecking.Monad (TCErr, withInteractionId)
+import Agda.TypeChecking.Monad (withInteractionId)
 import Agda.TypeChecking.Rules.Term (checkExpr, isType_)
 import Control.Exception (Exception, throwIO)
 import Control.Monad.IO.Class (liftIO)
@@ -24,10 +24,9 @@ import Data.Text qualified as Text
 import AgdaMCP.Interaction.Goal (extractGoalReport)
 import AgdaMCP.Interaction.Internal (InteractionM, catchTCErr, runCommandM)
 import AgdaMCP.Interaction.Model (
-  Error,
+  GoalError (..),
   GoalReport,
-  extractError,
-  matchNoSuchInteractionPoint,
+  classifyInteractionError,
  )
 
 data Request = Request
@@ -37,15 +36,11 @@ data Request = Request
   }
   deriving (Eq, Show)
 
-data Response
-  = -- The goal report together with the elaborated ("Elaborates to:") term.
-    ResponseOk GoalReport Text
-  | -- The requested goal id did not correspond to an interaction point.
-    ResponseUnknownId InteractionId
-  | -- Any other `TCErr`, including every way the expression can be at fault
-    -- (parse error, unbound name, ill-typed against the goal).
-    ResponseError Error
-  deriving (Eq, Show)
+-- `Left` is a bad id or a `TCErr` (every way the expression can be at
+-- fault--for example, parse error, unbound name, ill-typed against the goal),
+-- while `Right` pairs the goal report with the elaborated ("Elaborates to:")
+-- term.
+type Response = Either GoalError (GoalReport, Text)
 
 goalCheck :: Request -> InteractionM Response
 goalCheck = runCommandM . goalCheckInternal
@@ -70,14 +65,9 @@ goalCheckInternal (Request norm goalId expression) =
       -- Render matching EmacsTop's `auxDoc` (:238-240).
       have <- liftLocalState $ Text.pack . render <$> prettyATop (elaborated :: Expr)
       report <- liftLocalState $ extractGoalReport norm goalId
-      pure $ ResponseOk report have
+      pure $ Right (report, have)
   )
-    `catchTCErr` handler
- where
-  handler :: TCErr -> CommandM Response
-  handler e = case matchNoSuchInteractionPoint e of
-    Just badId -> pure $ ResponseUnknownId badId
-    Nothing -> ResponseError <$> lift (extractError e)
+    `catchTCErr` (fmap Left . lift . classifyInteractionError GoalUnknownId GoalFailed)
 
 newtype GoalCheckBug = CannotCheckAgainstNonType InteractionId
   deriving (Show)
