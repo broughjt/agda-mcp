@@ -44,6 +44,28 @@ library
   ghc-options:
       -Wall
 
+test-suite agda-mcp-test
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs: test
+  other-modules:
+    Test.Harness
+    Test.Interaction.Load
+  build-depends:
+      Agda == 2.8.*,
+      agda-mcp,
+      base >= 4.18 && < 5,
+      directory,
+      filepath,
+      mtl,
+      tasty,
+      tasty-hunit,
+      temporary,
+      text
+  default-language: GHC2021
+  ghc-options:
+      -Wall
+
 executable agda-mcp
   main-is: Main.hs
   hs-source-dirs: app

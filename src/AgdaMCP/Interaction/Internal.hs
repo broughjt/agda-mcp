@@ -7,8 +7,15 @@ module AgdaMCP.Interaction.Internal (
   catchTCErr,
 ) where
 
-import Agda.Interaction.Base (CommandQueue (..), CommandState, initCommandState)
+import Agda.Interaction.Base (
+  CommandQueue (..),
+  CommandState (..),
+  initCommandState,
+ )
 import Agda.Interaction.Command (CommandM)
+import Agda.Interaction.Options (
+  CommandLineOptions (..),
+ )
 import Agda.Interaction.Response (
   GiveResult,
   Response,
@@ -57,8 +64,8 @@ type GiveSlot = IORef (Maybe (InteractionId, GiveResult))
 -- themselves.
 type InteractionM = StateT InteractionState IO
 
-newInteractionState :: IO InteractionState
-newInteractionState = do
+newInteractionState :: CommandLineOptions -> IO InteractionState
+newInteractionState options = do
   -- The queue is inert--nothing ever uses it. We just need to pass it because
   -- `CommandState` has a `commandQueue` field which needs to be
   -- initialized. Normally, Agda runs in a separate thread and receives commands
@@ -69,7 +76,15 @@ newInteractionState = do
   -- Install the capturing output callback (see `captureGiveAction`).
   ((), tcState') <-
     runTCM initEnv tcState $ setInteractionOutputCallback $ captureGiveAction slot
-  pure $ InteractionState tcState' (initCommandState queue) slot
+  -- Clear `optAbsoluteIncludePaths` the same way that `repl` does
+  -- (AgdaTop.hs:44-46). As far as I understand, clearing this causes library
+  -- resolution to run for new loads and prevents the use of stale absolute
+  -- paths.
+  let commandState =
+        (initCommandState queue)
+          { optionsOnReload = options {optAbsoluteIncludePaths = []}
+          }
+  pure $ InteractionState tcState' commandState slot
 
 {- | This capturing callback is a deliberate hack. The goal of the interaction
 layer is to avoid needing to intercept and parse `Resp_` streams, and to avoid

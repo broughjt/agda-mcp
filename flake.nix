@@ -41,6 +41,8 @@
         devShells.default = haskellPackages.shellFor {
           packages = _: [ package ];
 
+          AGDA_MCP_STDLIB = pkgs.agdaPackages.standard-library;
+
           buildInputs = [
             pkgs.cabal-install
             pkgs.haskell-language-server
@@ -48,7 +50,9 @@
             pkgs.hlint
             pkgs.ghcid
             pkgs.zlib
+            haskellPackages.tasty
             haskellPackages.tasty-hunit
+            haskellPackages.temporary
           ];
         };
       }
