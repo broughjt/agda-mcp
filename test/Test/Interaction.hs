@@ -27,5 +27,22 @@ tests =
                 nonFatalErrors @?= []
               other ->
                 assertFailure $ "expected ResponseOk, got " <> show other
+        , testCase "load a group-theory file with three holes" $ do
+            response <-
+              withFixtureSession "test/fixtures/GroupProperties.agda" $ \path ->
+                load Request {requestPath = path, requestArguments = []}
+            case response of
+              ResponseOk goals hiddenMetavariables warnings nonFatalErrors -> do
+                map goalId goals @?= [0, 1, 2]
+                map goalShape goals
+                  @?= [ GoalOfType "x ≈ y → u ≈ v → x // u ≈ y // v"
+                      , GoalOfType "(setoid Relation.Binary.Bundles.Setoid.≈ (y ∙ ε)) y"
+                      , GoalOfType "ε ⁻¹ ≈ ε"
+                      ]
+                hiddenMetavariables @?= []
+                warnings @?= []
+                nonFatalErrors @?= []
+              other ->
+                assertFailure $ "expected ResponseOk, got " <> show other
         ]
     ]
