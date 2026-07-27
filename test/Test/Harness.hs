@@ -15,7 +15,8 @@ import System.Environment (lookupEnv)
 import System.FilePath (takeFileName, (</>))
 import System.IO.Temp (withSystemTempDirectory)
 
-import AgdaMCP.Interaction.Internal (InteractionM, newInteractionState)
+import AgdaMCP.Interaction (InteractionM, newInteractionState)
+import Control.Exception (throwIO)
 
 withFixtureSession :: FilePath -> (FilePath -> InteractionM a) -> IO a
 withFixtureSession source k = do
@@ -25,7 +26,12 @@ withFixtureSession source k = do
     writeFile librariesFile (standardLibrary </> "standard-library.agda-lib\n")
     writeFile
       (directory </> "fixture.agda-lib")
-      (unlines ["name: fixture", "include: .", "depend: standard-library"])
+      ( unlines
+          [ "name: fixture"
+          , "include: ."
+          , "depend: standard-library"
+          ]
+      )
     let staged = directory </> takeFileName source
     copyFile source staged
     runSession
@@ -36,12 +42,14 @@ standardLibraryPath :: IO FilePath
 standardLibraryPath =
   lookupEnv "AGDA_MCP_STDLIB"
     >>= maybe
-      ( fail
-          "AGDA_MCP_STDLIB is not set. Run the test suite inside `nix develop`, \
-          \which exports the pinned Agda standard library."
+      ( throwIO $
+          userError
+            "AGDA_MCP_STDLIB is not set. Run the test suite inside \
+            \`nix develop`, which exports the pinned Agda standard library."
       )
       pure
 
+-- TODO: Maybe delete this when the tool layer is written and duplicates it
 runSession :: CommandLineOptions -> InteractionM a -> IO a
 runSession options action =
   fst <$> (newInteractionState options >>= runStateT action)
