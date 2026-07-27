@@ -50,7 +50,7 @@ test-suite agda-mcp-test
   hs-source-dirs: test
   other-modules:
     Test.Harness
-    Test.Interaction.Load
+    Test.Interaction
   build-depends:
       Agda == 2.8.*,
       agda-mcp,
