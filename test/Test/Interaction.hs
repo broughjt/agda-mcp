@@ -2,11 +2,21 @@
 
 module Test.Interaction (tests) where
 
+import Agda.Interaction.Base (Rewrite (..))
+import Agda.Interaction.Response (InteractionOutputCallback, Response_boot (..))
+import Agda.TypeChecking.Monad (initEnv, runTCM, setInteractionOutputCallback)
+import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
+import Control.Monad.State (runStateT)
+import Data.Functor (void)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.IO qualified as Text.IO
+import Data.Time (addUTCTime)
+import System.Directory (getModificationTime, setModificationTime)
+import System.FilePath (takeDirectory, takeFileName, (</>))
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (
   assertBool,
@@ -16,12 +26,6 @@ import Test.Tasty.HUnit (
   (@?=),
  )
 
-import Agda.Interaction.Base (Rewrite (..))
-
-import System.FilePath (takeDirectory, takeFileName, (</>))
-
-import Agda.Interaction.Response (InteractionOutputCallback, Response_boot (..))
-import Agda.TypeChecking.Monad (initEnv, runTCM, setInteractionOutputCallback)
 import AgdaMCP.Interaction (InteractionM, newInteractionState)
 import AgdaMCP.Interaction.Context (context)
 import AgdaMCP.Interaction.Context qualified as Context
@@ -45,16 +49,10 @@ import AgdaMCP.Interaction.Model (
  )
 import AgdaMCP.Interaction.Refine (refine)
 import AgdaMCP.Interaction.Refine qualified as Refine
-import Control.Monad (when)
-import Control.Monad.State (runStateT)
-import Data.Functor (void)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.Time (addUTCTime)
-import System.Directory (getModificationTime, setModificationTime)
 import Test.Harness (
   currentFile,
   expectLoadError,
-  expectLoaded,
+  expectLoadOk,
   spanCoordinates,
   spanText,
   withFixtureDirectory,
@@ -103,14 +101,14 @@ loadTests =
           withFixtureSession "test/fixtures/HoleNatural.agda" $ \path -> do
             response <-
               load Load.Request {Load.requestPath = path, Load.requestArguments = []}
-            void $ liftIO $ expectLoaded "load" response
+            void $ liftIO $ expectLoadOk "load" response
             (,) path <$> currentFile
         recorded @?= Just path
     , testCase "a failed load clears the recorded current file" $ do
         (afterSuccess, afterFailure) <-
           withFixtureSession "test/fixtures/HoleNatural.agda" $ \path -> do
             let request = Load.Request {Load.requestPath = path, Load.requestArguments = []}
-            void $ load request >>= liftIO . expectLoaded "initial load"
+            void $ load request >>= liftIO . expectLoadOk "initial load"
             recorded <- currentFile
             liftIO $ Text.IO.writeFile path brokenHoleNatural
             void $ load request >>= liftIO . expectLoadError "load after breaking"
@@ -126,7 +124,7 @@ loadTests =
               let request = Load.Request {Load.requestPath = path, Load.requestArguments = []}
               original <- liftIO $ Text.IO.readFile path
               before <- load request
-              void $ liftIO $ expectLoaded "initial load" before
+              void $ liftIO $ expectLoadOk "initial load" before
               liftIO $ Text.IO.writeFile path brokenHoleNatural
               void $ load request >>= liftIO . expectLoadError "load after breaking"
               liftIO $ Text.IO.writeFile path original
@@ -143,7 +141,7 @@ loadTests =
             pure (withSafe, withoutSafe)
         -- `--safe` rejects the postulate as a non-fatal error
         (goals, hiddenMetavariables, warnings, nonFatalErrors) <-
-          expectLoaded "load with --safe" withSafe
+          expectLoadOk "load with --safe" withSafe
         goals @?= []
         hiddenMetavariables @?= []
         warnings @?= []
@@ -154,14 +152,14 @@ loadTests =
               ("SafeFlagPostulate" `Text.isInfixOf` message)
           other ->
             assertFailure $ "expected one non-fatal error, got " <> show other
-        expectLoaded "load without arguments" withoutSafe
+        expectLoadOk "load without arguments" withoutSafe
           >>= (@?= ([], [], [], []))
     , testCase "hidden metavariables are reported alongside goals" $ do
         response <-
           withFixtureSession "test/fixtures/Normalization.agda" $ \path ->
             load Load.Request {Load.requestPath = path, Load.requestArguments = []}
         (goals, hiddenMetavariables, warnings, nonFatalErrors) <-
-          expectLoaded "load" response
+          expectLoadOk "load" response
         map goalShape goals @?= [GoalOfType "Twice 2"]
         map hiddenMetavariableShape hiddenMetavariables @?= [GoalOfType "Twice 2"]
         map (isJust . hiddenMetavariableSpan) hiddenMetavariables @?= [True]
@@ -178,7 +176,7 @@ loadTests =
             (,) path
               <$> load Load.Request {Load.requestPath = path, Load.requestArguments = []}
         (goals, hiddenMetavariables, warnings, nonFatalErrors) <-
-          expectLoaded "load" response
+          expectLoadOk "load" response
         goals @?= []
         hiddenMetavariables @?= []
         nonFatalErrors @?= []
@@ -235,7 +233,7 @@ loadTests =
               pure (response1, maybeCurrentFile, response2)
         response1 @?= Load.ResponseStale
         maybeCurrentFile @?= Nothing
-        void $ expectLoaded "load after the file settles" response2
+        void $ expectLoadOk "load after the file settles" response2
     , -- Agda checks a `where` module before the clause body containing it,
       -- so the hole on line 9 is created first and gets the lower id.
       -- `extractResponseOk` sorts by position, so the ids come back
@@ -244,7 +242,7 @@ loadTests =
         response <-
           withFixtureSession "test/fixtures/GoalOrder.agda" $ \path ->
             load Load.Request {Load.requestPath = path, Load.requestArguments = []}
-        (goals, _, _, _) <- expectLoaded "load" response
+        (goals, _, _, _) <- expectLoadOk "load" response
         map (spanCoordinates . goalSpan) goals
           @?= [((6, 11), (6, 15)), ((9, 11), (9, 15))]
         map goalId goals @?= [1, 0]
@@ -255,13 +253,13 @@ loadTests =
         response <-
           withFixtureSession "test/fixtures/Parenthesization.agda" $ \path ->
             load Load.Request {Load.requestPath = path, Load.requestArguments = []}
-        (goals, _, _, _) <- expectLoaded "load" response
+        (goals, _, _, _) <- expectLoadOk "load" response
         map goalShape goals @?= [GoalOfType "ℕ → ℕ"]
     , testCase "a sort-shaped hidden metavariable is reported" $ do
         response <-
           withFixtureSession "test/fixtures/SortMetavariable.agda" $ \path ->
             load Load.Request {Load.requestPath = path, Load.requestArguments = []}
-        (goals, hiddenMetavariables, _, _) <- expectLoaded "load" response
+        (goals, hiddenMetavariables, _, _) <- expectLoadOk "load" response
         map goalShape goals @?= [GoalOfType "_0"]
         map hiddenMetavariableName hiddenMetavariables @?= ["_0"]
         map hiddenMetavariableShape hiddenMetavariables @?= [GoalSort]
@@ -274,7 +272,7 @@ loadTests =
                   { Load.requestPath = directory </> "Importer.agda"
                   , Load.requestArguments = []
                   }
-        (goals, _, warnings, nonFatalErrors) <- expectLoaded "load" response
+        (goals, _, warnings, nonFatalErrors) <- expectLoadOk "load" response
         goals @?= []
         nonFatalErrors @?= []
         map warningLocation warnings
@@ -322,7 +320,7 @@ scenarioTests =
               step label expected actual = liftIO $ assertEqual label expected actual
 
           goals <-
-            load request >>= liftIO . fmap goalsOf . expectLoaded "load"
+            load request >>= liftIO . fmap goalsOf . expectLoadOk "load"
           step
             "the two clauses each leave a hole"
             [ GoalOfType "zero + n + p ≡ zero + (n + p)"
@@ -395,7 +393,7 @@ scenarioTests =
           -- The file on disk never changed, so a reload throws all of that
           -- away and returns the original two goals.
           reloaded <-
-            load request >>= liftIO . fmap goalsOf . expectLoaded "reload"
+            load request >>= liftIO . fmap goalsOf . expectLoadOk "reload"
           step
             "reloading discards the session's progress"
             (map goalShape goals)

@@ -6,7 +6,7 @@ module Test.Harness (
   withFixtureDirectory,
   withStagedFiles,
   currentFile,
-  expectLoaded,
+  expectLoadOk,
   expectLoadError,
   spanCoordinates,
   spanText,
@@ -103,13 +103,13 @@ currentFile =
   gets $ \(InteractionState _ commandState _) ->
     filePath . currentFilePath <$> theCurrentFile commandState
 
-expectLoaded ::
+expectLoadOk ::
   String ->
   Response ->
   IO ([Goal], [HiddenMetavariable], [Warning], [NonFatalError])
-expectLoaded _ (ResponseOk goals hiddenMetavariables warnings nonFatalErrors) =
+expectLoadOk _ (ResponseOk goals hiddenMetavariables warnings nonFatalErrors) =
   pure (goals, hiddenMetavariables, warnings, nonFatalErrors)
-expectLoaded label other =
+expectLoadOk label other =
   assertFailure $ label <> ": expected ResponseOk, got " <> show other
 
 expectLoadError :: String -> Response -> IO Error
