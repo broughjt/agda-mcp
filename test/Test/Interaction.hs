@@ -60,6 +60,7 @@ import AgdaMCP.Interaction.Model (
   GiveAction (..),
   GiveError (..),
   Goal (..),
+  GoalError (..),
   GoalReport (..),
   GoalShape (..),
   HiddenMetavariable (..),
@@ -89,6 +90,7 @@ tests =
           ($ warm)
           [ loadTests
           , metasTests
+          , contextTests
           , giveFamilyTests
           , giveTests
           , refineTests
@@ -418,6 +420,181 @@ metasTests warm =
           ("expected a termination issue, got " <> show withoutForce)
           (any ("TerminationIssue" `Text.isInfixOf`) withoutForce)
         withForce @?= []
+    ]
+
+contextTests :: IO TCState -> TestTree
+contextTests warm =
+  testGroup
+    "Context"
+    [ testCase "the context lists locals outermost first, then let bindings" $
+        withFixtureSession warm "test/fixtures/ContextBindings.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          -- `m` and `n` are locals with the let binding between them in the
+          -- telescope, so this distinguishes telescope order from the order
+          -- `contextOfMeta` actually reports.
+          entries <-
+            context
+              Context.Request
+                { Context.requestNormalization = AsIs
+                , Context.requestGoalId = 0
+                }
+              >>= liftIO . expectContextOk "a clause mixing binders and a let"
+          liftIO $
+            map
+              ( \entry ->
+                  ( contextEntryOriginalName entry
+                  , contextEntryType entry
+                  , contextEntryLetValue entry
+                  )
+              )
+              entries
+              @?= [ ("m", "ℕ", Nothing)
+                  , ("n", "ℕ", Nothing)
+                  , ("doubled", "ℕ", Just "m + m")
+                  ]
+    , testCase "a shadowed binding keeps its original name beside the reified one" $
+        withFixtureSession warm "test/fixtures/ContextBindings.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          -- Agda renders these two as `x = x₁ : ℕ   (not in scope)` and
+          -- `x : ℕ`. The outer binder took the second display form, so its
+          -- original name is in scope while the reified name it was given is
+          -- not.
+          entries <-
+            context
+              Context.Request
+                { Context.requestNormalization = AsIs
+                , Context.requestGoalId = 1
+                }
+              >>= liftIO . expectContextOk "a clause whose binder is shadowed"
+          liftIO $
+            map
+              ( \entry ->
+                  ( contextEntryOriginalName entry
+                  , contextEntryReifiedName entry
+                  , contextEntryOriginalInScope entry
+                  , contextEntryReifiedInScope entry
+                  )
+              )
+              entries
+              @?= [ ("x", "x₁", True, False)
+                  , ("x", "x", True, True)
+                  ]
+    , testCase "an anonymous binding gets a name that is not in scope" $
+        withFixtureSession warm "test/fixtures/ContextBindings.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          entries <-
+            context
+              Context.Request
+                { Context.requestNormalization = AsIs
+                , Context.requestGoalId = 3
+                }
+              >>= liftIO . expectContextOk "a clause with an anonymous binder"
+          liftIO $
+            map
+              ( \entry ->
+                  ( contextEntryOriginalName entry
+                  , contextEntryReifiedName entry
+                  , contextEntryOriginalInScope entry
+                  , contextEntryReifiedInScope entry
+                  )
+              )
+              entries
+              @?= [ ("x", "x", False, False)
+                  , ("n", "n", True, True)
+                  ]
+    , testCase "entry types are rendered at the requested normalization" $
+        withFixtureSession warm "test/fixtures/ContextBindings.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          types <-
+            traverse
+              ( \normalization ->
+                  context
+                    Context.Request
+                      { Context.requestNormalization = normalization
+                      , Context.requestGoalId = 2
+                      }
+                    >>= liftIO
+                      . fmap (map contextEntryType)
+                      . expectContextOk (show normalization)
+              )
+              [AsIs, Instantiated, HeadNormal, Simplified, Normalised]
+          -- The same table the goal types produce: `simplify` collapses onto
+          -- `AsIs` even where `HeadNormal` reduces.
+          liftIO $
+            types
+              @?= [ ["Twice 2"]
+                  , ["Twice 2"]
+                  , ["P (2 + 2)"]
+                  , ["Twice 2"]
+                  , ["P 4"]
+                  ]
+    , testCase "binder attributes are reported per entry" $
+        withFixtureSession warm "test/fixtures/ContextAttributes.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          let attributes entry =
+                ( contextEntryOriginalName entry
+                ,
+                  ( contextEntryIsInstance entry
+                  , contextEntryErased entry
+                  , contextEntryRelevance entry
+                  , -- Nothing in this fixture is annotated with either, and
+                    -- exercising them would mean turning on further language
+                    -- features, so they stay absent here.
+                    contextEntryCohesion entry
+                  , contextEntryPolarity entry
+                  )
+                )
+              entriesFor label goalId =
+                context
+                  Context.Request
+                    { Context.requestNormalization = AsIs
+                    , Context.requestGoalId = goalId
+                    }
+                  >>= liftIO . fmap (map attributes) . expectContextOk label
+
+          instanceArgument <- entriesFor "an instance argument" 0
+          liftIO $
+            instanceArgument
+              @?= [ ("eq", (True, False, Nothing, Nothing, Nothing))
+                  , ("n", (False, False, Nothing, Nothing, Nothing))
+                  ]
+
+          erasedArgument <- entriesFor "an erased argument" 1
+          liftIO $
+            erasedArgument @?= [("n", (False, True, Nothing, Nothing, Nothing))]
+
+          irrelevantArgument <- entriesFor "an irrelevant argument" 2
+          liftIO $
+            irrelevantArgument
+              @?= [("n", (False, False, Just "irrelevant", Nothing, Nothing))]
+    , testCase "a bogus goal id is rejected" $
+        withFixtureSession warm "test/fixtures/ContextBindings.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          response <-
+            context
+              Context.Request
+                { Context.requestNormalization = AsIs
+                , Context.requestGoalId = bogusGoalId
+                }
+          liftIO $ response @?= Left (GoalUnknownId bogusGoalId)
     ]
 
 giveFamilyTests :: IO TCState -> TestTree
@@ -1019,6 +1196,11 @@ expectMetasOk :: String -> Metas.Response -> IO MetasReport
 expectMetasOk _ (Right report) = pure report
 expectMetasOk label other =
   assertFailure $ label <> ": expected a metas report, got " <> show other
+
+expectContextOk :: String -> Context.Response -> IO [ContextEntry]
+expectContextOk _ (Right entries) = pure entries
+expectContextOk label other =
+  assertFailure $ label <> ": expected a context, got " <> show other
 
 expectGiveOk :: String -> Give.Response -> IO GiveAction
 expectGiveOk _ (Right action) = pure action
