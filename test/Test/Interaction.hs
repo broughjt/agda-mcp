@@ -8,7 +8,13 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.IO qualified as Text.IO
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (
+  assertBool,
+  assertEqual,
+  assertFailure,
+  testCase,
+  (@?=),
+ )
 
 import Agda.Interaction.Base (Rewrite (..))
 
@@ -17,16 +23,27 @@ import System.FilePath (takeDirectory, takeFileName, (</>))
 import Agda.Interaction.Response (InteractionOutputCallback, Response_boot (..))
 import Agda.TypeChecking.Monad (initEnv, runTCM, setInteractionOutputCallback)
 import AgdaMCP.Interaction (InteractionM, newInteractionState)
+import AgdaMCP.Interaction.Context (context)
+import AgdaMCP.Interaction.Context qualified as Context
+import AgdaMCP.Interaction.Goal (goal)
+import AgdaMCP.Interaction.Goal qualified as Goal
 import AgdaMCP.Interaction.Internal (InteractionState (..))
+import AgdaMCP.Interaction.Intro (intro)
+import AgdaMCP.Interaction.Intro qualified as Intro
 import AgdaMCP.Interaction.Load (Request (..), Response (..), load)
 import AgdaMCP.Interaction.Model (
+  ContextEntry (..),
   Error (..),
+  GiveAction (..),
   Goal (..),
+  GoalReport (..),
   GoalShape (..),
   HiddenMetavariable (..),
   NonFatalError (..),
   Warning (..),
  )
+import AgdaMCP.Interaction.Refine (refine)
+import AgdaMCP.Interaction.Refine qualified as Refine
 import Control.Monad (when)
 import Control.Monad.State (runStateT)
 import Data.Functor (void)
@@ -56,7 +73,7 @@ tests =
                 load Request {requestPath = path, requestArguments = []}
             case response of
               ResponseOk goals hiddenMetavariables warnings nonFatalErrors -> do
-                map (\goal -> (goalId goal, goalShape goal)) goals @?= [(0, GoalOfType "ℕ")]
+                map (\g -> (goalId g, goalShape g)) goals @?= [(0, GoalOfType "ℕ")]
                 hiddenMetavariables @?= []
                 warnings @?= []
                 nonFatalErrors @?= []
@@ -285,7 +302,101 @@ tests =
               ("expected a read failure, got " <> Text.unpack (errorMessage e))
               ("Cannot read file" `Text.isInfixOf` errorMessage e)
         ]
+    , testGroup
+        "Scenarios"
+        [ -- Builds `+-assoc` the way a caller would. Inspect the goals, read a
+          -- context, close the base case with `intro`, refine the inductive
+          -- step, then fill what refine leaves remaining. Nothing is written to
+          -- disk, so this is entirely session state.
+          testCase "build a proof of addition associativity" $
+            withFixtureSession "test/fixtures/ProofScenario.agda" $ \path -> do
+              let request = Request {requestPath = path, requestArguments = []}
+                  step label expected actual = liftIO $ assertEqual label expected actual
+
+              goals <-
+                load request >>= liftIO . fmap goalsOf . expectLoaded "load"
+              step
+                "the two clauses each leave a hole"
+                [ GoalOfType "zero + n + p ≡ zero + (n + p)"
+                , GoalOfType "suc m + n + p ≡ suc m + (n + p)"
+                ]
+                (map goalShape goals)
+
+              stepContext <-
+                context
+                  Context.Request
+                    { Context.requestNormalization = AsIs
+                    , Context.requestGoalId = 1
+                    }
+              step
+                "the inductive step binds the three arguments"
+                (Right (["m", "n", "p"], ["ℕ", "ℕ", "ℕ"]))
+                ( fmap
+                    (\entries -> (map contextEntryOriginalName entries, map contextEntryType entries))
+                    stepContext
+                )
+
+              baseReport <-
+                goal
+                  Goal.Request
+                    { Goal.requestNormalization = AsIs
+                    , Goal.requestGoalId = 0
+                    }
+              step
+                "the base case sees only the arguments its pattern binds"
+                (Right (GoalOfType "zero + n + p ≡ zero + (n + p)", ["n", "p"]))
+                ( fmap
+                    (\r -> (goalReportShape r, map contextEntryOriginalName (goalReportContext r)))
+                    baseReport
+                )
+
+              -- The identity type has one constructor, so `intro` is
+              -- unambiguous here.
+              introduced <-
+                intro
+                  Intro.Request
+                    { Intro.requestPatternLambda = False
+                    , Intro.requestGoalId = 0
+                    }
+              step "intro closes the base case" (Right (GiveComputed "refl")) introduced
+
+              refined <-
+                refine
+                  Refine.Request
+                    { Refine.requestGoalId = 1
+                    , Refine.requestExpression = "cong suc"
+                    }
+              step
+                "refine leaves a hole for the recursive call"
+                (Right (GiveComputed "cong suc ?"))
+                refined
+
+              -- Refine's new hole exists in the session immediately, without
+              -- writing the splice to disk and reloading.
+              recursiveCall <-
+                goal
+                  Goal.Request
+                    { Goal.requestNormalization = AsIs
+                    , Goal.requestGoalId = 2
+                    }
+              step
+                "the hole refine introduced is the recursive call"
+                (Right (GoalOfType "m + n + p ≡ m + (n + p)"))
+                (fmap goalReportShape recursiveCall)
+
+              -- The file on disk never changed, so a reload throws all of that
+              -- away and returns the original two goals.
+              reloaded <-
+                load request >>= liftIO . fmap goalsOf . expectLoaded "reload"
+              step
+                "reloading discards the session's progress"
+                (map goalShape goals)
+                (map goalShape reloaded)
+        ]
     ]
+
+goalsOf :: ([Goal], [HiddenMetavariable], [Warning], [NonFatalError]) -> [Goal]
+goalsOf (goals, _, _, _) = goals
 
 warningMessage :: Warning -> Text
 warningMessage (Warning (_, message)) = message
