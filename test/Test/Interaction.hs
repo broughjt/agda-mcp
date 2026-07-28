@@ -406,7 +406,7 @@ giveFamilyTests =
                 }
               >>= liftIO . expectGiveOk "elaborateGive normalizes"
           liftIO $ elaborated @?= GiveComputed "2"
-    , testCase "a failed give-family command leaves its goal usable" $
+    , testCase "a failed give family command leaves its goal usable" $
         withFixtureSession "test/fixtures/GiveFamily.agda" $ \path -> do
           void $
             load Load.Request {Load.requestPath = path, Load.requestArguments = []}
