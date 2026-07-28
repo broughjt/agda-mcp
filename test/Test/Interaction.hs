@@ -10,7 +10,12 @@ import Agda.Interaction.Base (
  )
 import Agda.Interaction.Response (InteractionOutputCallback, Response_boot (..))
 import Agda.Syntax.Common (InteractionId)
-import Agda.TypeChecking.Monad (initEnv, runTCM, setInteractionOutputCallback)
+import Agda.TypeChecking.Monad (
+  TCState,
+  initEnv,
+  runTCM,
+  setInteractionOutputCallback,
+ )
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (gets, runStateT)
@@ -23,7 +28,7 @@ import Data.Text.IO qualified as Text.IO
 import Data.Time (addUTCTime)
 import System.Directory (getModificationTime, setModificationTime)
 import System.FilePath (takeDirectory, takeFileName, (</>))
-import Test.Tasty (TestTree, testGroup)
+import Test.Tasty (TestTree, testGroup, withResource)
 import Test.Tasty.HUnit (
   assertBool,
   assertEqual,
@@ -33,7 +38,7 @@ import Test.Tasty.HUnit (
  )
 
 import Agda.Utils.FileName (filePath)
-import AgdaMCP.Interaction (InteractionM, newInteractionState)
+import AgdaMCP.Interaction (InteractionM)
 import AgdaMCP.Interaction.Context (context)
 import AgdaMCP.Interaction.Context qualified as Context
 import AgdaMCP.Interaction.ElaborateGive (elaborateGive)
@@ -65,21 +70,27 @@ import AgdaMCP.Interaction.Model (
 import AgdaMCP.Interaction.Refine (refine)
 import AgdaMCP.Interaction.Refine qualified as Refine
 import Test.Harness (
+  warmInteractionState,
+  warmedSession,
   withFixtureDirectory,
   withFixtureSession,
   withStagedFiles,
  )
 
 tests :: TestTree
-tests = testGroup "interaction" [loadTests, giveFamilyTests, scenarioTests]
+tests =
+  withResource warmInteractionState (const $ pure ()) $ \warm ->
+    testGroup
+      "interaction"
+      (map ($ warm) [loadTests, giveFamilyTests, scenarioTests])
 
-loadTests :: TestTree
-loadTests =
+loadTests :: IO TCState -> TestTree
+loadTests warm =
   testGroup
     "Load"
     [ testCase "load a file with single hole of type ℕ" $ do
         response <-
-          withFixtureSession "test/fixtures/HoleNatural.agda" $ \path ->
+          withFixtureSession warm "test/fixtures/HoleNatural.agda" $ \path ->
             load Load.Request {Load.requestPath = path, Load.requestArguments = []}
         case response of
           Load.ResponseOk goals hiddenMetavariables warnings nonFatalErrors -> do
@@ -91,7 +102,7 @@ loadTests =
             assertFailure $ "expected ResponseOk, got " <> show other
     , testCase "load a file with three holes" $ do
         response <-
-          withFixtureSession "test/fixtures/GroupProperties.agda" $ \path ->
+          withFixtureSession warm "test/fixtures/GroupProperties.agda" $ \path ->
             load Load.Request {Load.requestPath = path, Load.requestArguments = []}
         case response of
           Load.ResponseOk goals hiddenMetavariables warnings nonFatalErrors -> do
@@ -108,7 +119,7 @@ loadTests =
             assertFailure $ "expected ResponseOk, got " <> show other
     , testCase "a successful load records the current file" $ do
         (path, recorded) <-
-          withFixtureSession "test/fixtures/HoleNatural.agda" $ \path -> do
+          withFixtureSession warm "test/fixtures/HoleNatural.agda" $ \path -> do
             response <-
               load Load.Request {Load.requestPath = path, Load.requestArguments = []}
             void $ liftIO $ expectLoadOk "load" response
@@ -116,7 +127,7 @@ loadTests =
         recorded @?= Just path
     , testCase "a failed load clears the recorded current file" $ do
         (afterSuccess, afterFailure) <-
-          withFixtureSession "test/fixtures/HoleNatural.agda" $ \path -> do
+          withFixtureSession warm "test/fixtures/HoleNatural.agda" $ \path -> do
             let request = Load.Request {Load.requestPath = path, Load.requestArguments = []}
             void $ load request >>= liftIO . expectLoadOk "initial load"
             recorded <- currentFile
@@ -130,7 +141,7 @@ loadTests =
         \and loading, the first and last responses should be equal"
         $ do
           (before, after) <-
-            withFixtureSession "test/fixtures/HoleNatural.agda" $ \path -> do
+            withFixtureSession warm "test/fixtures/HoleNatural.agda" $ \path -> do
               let request = Load.Request {Load.requestPath = path, Load.requestArguments = []}
               original <- liftIO $ Text.IO.readFile path
               before <- load request
@@ -143,7 +154,7 @@ loadTests =
           after @?= before
     , testCase "load arguments do not persist across loads" $ do
         (withSafe, withoutSafe) <-
-          withFixtureSession "test/fixtures/SafePostulate.agda" $ \path -> do
+          withFixtureSession warm "test/fixtures/SafePostulate.agda" $ \path -> do
             withSafe <-
               load Load.Request {Load.requestPath = path, Load.requestArguments = ["--safe"]}
             withoutSafe <-
@@ -166,7 +177,7 @@ loadTests =
           >>= (@?= ([], [], [], []))
     , testCase "hidden metavariables are reported alongside goals" $ do
         response <-
-          withFixtureSession "test/fixtures/Normalization.agda" $ \path ->
+          withFixtureSession warm "test/fixtures/Normalization.agda" $ \path ->
             load Load.Request {Load.requestPath = path, Load.requestArguments = []}
         (goals, hiddenMetavariables, warnings, nonFatalErrors) <-
           expectLoadOk "load" response
@@ -182,7 +193,7 @@ loadTests =
           (AsIs <= Simplified)
     , testCase "warnings are reported in file order with their locations" $ do
         (path, response) <-
-          withFixtureSession "test/fixtures/Warnings.agda" $ \path ->
+          withFixtureSession warm "test/fixtures/Warnings.agda" $ \path ->
             (,) path
               <$> load Load.Request {Load.requestPath = path, Load.requestArguments = []}
         (goals, hiddenMetavariables, warnings, nonFatalErrors) <-
@@ -200,7 +211,7 @@ loadTests =
               ]
     , testCase "a type error reports its message and span" $ do
         (path, source, response) <-
-          withFixtureSession "test/fixtures/TypeError.agda" $ \path -> do
+          withFixtureSession warm "test/fixtures/TypeError.agda" $ \path -> do
             source <- liftIO $ Text.IO.readFile path
             (,,) path source
               <$> load Load.Request {Load.requestPath = path, Load.requestArguments = []}
@@ -217,7 +228,7 @@ loadTests =
             assertFailure "expected the error to carry a span"
     , testCase "a failed load carries the warnings raised before the error" $ do
         (path, response) <-
-          withFixtureSession "test/fixtures/WarningThenError.agda" $ \path ->
+          withFixtureSession warm "test/fixtures/WarningThenError.agda" $ \path ->
             (,) path
               <$> load Load.Request {Load.requestPath = path, Load.requestArguments = []}
         e <- expectLoadError "load" response
@@ -233,7 +244,7 @@ loadTests =
           @?= ["FIXTURE:8.1-12: warning: -W[no]UnreachableClauses"]
     , testCase "a file changed while it is checked loads as stale" $ do
         (response1, maybeCurrentFile, response2) <-
-          withStaleFixtureSession "test/fixtures/HoleNatural.agda" $
+          withStaleFixtureSession warm "test/fixtures/HoleNatural.agda" $
             \path stopModifying -> do
               let request = Load.Request {Load.requestPath = path, Load.requestArguments = []}
               response1 <- load request
@@ -250,7 +261,7 @@ loadTests =
       -- descending here.
       testCase "goals are ordered by position, not by interaction id" $ do
         response <-
-          withFixtureSession "test/fixtures/GoalOrder.agda" $ \path ->
+          withFixtureSession warm "test/fixtures/GoalOrder.agda" $ \path ->
             load Load.Request {Load.requestPath = path, Load.requestArguments = []}
         (goals, _, _, _) <- expectLoadOk "load" response
         map (spanCoordinates . goalSpan) goals
@@ -261,13 +272,13 @@ loadTests =
       -- function type sitting in an argument position.
       testCase "goal type rendering" $ do
         response <-
-          withFixtureSession "test/fixtures/Parenthesization.agda" $ \path ->
+          withFixtureSession warm "test/fixtures/Parenthesization.agda" $ \path ->
             load Load.Request {Load.requestPath = path, Load.requestArguments = []}
         (goals, _, _, _) <- expectLoadOk "load" response
         map goalShape goals @?= [GoalOfType "ℕ → ℕ"]
     , testCase "a sort-shaped hidden metavariable is reported" $ do
         response <-
-          withFixtureSession "test/fixtures/SortMetavariable.agda" $ \path ->
+          withFixtureSession warm "test/fixtures/SortMetavariable.agda" $ \path ->
             load Load.Request {Load.requestPath = path, Load.requestArguments = []}
         (goals, hiddenMetavariables, _, _) <- expectLoadOk "load" response
         map goalShape goals @?= [GoalOfType "_0"]
@@ -275,7 +286,7 @@ loadTests =
         map hiddenMetavariableShape hiddenMetavariables @?= [GoalSort]
     , testCase "a warning from an imported module keeps its own path" $ do
         (directory, response) <-
-          withFixtureDirectory "test/fixtures/imported-warning" $ \directory ->
+          withFixtureDirectory warm "test/fixtures/imported-warning" $ \directory ->
             (,) directory
               <$> load
                 Load.Request
@@ -289,7 +300,7 @@ loadTests =
           @?= [Just (directory </> "Warned.agda", ((8, 1), (8, 12)))]
     , testCase "importing a module with open holes fails" $ do
         (directory, response) <-
-          withFixtureDirectory "test/fixtures/open-holes" $ \directory ->
+          withFixtureDirectory warm "test/fixtures/open-holes" $ \directory ->
             (,) directory
               <$> load
                 Load.Request
@@ -304,7 +315,7 @@ loadTests =
           @?= Just (directory </> "HoleImporter.agda", ((3, 1), (3, 32)))
     , testCase "loading a missing file reports an error" $ do
         response <-
-          withFixtureSession "test/fixtures/HoleNatural.agda" $ \path ->
+          withFixtureSession warm "test/fixtures/HoleNatural.agda" $ \path ->
             load
               Load.Request
                 { Load.requestPath = takeDirectory path </> "Missing.agda"
@@ -316,12 +327,12 @@ loadTests =
           ("Cannot read file" `Text.isInfixOf` errorMessage e)
     ]
 
-giveFamilyTests :: TestTree
-giveFamilyTests =
+giveFamilyTests :: IO TCState -> TestTree
+giveFamilyTests warm =
   testGroup
     "Give family"
     [ testCase "bogus goal id case for give family" $
-        withFixtureSession "test/fixtures/GiveFamily.agda" $ \path -> do
+        withFixtureSession warm "test/fixtures/GiveFamily.agda" $ \path -> do
           void $
             load Load.Request {Load.requestPath = path, Load.requestArguments = []}
               >>= liftIO . expectLoadOk "load"
@@ -364,7 +375,7 @@ giveFamilyTests =
               >>= liftIO . expectGiveError "elaborateGive"
           liftIO $ elaborated @?= GiveUnknownId bogusGoalId
     , testCase "success case for give family" $
-        withFixtureSession "test/fixtures/GiveFamily.agda" $ \path -> do
+        withFixtureSession warm "test/fixtures/GiveFamily.agda" $ \path -> do
           void $
             load Load.Request {Load.requestPath = path, Load.requestArguments = []}
               >>= liftIO . expectLoadOk "load"
@@ -407,7 +418,7 @@ giveFamilyTests =
               >>= liftIO . expectGiveOk "elaborateGive normalizes"
           liftIO $ elaborated @?= GiveComputed "2"
     , testCase "a failed give family command leaves its goal usable" $
-        withFixtureSession "test/fixtures/GiveFamily.agda" $ \path -> do
+        withFixtureSession warm "test/fixtures/GiveFamily.agda" $ \path -> do
           void $
             load Load.Request {Load.requestPath = path, Load.requestArguments = []}
               >>= liftIO . expectLoadOk "load"
@@ -447,8 +458,8 @@ giveFamilyTests =
           liftIO $ retried @?= GiveVerbatim False
     ]
 
-scenarioTests :: TestTree
-scenarioTests =
+scenarioTests :: IO TCState -> TestTree
+scenarioTests warm =
   testGroup
     "Scenarios"
     [ -- Builds `+-assoc` the way a caller would. Inspect the goals, read a
@@ -456,7 +467,7 @@ scenarioTests =
       -- step, then fill what refine leaves remaining. Nothing is written to
       -- disk, so this is entirely session state.
       testCase "build a proof of addition associativity" $
-        withFixtureSession "test/fixtures/ProofScenario.agda" $ \path -> do
+        withFixtureSession warm "test/fixtures/ProofScenario.agda" $ \path -> do
           let request = Load.Request {Load.requestPath = path, Load.requestArguments = []}
 
           goals <-
@@ -630,12 +641,12 @@ brokenHoleNatural =
 -- argument disarms file modification so that a later load in the same session
 -- succeeds.
 withStaleFixtureSession ::
-  FilePath -> (FilePath -> IO () -> InteractionM a) -> IO a
-withStaleFixtureSession source k =
+  IO TCState -> FilePath -> (FilePath -> IO () -> InteractionM a) -> IO a
+withStaleFixtureSession warm source k =
   withStagedFiles [source] $ \directory options -> do
     let staged = directory </> takeFileName source
     armed <- newIORef True
-    state <- newInteractionState options >>= touchWhileChecking armed staged
+    state <- warmedSession warm options >>= touchWhileChecking armed staged
     fst <$> runStateT (k staged (writeIORef armed False)) state
 
 -- Agda emits `Resp_RunningInfo` from `chaseMsg` while type checking, between

@@ -1,6 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Test.Harness (
+  warmInteractionState,
+  warmedSession,
   runSession,
   withFixtureSession,
   withFixtureDirectory,
@@ -10,6 +12,10 @@ module Test.Harness (
 import Agda.Interaction.Options (
   CommandLineOptions (..),
   defaultOptions,
+ )
+import Agda.TypeChecking.Monad (
+  PersistentTCState (..),
+  TCState (..),
  )
 import Control.Monad.State (runStateT)
 import System.Directory (
@@ -22,21 +28,55 @@ import System.IO.Temp (withSystemTempDirectory)
 
 import AgdaMCP.Interaction.Internal (
   InteractionM,
+  InteractionState (..),
   newInteractionState,
  )
+import AgdaMCP.Interaction.Load qualified as Load
 import Control.Exception (throwIO)
 
-withFixtureSession :: FilePath -> (FilePath -> InteractionM a) -> IO a
-withFixtureSession source k =
-  withStagedFiles [source] $ \directory options ->
-    runSession options (k (directory </> takeFileName source))
+-- Cache Agda standard library interface file loading
+warmInteractionState :: IO TCState
+warmInteractionState =
+  withStagedFiles ["test/fixtures/Warmup.agda"] $ \directory options -> do
+    state <- newInteractionState options
+    let target = directory </> "Warmup.agda"
+    (response, InteractionState tcState _ _) <-
+      runStateT
+        (Load.load Load.Request {Load.requestPath = target, Load.requestArguments = []})
+        state
+    case response of
+      Load.ResponseOk {} -> pure tcState
+      other ->
+        throwIO $
+          userError $
+            "The test warm-up fixture failed to load: " <> show other
 
-withFixtureDirectory :: FilePath -> (FilePath -> InteractionM a) -> IO a
-withFixtureDirectory source k = do
+warmedSession :: IO TCState -> CommandLineOptions -> IO InteractionState
+warmedSession warm options = do
+  warmState <- warm
+  InteractionState tcState commandState slot <- newInteractionState options
+  let persistent =
+        (stPersistentState warmState)
+          { stInteractionOutputCallback =
+              stInteractionOutputCallback (stPersistentState tcState)
+          }
+  pure $
+    InteractionState tcState {stPersistentState = persistent} commandState slot
+
+withFixtureSession ::
+  IO TCState -> FilePath -> (FilePath -> InteractionM a) -> IO a
+withFixtureSession warm source k =
+  withStagedFiles [source] $ \directory options ->
+    runSession warm options (k (directory </> takeFileName source))
+
+withFixtureDirectory ::
+  IO TCState -> FilePath -> (FilePath -> InteractionM a) -> IO a
+withFixtureDirectory warm source k = do
   entries <- listDirectory source
   let sources =
         [source </> entry | entry <- entries, takeExtension entry == ".agda"]
-  withStagedFiles sources $ \directory options -> runSession options (k directory)
+  withStagedFiles sources $ \directory options ->
+    runSession warm options (k directory)
 
 withStagedFiles ::
   [FilePath] -> (FilePath -> CommandLineOptions -> IO a) -> IO a
@@ -70,6 +110,6 @@ standardLibraryPath =
       pure
 
 -- TODO: Maybe delete this when the tool layer is written and duplicates it
-runSession :: CommandLineOptions -> InteractionM a -> IO a
-runSession options action =
-  fst <$> (newInteractionState options >>= runStateT action)
+runSession :: IO TCState -> CommandLineOptions -> InteractionM a -> IO a
+runSession warm options action =
+  fst <$> (warmedSession warm options >>= runStateT action)
