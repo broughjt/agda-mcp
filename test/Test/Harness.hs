@@ -3,7 +3,8 @@
 module Test.Harness (
   runSession,
   withFixtureSession,
-  withStaleFixtureSession,
+  withFixtureDirectory,
+  withStagedFiles,
   currentFile,
   expectLoaded,
   expectLoadError,
@@ -19,28 +20,14 @@ import Agda.Interaction.Options (
   CommandLineOptions (..),
   defaultOptions,
  )
-import Agda.Interaction.Response (
-  Response_boot (Resp_RunningInfo),
- )
-import Agda.TypeChecking.Monad (
-  InteractionOutputCallback,
-  initEnv,
-  runTCM,
-  setInteractionOutputCallback,
- )
 import Agda.Utils.FileName (filePath)
-import Control.Monad (when)
-import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (gets, runStateT)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.Time.Clock (addUTCTime)
 import System.Directory (
   copyFile,
-  getModificationTime,
-  setModificationTime,
+  listDirectory,
  )
 import System.Environment (lookupEnv)
-import System.FilePath (takeFileName, (</>))
+import System.FilePath (takeExtension, takeFileName, (</>))
 import System.IO.Temp (withSystemTempDirectory)
 import Test.Tasty.HUnit (assertFailure)
 
@@ -65,11 +52,19 @@ import Data.Text qualified as Text
 
 withFixtureSession :: FilePath -> (FilePath -> InteractionM a) -> IO a
 withFixtureSession source k =
-  withStagedFixture source $ \staged options -> runSession options (k staged)
+  withStagedFiles [source] $ \directory options ->
+    runSession options (k (directory </> takeFileName source))
 
-withStagedFixture ::
-  FilePath -> (FilePath -> CommandLineOptions -> IO a) -> IO a
-withStagedFixture source k = do
+withFixtureDirectory :: FilePath -> (FilePath -> InteractionM a) -> IO a
+withFixtureDirectory source k = do
+  entries <- listDirectory source
+  let sources =
+        [source </> entry | entry <- entries, takeExtension entry == ".agda"]
+  withStagedFiles sources $ \directory options -> runSession options (k directory)
+
+withStagedFiles ::
+  [FilePath] -> (FilePath -> CommandLineOptions -> IO a) -> IO a
+withStagedFiles sources k = do
   standardLibrary <- standardLibraryPath
   withSystemTempDirectory "agda-mcp-test" $ \directory -> do
     let librariesFile = directory </> "libraries"
@@ -82,9 +77,10 @@ withStagedFixture source k = do
           , "depend: standard-library"
           ]
       )
-    let staged = directory </> takeFileName source
-    copyFile source staged
-    k staged defaultOptions {optOverrideLibrariesFile = Just librariesFile}
+    mapM_
+      (\source -> copyFile source (directory </> takeFileName source))
+      sources
+    k directory defaultOptions {optOverrideLibrariesFile = Just librariesFile}
 
 standardLibraryPath :: IO FilePath
 standardLibraryPath =

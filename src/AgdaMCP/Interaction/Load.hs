@@ -39,6 +39,7 @@ import Agda.TypeChecking.Monad.MetaVars (
 import Control.Exception (Exception, throwIO)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (gets, lift, modify)
+import Data.List (sortOn)
 import Data.Maybe (isJust)
 import Data.Set qualified as Set
 import Data.Text qualified as Text
@@ -50,6 +51,8 @@ import AgdaMCP.Interaction.Model (
   GoalShape (..),
   HiddenMetavariable (..),
   NonFatalError,
+  Position (..),
+  Span (..),
   Warning,
   extractError,
   extractNonFatalError,
@@ -128,7 +131,13 @@ loadInternal (Request path arguments) = do
 
 extractResponseOk :: TCM Response
 extractResponseOk = do
-  goals <- typesOfVisibleMetas AsIs >>= traverse extractGoal
+  -- `typesOfVisibleMetas` uses `getInteractionIdsAndMetas`, which obtains the
+  -- goals in creation order. We sort by position instead, which is what
+  -- `sortInteractionPoints` does for `theCurrentFile`'s interaction points
+  -- (InteractionTop.hs:1046).
+  goals <-
+    sortOn (positionOffset . spanStart . goalSpan)
+      <$> (typesOfVisibleMetas AsIs >>= traverse extractGoal)
   -- Note: `interpret Cmd_metas` uses `(max Simplified norm)` for the hidden
   -- metavariable normalization, and `AsIs <= Simplified` by the `deriving`
   -- instance of `Ord` for `Rewrite`.

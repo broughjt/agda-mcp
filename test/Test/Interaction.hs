@@ -12,8 +12,12 @@ import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 import Agda.Interaction.Base (Rewrite (..))
 
-import System.FilePath (takeDirectory, (</>))
+import System.FilePath (takeDirectory, takeFileName, (</>))
 
+import Agda.Interaction.Response (InteractionOutputCallback, Response_boot (..))
+import Agda.TypeChecking.Monad (initEnv, runTCM, setInteractionOutputCallback)
+import AgdaMCP.Interaction (InteractionM, newInteractionState)
+import AgdaMCP.Interaction.Internal (InteractionState (..))
 import AgdaMCP.Interaction.Load (Request (..), Response (..), load)
 import AgdaMCP.Interaction.Model (
   Error (..),
@@ -23,15 +27,21 @@ import AgdaMCP.Interaction.Model (
   NonFatalError (..),
   Warning (..),
  )
+import Control.Monad (when)
+import Control.Monad.State (runStateT)
 import Data.Functor (void)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Time (addUTCTime)
+import System.Directory (getModificationTime, setModificationTime)
 import Test.Harness (
   currentFile,
   expectLoadError,
   expectLoaded,
   spanCoordinates,
   spanText,
+  withFixtureDirectory,
   withFixtureSession,
-  withStaleFixtureSession,
+  withStagedFiles,
  )
 
 tests :: TestTree
@@ -204,6 +214,64 @@ tests =
             response1 @?= ResponseStale
             maybeCurrentFile @?= Nothing
             void $ expectLoaded "load after the file settles" response2
+        , -- Agda checks a `where` module before the clause body containing it,
+          -- so the hole on line 9 is created first and gets the lower id.
+          -- `extractResponseOk` sorts by position, so the ids come back
+          -- descending here.
+          testCase "goals are ordered by position, not by interaction id" $ do
+            response <-
+              withFixtureSession "test/fixtures/GoalOrder.agda" $ \path ->
+                load Request {requestPath = path, requestArguments = []}
+            (goals, _, _, _) <- expectLoaded "load" response
+            map (spanCoordinates . goalSpan) goals
+              @?= [((6, 11), (6, 15)), ((9, 11), (9, 15))]
+            map goalId goals @?= [1, 0]
+        , -- `extractVisibleMetavariable` renders with `prettyATop` rather than
+          -- the JSON frontend's `prettyTCM`, which would parenthesize a
+          -- function type sitting in an argument position.
+          testCase "goal type rendering" $ do
+            response <-
+              withFixtureSession "test/fixtures/Parenthesization.agda" $ \path ->
+                load Request {requestPath = path, requestArguments = []}
+            (goals, _, _, _) <- expectLoaded "load" response
+            map goalShape goals @?= [GoalOfType "ℕ → ℕ"]
+        , testCase "a sort-shaped hidden metavariable is reported" $ do
+            response <-
+              withFixtureSession "test/fixtures/SortMetavariable.agda" $ \path ->
+                load Request {requestPath = path, requestArguments = []}
+            (goals, hiddenMetavariables, _, _) <- expectLoaded "load" response
+            map goalShape goals @?= [GoalOfType "_0"]
+            map hiddenMetavariableName hiddenMetavariables @?= ["_0"]
+            map hiddenMetavariableShape hiddenMetavariables @?= [GoalSort]
+        , testCase "a warning from an imported module keeps its own path" $ do
+            (directory, response) <-
+              withFixtureDirectory "test/fixtures/imported-warning" $ \directory ->
+                (,) directory
+                  <$> load
+                    Request
+                      { requestPath = directory </> "Importer.agda"
+                      , requestArguments = []
+                      }
+            (goals, _, warnings, nonFatalErrors) <- expectLoaded "load" response
+            goals @?= []
+            nonFatalErrors @?= []
+            map warningLocation warnings
+              @?= [Just (directory </> "Warned.agda", ((8, 1), (8, 12)))]
+        , testCase "importing a module with open holes fails" $ do
+            (directory, response) <-
+              withFixtureDirectory "test/fixtures/open-holes" $ \directory ->
+                (,) directory
+                  <$> load
+                    Request
+                      { requestPath = directory </> "HoleImporter.agda"
+                      , requestArguments = []
+                      }
+            e <- expectLoadError "load" response
+            assertBool
+              ("expected open interaction points, got " <> Text.unpack (errorMessage e))
+              ("open interaction points" `Text.isInfixOf` errorMessage e)
+            fmap (fmap spanCoordinates) (errorPathSpan e)
+              @?= Just (directory </> "HoleImporter.agda", ((3, 1), (3, 32)))
         , testCase "loading a missing file reports an error" $ do
             response <-
               withFixtureSession "test/fixtures/HoleNatural.agda" $ \path ->
@@ -246,19 +314,20 @@ brokenHoleNatural =
     ]
 
 -- `cmd_load'` samples the fixture's modification time before type checking and
--- again after, and treats a difference as "the file changed under us". The
--- second argument to the continuation is an action to disarm file modification
--- so that later loads in the same session can succeed.
+-- again after, treating a difference as "the file changed under us". The second
+-- argument disarms file modification so that a later load in the same session
+-- succeeds.
 withStaleFixtureSession ::
   FilePath -> (FilePath -> IO () -> InteractionM a) -> IO a
 withStaleFixtureSession source k =
-  withStagedFixture source $ \staged options -> do
+  withStagedFiles [source] $ \directory options -> do
+    let staged = directory </> takeFileName source
     armed <- newIORef True
     state <- newInteractionState options >>= touchWhileChecking armed staged
     fst <$> runStateT (k staged (writeIORef armed False)) state
 
--- Agda emits `Resp_RunningInfo` from `chaseMsg` while type checking, which is
--- between the two modification time samples.
+-- Agda emits `Resp_RunningInfo` from `chaseMsg` while type checking, between
+-- the two modification time samples.
 touchWhileChecking ::
   IORef Bool -> FilePath -> InteractionState -> IO InteractionState
 touchWhileChecking armed path (InteractionState tcState commandState slot) = do
