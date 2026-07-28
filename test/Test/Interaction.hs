@@ -82,7 +82,7 @@ tests =
   withResource warmInteractionState (const $ pure ()) $ \warm ->
     testGroup
       "interaction"
-      (map ($ warm) [loadTests, giveFamilyTests, scenarioTests])
+      (map ($ warm) [loadTests, giveFamilyTests, giveTests, scenarioTests])
 
 loadTests :: IO TCState -> TestTree
 loadTests warm =
@@ -423,29 +423,20 @@ giveFamilyTests warm =
             load Load.Request {Load.requestPath = path, Load.requestArguments = []}
               >>= liftIO . expectLoadOk "load"
 
-          failed <-
+          e <-
             give
               Give.Request
                 { Give.requestForce = WithoutForce
                 , Give.requestGoalId = 0
                 , Give.requestExpression = "suc suc"
                 }
-              >>= liftIO . expectGiveError "ill-typed give"
-          case failed of
-            GiveFailed e ->
-              let message = errorMessage e
-               in liftIO $
-                    assertBool
-                      ( "an ill-typed expression is a classified failure: expected "
-                          <> show ("UnequalTerms" :: Text)
-                          <> " within "
-                          <> show message
-                      )
-                      ("UnequalTerms" `Text.isInfixOf` message)
-            other ->
-              liftIO $
-                assertFailure $
-                  "ill-typed give: expected GiveFailed, got " <> show other
+              >>= liftIO . expectGiveFailure "ill-typed give"
+          liftIO $
+            assertBool
+              ( "ill-typed give: expected \"UnequalTerms\" within "
+                  <> show (errorMessage e)
+              )
+              ("UnequalTerms" `Text.isInfixOf` errorMessage e)
 
           retried <-
             give
@@ -456,6 +447,112 @@ giveFamilyTests warm =
                 }
               >>= liftIO . expectGiveOk "the same goal accepts a later give"
           liftIO $ retried @?= GiveVerbatim False
+    ]
+
+giveTests :: IO TCState -> TestTree
+giveTests warm =
+  testGroup
+    "Give"
+    [ testCase "give classifies the ways an expression can be rejected" $
+        withFixtureSession warm "test/fixtures/GiveExpressions.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          illTyped <-
+            give
+              Give.Request
+                { Give.requestForce = WithoutForce
+                , Give.requestGoalId = 0
+                , Give.requestExpression = "suc suc"
+                }
+              >>= liftIO . expectGiveFailure "ill-typed"
+          liftIO $
+            assertBool
+              ( "ill-typed: expected \"UnequalTerms\" within "
+                  <> show (errorMessage illTyped)
+              )
+              ("UnequalTerms" `Text.isInfixOf` errorMessage illTyped)
+
+          outOfScope <-
+            give
+              Give.Request
+                { Give.requestForce = WithoutForce
+                , Give.requestGoalId = 1
+                , Give.requestExpression = "nope"
+                }
+              >>= liftIO . expectGiveFailure "out of scope"
+          liftIO $
+            assertBool
+              ( "out of scope: expected \"NotInScope\" within "
+                  <> show (errorMessage outOfScope)
+              )
+              ("NotInScope" `Text.isInfixOf` errorMessage outOfScope)
+
+          unparseable <-
+            give
+              Give.Request
+                { Give.requestForce = WithoutForce
+                , Give.requestGoalId = 2
+                , Give.requestExpression = "zero zero \8594"
+                }
+              >>= liftIO . expectGiveFailure "unparseable"
+          liftIO $
+            assertBool
+              ( "unparseable: expected \"ParseError\" within "
+                  <> show (errorMessage unparseable)
+              )
+              ("ParseError" `Text.isInfixOf` errorMessage unparseable)
+    , testCase "give keeps an expression Agda did not change" $
+        withFixtureSession warm "test/fixtures/GiveExpressions.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          plain <-
+            give
+              Give.Request
+                { Give.requestForce = WithoutForce
+                , Give.requestGoalId = 3
+                , Give.requestExpression = "zero"
+                }
+              >>= liftIO . expectGiveOk "a plain expression"
+          liftIO $ plain @?= GiveVerbatim False
+
+          parenthesized <-
+            give
+              Give.Request
+                { Give.requestForce = WithoutForce
+                , Give.requestGoalId = 5
+                , Give.requestExpression = "(zero)"
+                }
+              >>= liftIO . expectGiveOk "redundant parentheses"
+          liftIO $ parenthesized @?= GiveVerbatim False
+
+          underscore <-
+            give
+              Give.Request
+                { Give.requestForce = WithoutForce
+                , Give.requestGoalId = 6
+                , Give.requestExpression = "_"
+                }
+              >>= liftIO . expectGiveOk "an underscore"
+          liftIO $ underscore @?= GiveVerbatim False
+    , testCase "give reports when the hole needs parentheses" $
+        withFixtureSession warm "test/fixtures/GiveExpressions.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          action <-
+            give
+              Give.Request
+                { Give.requestForce = WithoutForce
+                , Give.requestGoalId = 4
+                , Give.requestExpression = "suc zero"
+                }
+              >>= liftIO . expectGiveOk "an application in argument position"
+          liftIO $ action @?= GiveVerbatim True
     ]
 
 scenarioTests :: IO TCState -> TestTree
@@ -583,6 +680,14 @@ expectGiveError :: String -> Give.Response -> IO GiveError
 expectGiveError _ (Left e) = pure e
 expectGiveError label other =
   assertFailure $ label <> ": expected a give error, got " <> show other
+
+expectGiveFailure :: String -> Give.Response -> IO Error
+expectGiveFailure label response = do
+  e <- expectGiveError label response
+  case e of
+    GiveFailed e' -> pure e'
+    other ->
+      assertFailure $ label <> ": expected GiveFailed, got " <> show other
 
 expectIntroOk :: String -> Intro.Response -> IO GiveAction
 expectIntroOk _ (Right action) = pure action
