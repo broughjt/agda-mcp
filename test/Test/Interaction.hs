@@ -52,6 +52,8 @@ import AgdaMCP.Interaction.Intro (intro)
 import AgdaMCP.Interaction.Intro qualified as Intro
 import AgdaMCP.Interaction.Load (load)
 import AgdaMCP.Interaction.Load qualified as Load
+import AgdaMCP.Interaction.Metas (metas)
+import AgdaMCP.Interaction.Metas qualified as Metas
 import AgdaMCP.Interaction.Model (
   ContextEntry (..),
   Error (..),
@@ -62,6 +64,7 @@ import AgdaMCP.Interaction.Model (
   GoalShape (..),
   HiddenMetavariable (..),
   IntroError (..),
+  MetasReport (..),
   NonFatalError (..),
   Position (..),
   Span (..),
@@ -82,7 +85,7 @@ tests =
   withResource warmInteractionState (const $ pure ()) $ \warm ->
     testGroup
       "interaction"
-      (map ($ warm) [loadTests, giveFamilyTests, giveTests, scenarioTests])
+      (map ($ warm) [loadTests, metasTests, giveFamilyTests, giveTests, scenarioTests])
 
 loadTests :: IO TCState -> TestTree
 loadTests warm =
@@ -92,31 +95,26 @@ loadTests warm =
         response <-
           withFixtureSession warm "test/fixtures/HoleNatural.agda" $ \path ->
             load Load.Request {Load.requestPath = path, Load.requestArguments = []}
-        case response of
-          Load.ResponseOk goals hiddenMetavariables warnings nonFatalErrors -> do
-            map (\g -> (goalId g, goalShape g)) goals @?= [(0, GoalOfType "ℕ")]
-            hiddenMetavariables @?= []
-            warnings @?= []
-            nonFatalErrors @?= []
-          other ->
-            assertFailure $ "expected ResponseOk, got " <> show other
+        report <- expectLoadOk "load" response
+        map (\g -> (goalId g, goalShape g)) (metasReportGoals report)
+          @?= [(0, GoalOfType "ℕ")]
+        metasReportHiddenMetavariables report @?= []
+        metasReportWarnings report @?= []
+        metasReportNonFatalErrors report @?= []
     , testCase "load a file with three holes" $ do
         response <-
           withFixtureSession warm "test/fixtures/GroupProperties.agda" $ \path ->
             load Load.Request {Load.requestPath = path, Load.requestArguments = []}
-        case response of
-          Load.ResponseOk goals hiddenMetavariables warnings nonFatalErrors -> do
-            map goalId goals @?= [0, 1, 2]
-            map goalShape goals
-              @?= [ GoalOfType "x ≈ y → u ≈ v → x // u ≈ y // v"
-                  , GoalOfType "(setoid Relation.Binary.Bundles.Setoid.≈ (y ∙ ε)) y"
-                  , GoalOfType "ε ⁻¹ ≈ ε"
-                  ]
-            hiddenMetavariables @?= []
-            warnings @?= []
-            nonFatalErrors @?= []
-          other ->
-            assertFailure $ "expected ResponseOk, got " <> show other
+        report <- expectLoadOk "load" response
+        map goalId (metasReportGoals report) @?= [0, 1, 2]
+        map goalShape (metasReportGoals report)
+          @?= [ GoalOfType "x ≈ y → u ≈ v → x // u ≈ y // v"
+              , GoalOfType "(setoid Relation.Binary.Bundles.Setoid.≈ (y ∙ ε)) y"
+              , GoalOfType "ε ⁻¹ ≈ ε"
+              ]
+        metasReportHiddenMetavariables report @?= []
+        metasReportWarnings report @?= []
+        metasReportNonFatalErrors report @?= []
     , testCase "a successful load records the current file" $ do
         (path, recorded) <-
           withFixtureSession warm "test/fixtures/HoleNatural.agda" $ \path -> do
@@ -161,12 +159,11 @@ loadTests warm =
               load Load.Request {Load.requestPath = path, Load.requestArguments = []}
             pure (withSafe, withoutSafe)
         -- `--safe` rejects the postulate as a non-fatal error
-        (goals, hiddenMetavariables, warnings, nonFatalErrors) <-
-          expectLoadOk "load with --safe" withSafe
-        goals @?= []
-        hiddenMetavariables @?= []
-        warnings @?= []
-        case nonFatalErrors of
+        report <- expectLoadOk "load with --safe" withSafe
+        metasReportGoals report @?= []
+        metasReportHiddenMetavariables report @?= []
+        metasReportWarnings report @?= []
+        case metasReportNonFatalErrors report of
           [NonFatalError (_, message)] ->
             assertBool
               ("expected a SafeFlagPostulate error, got " <> Text.unpack message)
@@ -174,38 +171,35 @@ loadTests warm =
           other ->
             assertFailure $ "expected one non-fatal error, got " <> show other
         expectLoadOk "load without arguments" withoutSafe
-          >>= (@?= ([], [], [], []))
+          >>= (@?= MetasReport [] [] [] [])
     , testCase "hidden metavariables are reported alongside goals" $ do
         response <-
           withFixtureSession warm "test/fixtures/Normalization.agda" $ \path ->
             load Load.Request {Load.requestPath = path, Load.requestArguments = []}
-        (goals, hiddenMetavariables, warnings, nonFatalErrors) <-
-          expectLoadOk "load" response
-        map goalShape goals @?= [GoalOfType "Twice 2"]
-        map hiddenMetavariableShape hiddenMetavariables @?= [GoalOfType "Twice 2"]
-        map (isJust . hiddenMetavariableSpan) hiddenMetavariables @?= [True]
-        warnings @?= []
-        nonFatalErrors @?= []
-    , -- Test a claim in `extractResponseOk`
-      testCase "AsIs normalization is weaker than Simplified" $
-        assertBool
-          "AsIs should be less than or equal to Simplified"
-          (AsIs <= Simplified)
+        report <- expectLoadOk "load" response
+        map goalShape (metasReportGoals report) @?= [GoalOfType "Twice 2"]
+        map hiddenMetavariableShape (metasReportHiddenMetavariables report)
+          @?= [GoalOfType "Twice 2"]
+        map (isJust . hiddenMetavariableSpan) (metasReportHiddenMetavariables report)
+          @?= [True]
+        metasReportWarnings report @?= []
+        metasReportNonFatalErrors report @?= []
     , testCase "warnings are reported in file order with their locations" $ do
         (path, response) <-
           withFixtureSession warm "test/fixtures/Warnings.agda" $ \path ->
             (,) path
               <$> load Load.Request {Load.requestPath = path, Load.requestArguments = []}
-        (goals, hiddenMetavariables, warnings, nonFatalErrors) <-
-          expectLoadOk "load" response
-        goals @?= []
-        hiddenMetavariables @?= []
-        nonFatalErrors @?= []
-        map warningLocation warnings
+        report <- expectLoadOk "load" response
+        metasReportGoals report @?= []
+        metasReportHiddenMetavariables report @?= []
+        metasReportNonFatalErrors report @?= []
+        map warningLocation (metasReportWarnings report)
           @?= [ Just (path, ((8, 1), (8, 12)))
               , Just (path, ((13, 1), (13, 13)))
               ]
-        map (withoutPath path . firstLine . warningMessage) warnings
+        map
+          (withoutPath path . firstLine . warningMessage)
+          (metasReportWarnings report)
           @?= [ "FIXTURE:8.1-12: warning: -W[no]UnreachableClauses"
               , "FIXTURE:13.1-13: warning: -W[no]UnreachableClauses"
               ]
@@ -257,13 +251,13 @@ loadTests warm =
         void $ expectLoadOk "load after the file settles" response2
     , -- Agda checks a `where` module before the clause body containing it,
       -- so the hole on line 9 is created first and gets the lower id.
-      -- `extractResponseOk` sorts by position, so the ids come back
+      -- `extractMetas` sorts by position, so the ids come back
       -- descending here.
       testCase "goals are ordered by position, not by interaction id" $ do
         response <-
           withFixtureSession warm "test/fixtures/GoalOrder.agda" $ \path ->
             load Load.Request {Load.requestPath = path, Load.requestArguments = []}
-        (goals, _, _, _) <- expectLoadOk "load" response
+        goals <- metasReportGoals <$> expectLoadOk "load" response
         map (spanCoordinates . goalSpan) goals
           @?= [((6, 11), (6, 15)), ((9, 11), (9, 15))]
         map goalId goals @?= [1, 0]
@@ -274,13 +268,15 @@ loadTests warm =
         response <-
           withFixtureSession warm "test/fixtures/Parenthesization.agda" $ \path ->
             load Load.Request {Load.requestPath = path, Load.requestArguments = []}
-        (goals, _, _, _) <- expectLoadOk "load" response
+        goals <- metasReportGoals <$> expectLoadOk "load" response
         map goalShape goals @?= [GoalOfType "ℕ → ℕ"]
     , testCase "a sort-shaped hidden metavariable is reported" $ do
         response <-
           withFixtureSession warm "test/fixtures/SortMetavariable.agda" $ \path ->
             load Load.Request {Load.requestPath = path, Load.requestArguments = []}
-        (goals, hiddenMetavariables, _, _) <- expectLoadOk "load" response
+        report <- expectLoadOk "load" response
+        let goals = metasReportGoals report
+            hiddenMetavariables = metasReportHiddenMetavariables report
         map goalShape goals @?= [GoalOfType "_0"]
         map hiddenMetavariableName hiddenMetavariables @?= ["_0"]
         map hiddenMetavariableShape hiddenMetavariables @?= [GoalSort]
@@ -293,10 +289,10 @@ loadTests warm =
                   { Load.requestPath = directory </> "Importer.agda"
                   , Load.requestArguments = []
                   }
-        (goals, _, warnings, nonFatalErrors) <- expectLoadOk "load" response
-        goals @?= []
-        nonFatalErrors @?= []
-        map warningLocation warnings
+        report <- expectLoadOk "load" response
+        metasReportGoals report @?= []
+        metasReportNonFatalErrors report @?= []
+        map warningLocation (metasReportWarnings report)
           @?= [Just (directory </> "Warned.agda", ((8, 1), (8, 12)))]
     , testCase "importing a module with open holes fails" $ do
         (directory, response) <-
@@ -325,6 +321,92 @@ loadTests warm =
         assertBool
           ("expected a read failure, got " <> Text.unpack (errorMessage e))
           ("Cannot read file" `Text.isInfixOf` errorMessage e)
+    ]
+
+metasTests :: IO TCState -> TestTree
+metasTests warm =
+  testGroup
+    "Metas"
+    [ testCase "hidden metavariables normalize at least as far as Simplified" $
+        withFixtureSession warm "test/fixtures/Normalization.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+          shapes <-
+            traverse
+              ( \normalization -> do
+                  report <-
+                    metas Metas.Request {Metas.requestNormalization = normalization}
+                      >>= liftIO . expectMetasOk (show normalization)
+                  pure
+                    ( map goalShape (metasReportGoals report)
+                    , map
+                        hiddenMetavariableShape
+                        (metasReportHiddenMetavariables report)
+                    )
+              )
+              [AsIs, Instantiated, HeadNormal, Simplified, Normalised]
+          liftIO $
+            shapes
+              @?= [ ([GoalOfType "Twice 2"], [GoalOfType "Twice 2"])
+                  , ([GoalOfType "Twice 2"], [GoalOfType "Twice 2"])
+                  , ([GoalOfType "P (2 + 2)"], [GoalOfType "Twice 2"])
+                  , ([GoalOfType "Twice 2"], [GoalOfType "Twice 2"])
+                  , ([GoalOfType "P 4"], [GoalOfType "P 4"])
+                  ]
+    , testCase "a metavariable stranded by a give is invisible to a reload" $
+        withFixtureSession warm "test/fixtures/GiveExpressions.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+          void $
+            give
+              Give.Request
+                { Give.requestForce = WithoutForce
+                , Give.requestGoalId = 6
+                , Give.requestExpression = "_"
+                }
+              >>= liftIO . expectGiveOk "an underscore"
+
+          report <-
+            metas Metas.Request {Metas.requestNormalization = AsIs}
+              >>= liftIO . expectMetasOk "after the give"
+          liftIO $ do
+            map goalId (metasReportGoals report) @?= [0, 1, 2, 3, 4, 5]
+            map hiddenMetavariableShape (metasReportHiddenMetavariables report)
+              @?= [GoalOfType "ℕ"]
+
+          reloadedReport <-
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "reload"
+          liftIO $ metasReportHiddenMetavariables reloadedReport @?= []
+    , testCase "metas reports a non-fatal error raised by a give" $ do
+        let attempt force =
+              withFixtureSession warm "test/fixtures/Termination.agda" $ \path -> do
+                void $
+                  load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+                    >>= liftIO . expectLoadOk "load"
+                void $
+                  give
+                    Give.Request
+                      { Give.requestForce = force
+                      , Give.requestGoalId = 0
+                      , Give.requestExpression = "loop n"
+                      }
+                    >>= liftIO . expectGiveOk "a non-terminating expression"
+                report <-
+                  metas Metas.Request {Metas.requestNormalization = AsIs}
+                    >>= liftIO . expectMetasOk "after the give"
+                pure $
+                  map
+                    (firstLine . nonFatalErrorMessage)
+                    (metasReportNonFatalErrors report)
+        withoutForce <- attempt WithoutForce
+        withForce <- attempt WithForce
+        assertBool
+          ("expected a termination issue, got " <> show withoutForce)
+          (any ("TerminationIssue" `Text.isInfixOf`) withoutForce)
+        withForce @?= []
     ]
 
 giveFamilyTests :: IO TCState -> TestTree
@@ -568,7 +650,7 @@ scenarioTests warm =
           let request = Load.Request {Load.requestPath = path, Load.requestArguments = []}
 
           goals <-
-            load request >>= liftIO . fmap goalsOf . expectLoadOk "load"
+            load request >>= liftIO . fmap metasReportGoals . expectLoadOk "load"
           liftIO $
             assertEqual
               "the two clauses each leave a hole"
@@ -644,7 +726,7 @@ scenarioTests warm =
           -- The file on disk never changed, so a reload throws all of that away
           -- and returns the original two goals.
           reloaded <-
-            load request >>= liftIO . fmap goalsOf . expectLoadOk "reload"
+            load request >>= liftIO . fmap metasReportGoals . expectLoadOk "reload"
           liftIO $
             assertEqual
               "reloading discards the session's progress"
@@ -660,9 +742,8 @@ currentFile =
 expectLoadOk ::
   String ->
   Load.Response ->
-  IO ([Goal], [HiddenMetavariable], [Warning], [NonFatalError])
-expectLoadOk _ (Load.ResponseOk goals hiddenMetavariables warnings nonFatalErrors) =
-  pure (goals, hiddenMetavariables, warnings, nonFatalErrors)
+  IO MetasReport
+expectLoadOk _ (Load.ResponseOk report) = pure report
 expectLoadOk label other =
   assertFailure $ label <> ": expected ResponseOk, got " <> show other
 
@@ -670,6 +751,11 @@ expectLoadError :: String -> Load.Response -> IO Error
 expectLoadError _ (Load.ResponseError e) = pure e
 expectLoadError label other =
   assertFailure $ label <> ": expected ResponseError, got " <> show other
+
+expectMetasOk :: String -> Metas.Response -> IO MetasReport
+expectMetasOk _ (Right report) = pure report
+expectMetasOk label other =
+  assertFailure $ label <> ": expected a metas report, got " <> show other
 
 expectGiveOk :: String -> Give.Response -> IO GiveAction
 expectGiveOk _ (Right action) = pure action
@@ -712,11 +798,11 @@ spanText source s =
   start = positionOffset $ spanStart s
   end = positionOffset $ spanEnd s
 
-goalsOf :: ([Goal], [HiddenMetavariable], [Warning], [NonFatalError]) -> [Goal]
-goalsOf (goals, _, _, _) = goals
-
 warningMessage :: Warning -> Text
 warningMessage (Warning (_, message)) = message
+
+nonFatalErrorMessage :: NonFatalError -> Text
+nonFatalErrorMessage (NonFatalError (_, message)) = message
 
 warningLocation :: Warning -> Maybe (FilePath, ((Int, Int), (Int, Int)))
 warningLocation (Warning (pathSpan, _)) =

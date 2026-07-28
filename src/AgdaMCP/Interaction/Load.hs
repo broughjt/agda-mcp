@@ -6,58 +6,22 @@ module AgdaMCP.Interaction.Load (
 
 import Agda.Interaction.Base (
   CommandState (..),
-  OutputConstraint_boot (..),
   Rewrite (..),
- )
-import Agda.Interaction.BasicOps (
-  getWarningsAndNonFatalErrors,
-  typesOfHiddenMetas,
-  typesOfVisibleMetas,
  )
 import Agda.Interaction.Command (CommandM)
 import Agda.Interaction.Imports (Mode (..))
 import Agda.Interaction.InteractionTop (cmd_load')
-import Agda.Interaction.Output (OutputConstraint)
-import Agda.Syntax.Abstract (Expr)
-import Agda.Syntax.Abstract.Pretty (prettyATop)
-import Agda.Syntax.Common (InteractionId)
-import Agda.Syntax.Common.Pretty (prettyShow, render)
-import Agda.TypeChecking.Monad (
-  NamedMeta,
-  TCErr (..),
-  TCM,
-  WarningsAndNonFatalErrors (..),
-  getMetaRange,
-  nmid,
-  withInteractionId,
-  withMetaId,
- )
-import Agda.TypeChecking.Monad.MetaVars (
-  getInteractionPoints,
-  getInteractionRange,
- )
-import Control.Exception (Exception, throwIO)
-import Control.Monad.IO.Class (liftIO)
+import Agda.TypeChecking.Monad (TCErr (..))
 import Control.Monad.State (gets, lift, modify)
-import Data.List (sortOn)
 import Data.Maybe (isJust)
-import Data.Set qualified as Set
 import Data.Text qualified as Text
 
 import AgdaMCP.Interaction.Internal (InteractionM, catchTCErr, runCommandM)
+import AgdaMCP.Interaction.Metas (extractMetas)
 import AgdaMCP.Interaction.Model (
   Error,
-  Goal (..),
-  GoalShape (..),
-  HiddenMetavariable (..),
-  NonFatalError,
-  Position (..),
-  Span (..),
-  Warning,
+  MetasReport,
   extractError,
-  extractNonFatalError,
-  extractWarning,
-  rangeSpan,
  )
 import Data.Text (Text)
 
@@ -78,7 +42,7 @@ data Request = Request {requestPath :: FilePath, requestArguments :: [Text]}
 -- - `Resp_DisplayInfo (Info_AllGoalsWarnings)`
 -- - `Resp_InteractionPoints`
 --
--- These three are emitted as part of the interpretation of `Cmd_metas` and in the `when` block of `runInteraction` for handling commands which modify the interaction points. The data in `Info_AllGoalsWarnings` is the payload we're interested in. It contains a list of visible metavariables (goals the user can interact with), hidden metavariables (an unsolved `_` for example), and a list of warnings and non-fatal errors. We don't collect this information from the `Resp_DisplayInfo` response since we're intentionally ignoring emitted responses. Instead we query this information from Agda state, being careful to do it in the same manner as the relevant Agda code. See comments in some of the `extract*` helpers below for details.
+-- These three are emitted as part of the interpretation of `Cmd_metas` and in the `when` block of `runInteraction` for handling commands which modify the interaction points. The data in `Info_AllGoalsWarnings` is the payload we're interested in. It contains a list of visible metavariables (goals the user can interact with), hidden metavariables (an unsolved `_` for example), and a list of warnings and non-fatal errors. We don't collect this information from the `Resp_DisplayInfo` response since we're intentionally ignoring emitted responses. Instead we query this information from Agda state, being careful to do it in the same manner as the relevant Agda code.
 --
 -- On the other hand, if the file modification times do not match, the current file and interaction point state is not updated. The responses for the success case are still emitted (except for `Resp_InteractionPoints`, which fails the file-is-still-current check in `runInteraction`), but they won't contain very much useful information. To detect this path we read back Agda's decision instead of repeating the check. See the comment in `load` for details.
 --
@@ -86,7 +50,7 @@ data Request = Request {requestPath :: FilePath, requestArguments :: [Text]}
 data Response
   = -- The success path: the file type-checked and Agda updated the interaction
     -- state.
-    ResponseOk [Goal] [HiddenMetavariable] [Warning] [NonFatalError]
+    ResponseOk MetasReport
   | -- The failure path: a `TCErr` was thrown in `cmd_load'`; state is rolled
     -- back as described in app/Main.hs.
     ResponseError Error
@@ -115,7 +79,7 @@ loadInternal (Request path arguments) = do
     )
       `catchTCErr` handler
   case outcome of
-    Right True -> lift extractResponseOk
+    Right True -> ResponseOk <$> lift (extractMetas AsIs)
     Right False -> pure ResponseStale
     Left e -> pure $ ResponseError e
  where
@@ -128,120 +92,3 @@ loadInternal (Request path arguments) = do
     -- `runInteraction`. We match this behavior here.
     modify $ \state -> state {theCurrentFile = Nothing}
     Left <$> lift (extractError e)
-
-extractResponseOk :: TCM Response
-extractResponseOk = do
-  -- `typesOfVisibleMetas` uses `getInteractionIdsAndMetas`, which obtains the
-  -- goals in creation order. We sort by position instead, which is what
-  -- `sortInteractionPoints` does for `theCurrentFile`'s interaction points
-  -- (InteractionTop.hs:1046).
-  goals <-
-    sortOn (positionOffset . spanStart . goalSpan)
-      <$> (typesOfVisibleMetas AsIs >>= traverse extractGoal)
-  -- Note: `interpret Cmd_metas` uses `(max Simplified norm)` for the hidden
-  -- metavariable normalization, and `AsIs <= Simplified` by the `deriving`
-  -- instance of `Ord` for `Rewrite`.
-  hiddenMetavariables <-
-    typesOfHiddenMetas Simplified >>= traverse extractHiddenMetavariable
-  WarningsAndNonFatalErrors warnings nonFatalErrors <-
-    getWarningsAndNonFatalErrors
-  warnings' <- traverse extractWarning $ Set.toList warnings
-  nonFatalErrors' <- traverse extractNonFatalError $ Set.toList nonFatalErrors
-  pure $ ResponseOk goals hiddenMetavariables warnings' nonFatalErrors'
-
-extractGoal :: OutputConstraint Expr InteractionId -> TCM Goal
-extractGoal constraint = do
-  -- The relevant Agda code for goal extraction is `showGoals`
-  -- (Interaction/BasicOps.hs:830-843) for the Emacs frontend and `encodeTCM`
-  -- for the JSON frontend (JSONTop.hs:305-310).
-  (goalId, goalShape) <- extractVisibleMetavariable constraint
-  -- We claim that after a load, `getInteractionRange` won't fail and that the
-  -- range won't be `NoRange`. If this is wrong, our mental model of Agda needs
-  -- to be updated.
-  goalSpan <-
-    getInteractionRange goalId
-      >>= maybe (throwInteractionPointNoRange goalId) pure . rangeSpan
-  pure $ Goal goalId goalSpan goalShape
- where
-  throwInteractionPointNoRange :: InteractionId -> TCM a
-  throwInteractionPointNoRange pointId = do
-    points <- getInteractionPoints
-    ranges <- traverse (fmap (Text.pack . prettyShow) . getInteractionRange) points
-    liftIO $
-      throwIO $
-        InteractionPointNoRangeBug $
-          InteractionPointNoRange pointId $
-            zip points ranges
-
-extractVisibleMetavariable ::
-  OutputConstraint Expr InteractionId -> TCM (InteractionId, GoalShape)
-extractVisibleMetavariable (OfType pointId ty) =
-  -- Both frontends render under `withInteractionId` with the constraint's id,
-  -- although they both pass through `OutputForm` which seems pointless. Anyway,
-  -- the Emacs frontend renders the whole constraint as one string, and we want
-  -- to render to a `Goal`, which has id, span, and type as separate fields. The
-  -- JSON frontend does this too, but instead of the `prettyTCM` call it uses,
-  -- we render the type with `prettyATop`.
-  --
-  -- `prettyTCM` on an abstract expression is `abstractToConcrete_`, which
-  -- parenthesizes according to the precedence of the ambient scope. The
-  -- difference is observable: for `apply {!!}` with goal type `Nat -> Nat`, the
-  -- JSON frontend prints `(Nat -> Nat)` (with parentheses), while `prettyATop`
-  -- prints `Nat -> Nat` (without parentheses), matching the Emacs display.
-  (pointId,)
-    <$> ( GoalOfType . Text.pack . render
-            <$> withInteractionId pointId (prettyATop ty)
-        )
-extractVisibleMetavariable (JustSort pointId) = pure $ (pointId, GoalSort)
-extractVisibleMetavariable constraint =
-  prettyATop constraint
-    >>= liftIO
-      . throwIO
-      . UnexpectedGoalConstraintBug
-      . UnexpectedGoalConstraint
-      . Text.pack
-      . render
-
-extractHiddenMetavariable ::
-  OutputConstraint Expr NamedMeta -> TCM HiddenMetavariable
-extractHiddenMetavariable constraint =
-  case constraint of
-    OfType metavariable ty ->
-      -- The same reasoning from the visible metavariable case in
-      -- `extractVisibleMetavariable` applies here
-      (withMetaId (nmid metavariable) $ prettyATop ty)
-        >>= toHiddenMetavariable metavariable . GoalOfType . Text.pack . render
-    JustSort metavariable ->
-      toHiddenMetavariable metavariable GoalSort
-    _ ->
-      prettyATop constraint
-        >>= liftIO
-          . throwIO
-          . UnexpectedGoalConstraintBug
-          . UnexpectedGoalConstraint
-          . Text.pack
-          . render
- where
-  toHiddenMetavariable :: NamedMeta -> GoalShape -> TCM HiddenMetavariable
-  toHiddenMetavariable metavariable shape = do
-    name <-
-      Text.pack . render
-        -- The same as `showA'` in `showGoals`
-        -- (Interaction/BasicOps.hs:838-843)
-        <$> (withMetaId (nmid metavariable) $ prettyATop metavariable)
-    maybeSpan <- rangeSpan <$> getMetaRange (nmid metavariable)
-    pure $ HiddenMetavariable name maybeSpan shape
-
-data LoadBug
-  = InteractionPointNoRangeBug InteractionPointNoRange
-  | UnexpectedGoalConstraintBug UnexpectedGoalConstraint
-  deriving (Show)
-
-data InteractionPointNoRange
-  = InteractionPointNoRange InteractionId [(InteractionId, Text)]
-  deriving (Show)
-
-data UnexpectedGoalConstraint = UnexpectedGoalConstraint Text
-  deriving (Show)
-
-instance Exception LoadBug

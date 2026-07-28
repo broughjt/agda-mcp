@@ -3,6 +3,7 @@ module AgdaMCP.Interaction.Model (
   Goal (..),
   GoalShape (..),
   HiddenMetavariable (..),
+  MetasReport (..),
   ContextEntry (..),
   GoalReport (..),
   -- Give family
@@ -69,19 +70,9 @@ data Goal = Goal
   }
   deriving (Eq, Show)
 
--- Goals and hidden metavariables use only two of `OutputConstraint`'s
--- constructors. The goals response list is built exclusively by `typeOfMetaMI`
--- (BasicOps.hs:889-921), which does cases on `Judgement`'s two
--- constructors. `HasType` becomes `OfType` and `IsSort` becomes `JustSort`. The
--- remaining `OutputConstraint` constructors are used when reifying constraints
--- (`Cmd_constraints`, the `Cmd_goal_type_context*` family of commands), never
--- for goals.
-
--- TODO: Explain `interpret Cmd_metas` calls `getGoals'` which calls
--- `typesOfVisibleMetas` and `typesOfHiddenMetas`. These in turn (transitively)
--- call `typeOfMetaMI`. `typeOfMetaMI` only builds `OutputConstraints` with the
--- `HasType` and `JustSort` constructors, so these are the only
--- `OutputConstraints` that will show up in goals obtained from `Cmd_meta`.
+-- A goal or hidden metavariable is either typed or is itself a sort. See the
+-- comment above `extractGoal` in `AgdaMCP.Interaction.Metas` for why these are
+-- the only two possibilities.
 data GoalShape
   = GoalOfType Text
   | GoalSort
@@ -91,6 +82,20 @@ data HiddenMetavariable = HiddenMetavariable
   { hiddenMetavariableName :: Text
   , hiddenMetavariableSpan :: Maybe Span
   , hiddenMetavariableShape :: GoalShape
+  }
+  deriving (Eq, Show)
+
+-- The payload of `Cmd_metas`, which Agda hands to `display_info` as
+-- `Info_AllGoalsWarnings` (InteractionTop.hs:508-510). It is also what
+-- `cmd_load'` reports through its continuation, so the load wrapper returns one
+-- of these on success.
+data MetasReport = MetasReport
+  { metasReportGoals :: [Goal]
+  -- ^ The visible metavariables, in file-position order.
+  , metasReportHiddenMetavariables :: [HiddenMetavariable]
+  -- ^ The hidden (unsolved, non-interaction) metavariables.
+  , metasReportWarnings :: [Warning]
+  , metasReportNonFatalErrors :: [NonFatalError]
   }
   deriving (Eq, Show)
 
