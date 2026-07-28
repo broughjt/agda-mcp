@@ -3,19 +3,40 @@
 module Test.Harness (
   runSession,
   withFixtureSession,
+  currentFile,
+  expectLoaded,
+  expectLoadError,
 ) where
 
+import Agda.Interaction.Base (
+  CommandState (..),
+  CurrentFile (..),
+ )
 import Agda.Interaction.Options (
   CommandLineOptions (..),
   defaultOptions,
  )
-import Control.Monad.State (runStateT)
+import Agda.Utils.FileName (filePath)
+import Control.Monad.State (gets, runStateT)
 import System.Directory (copyFile)
 import System.Environment (lookupEnv)
 import System.FilePath (takeFileName, (</>))
 import System.IO.Temp (withSystemTempDirectory)
+import Test.Tasty.HUnit (assertFailure)
 
-import AgdaMCP.Interaction (InteractionM, newInteractionState)
+import AgdaMCP.Interaction.Internal (
+  InteractionM,
+  InteractionState (..),
+  newInteractionState,
+ )
+import AgdaMCP.Interaction.Load (Response (..))
+import AgdaMCP.Interaction.Model (
+  Error,
+  Goal,
+  HiddenMetavariable,
+  NonFatalError,
+  Warning,
+ )
 import Control.Exception (throwIO)
 
 withFixtureSession :: FilePath -> (FilePath -> InteractionM a) -> IO a
@@ -53,3 +74,22 @@ standardLibraryPath =
 runSession :: CommandLineOptions -> InteractionM a -> IO a
 runSession options action =
   fst <$> (newInteractionState options >>= runStateT action)
+
+currentFile :: InteractionM (Maybe FilePath)
+currentFile =
+  gets $ \(InteractionState _ commandState _) ->
+    filePath . currentFilePath <$> theCurrentFile commandState
+
+expectLoaded ::
+  String ->
+  Response ->
+  IO ([Goal], [HiddenMetavariable], [Warning], [NonFatalError])
+expectLoaded _ (ResponseOk goals hiddenMetavariables warnings nonFatalErrors) =
+  pure (goals, hiddenMetavariables, warnings, nonFatalErrors)
+expectLoaded label other =
+  assertFailure $ label <> ": expected ResponseOk, got " <> show other
+
+expectLoadError :: String -> Response -> IO Error
+expectLoadError _ (ResponseError e) = pure e
+expectLoadError label other =
+  assertFailure $ label <> ": expected ResponseError, got " <> show other
