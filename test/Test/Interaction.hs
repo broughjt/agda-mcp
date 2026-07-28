@@ -913,6 +913,88 @@ scenarioTests warm =
               "reloading discards the session's progress"
               (map goalShape goals)
               (map goalShape reloaded)
+    , -- Gives a real library proof back to the library's own statement of it.
+      testCase "rebuild a standard library proof from its own text" $
+        withFixtureSession warm "test/fixtures/StandardLibraryProof.agda" $ \path -> do
+          goals <-
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . fmap metasReportGoals . expectLoadOk "load"
+          -- The stated type is `Associative _++_`, a defined predicate, which
+          -- does not survive into the goals: each hole shows the equation it
+          -- unfolds to.
+          liftIO $
+            assertEqual
+              "the clauses hold the unfolded associativity equations"
+              [ GoalOfType "([] ++ ys) ++ zs ≡ [] ++ ys ++ zs"
+              , GoalOfType "((x ∷ xs) ++ ys) ++ zs ≡ (x ∷ xs) ++ ys ++ zs"
+              ]
+              (map goalShape goals)
+
+          -- A dependency-rich context: the clause's own binders, plus the
+          -- generalized variables the module telescope introduces.
+          stepReport <-
+            goal
+              Goal.Request
+                { Goal.requestNormalization = AsIs
+                , Goal.requestGoalId = 1
+                }
+          liftIO $
+            assertEqual
+              "the inductive step sees the generalized variables too"
+              ( Right
+                  ( ["a", "A", "x", "xs", "ys", "zs"]
+                  , ["Level", "Set a", "A", "List A", "List A", "List A"]
+                  )
+              )
+              ( fmap
+                  ( \report ->
+                      ( map contextEntryOriginalName (goalReportContext report)
+                      , map contextEntryType (goalReportContext report)
+                      )
+                  )
+                  stepReport
+              )
+
+          base <-
+            give
+              Give.Request
+                { Give.requestForce = WithoutForce
+                , Give.requestGoalId = 0
+                , Give.requestExpression = "refl"
+                }
+              >>= liftIO . expectGiveOk "the standard library's base case"
+          liftIO $ base @?= GiveVerbatim False
+
+          inductiveStep <-
+            give
+              Give.Request
+                { Give.requestForce = WithoutForce
+                , Give.requestGoalId = 1
+                , Give.requestExpression = "cong (x ∷_) (++-assoc xs ys zs)"
+                }
+              >>= liftIO . expectGiveOk "the standard library's inductive step"
+          liftIO $ inductiveStep @?= GiveVerbatim False
+
+          report <-
+            metas Metas.Request {Metas.requestNormalization = AsIs}
+              >>= liftIO . expectMetasOk "after both gives"
+          liftIO $ report @?= MetasReport [] [] [] []
+    , testCase "an elaboration can coincide with the text it elaborates" $
+        withFixtureSession warm "test/fixtures/StandardLibraryProof.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          let body = "cong (x ∷_) (++-assoc xs ys zs)"
+          elaborated <-
+            elaborateGive
+              ElaborateGive.Request
+                { ElaborateGive.requestNormalization = Normalised
+                , ElaborateGive.requestGoalId = 1
+                , ElaborateGive.requestExpression = body
+                }
+              >>= liftIO . expectElaborated "the standard library's inductive step"
+          liftIO $ elaborated @?= body
     ]
 
 currentFile :: InteractionM (Maybe FilePath)
