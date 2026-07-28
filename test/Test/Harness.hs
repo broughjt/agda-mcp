@@ -3,6 +3,7 @@
 module Test.Harness (
   runSession,
   withFixtureSession,
+  withStaleFixtureSession,
   currentFile,
   expectLoaded,
   expectLoadError,
@@ -18,9 +19,26 @@ import Agda.Interaction.Options (
   CommandLineOptions (..),
   defaultOptions,
  )
+import Agda.Interaction.Response (
+  Response_boot (Resp_RunningInfo),
+ )
+import Agda.TypeChecking.Monad (
+  InteractionOutputCallback,
+  initEnv,
+  runTCM,
+  setInteractionOutputCallback,
+ )
 import Agda.Utils.FileName (filePath)
+import Control.Monad (when)
+import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (gets, runStateT)
-import System.Directory (copyFile)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Time.Clock (addUTCTime)
+import System.Directory (
+  copyFile,
+  getModificationTime,
+  setModificationTime,
+ )
 import System.Environment (lookupEnv)
 import System.FilePath (takeFileName, (</>))
 import System.IO.Temp (withSystemTempDirectory)
@@ -46,7 +64,12 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 
 withFixtureSession :: FilePath -> (FilePath -> InteractionM a) -> IO a
-withFixtureSession source k = do
+withFixtureSession source k =
+  withStagedFixture source $ \staged options -> runSession options (k staged)
+
+withStagedFixture ::
+  FilePath -> (FilePath -> CommandLineOptions -> IO a) -> IO a
+withStagedFixture source k = do
   standardLibrary <- standardLibraryPath
   withSystemTempDirectory "agda-mcp-test" $ \directory -> do
     let librariesFile = directory </> "libraries"
@@ -61,9 +84,7 @@ withFixtureSession source k = do
       )
     let staged = directory </> takeFileName source
     copyFile source staged
-    runSession
-      defaultOptions {optOverrideLibrariesFile = Just librariesFile}
-      (k staged)
+    k staged defaultOptions {optOverrideLibrariesFile = Just librariesFile}
 
 standardLibraryPath :: IO FilePath
 standardLibraryPath =

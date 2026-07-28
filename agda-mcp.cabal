@@ -61,7 +61,8 @@ test-suite agda-mcp-test
       tasty,
       tasty-hunit,
       temporary,
-      text
+      text,
+      time
   default-language: GHC2021
   ghc-options:
       -Wall

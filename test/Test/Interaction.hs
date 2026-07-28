@@ -31,6 +31,7 @@ import Test.Harness (
   spanCoordinates,
   spanText,
   withFixtureSession,
+  withStaleFixtureSession,
  )
 
 tests :: TestTree
@@ -190,6 +191,19 @@ tests =
               @?= [Just (path, ((8, 1), (8, 12)))]
             map (withoutPath path . firstLine . warningMessage) (errorWarnings e)
               @?= ["FIXTURE:8.1-12: warning: -W[no]UnreachableClauses"]
+        , testCase "a file changed while it is checked loads as stale" $ do
+            (response1, maybeCurrentFile, response2) <-
+              withStaleFixtureSession "test/fixtures/HoleNatural.agda" $
+                \path stopModifying -> do
+                  let request = Request {requestPath = path, requestArguments = []}
+                  response1 <- load request
+                  maybeCurrentFile <- currentFile
+                  liftIO stopModifying
+                  response2 <- load request
+                  pure (response1, maybeCurrentFile, response2)
+            response1 @?= ResponseStale
+            maybeCurrentFile @?= Nothing
+            void $ expectLoaded "load after the file settles" response2
         , testCase "loading a missing file reports an error" $ do
             response <-
               withFixtureSession "test/fixtures/HoleNatural.agda" $ \path ->
@@ -230,3 +244,31 @@ brokenHoleNatural =
     , "foo : ℕ → ℕ"
     , "foo n = ℕ"
     ]
+
+-- `cmd_load'` samples the fixture's modification time before type checking and
+-- again after, and treats a difference as "the file changed under us". The
+-- second argument to the continuation is an action to disarm file modification
+-- so that later loads in the same session can succeed.
+withStaleFixtureSession ::
+  FilePath -> (FilePath -> IO () -> InteractionM a) -> IO a
+withStaleFixtureSession source k =
+  withStagedFixture source $ \staged options -> do
+    armed <- newIORef True
+    state <- newInteractionState options >>= touchWhileChecking armed staged
+    fst <$> runStateT (k staged (writeIORef armed False)) state
+
+-- Agda emits `Resp_RunningInfo` from `chaseMsg` while type checking, which is
+-- between the two modification time samples.
+touchWhileChecking ::
+  IORef Bool -> FilePath -> InteractionState -> IO InteractionState
+touchWhileChecking armed path (InteractionState tcState commandState slot) = do
+  ((), tcState') <-
+    runTCM initEnv tcState $ setInteractionOutputCallback callback
+  pure $ InteractionState tcState' commandState slot
+ where
+  callback :: InteractionOutputCallback
+  callback (Resp_RunningInfo _ _) = liftIO $ do
+    shouldTouch <- readIORef armed
+    when shouldTouch $
+      getModificationTime path >>= setModificationTime path . addUTCTime 1
+  callback _ = pure ()
