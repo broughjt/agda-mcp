@@ -58,8 +58,8 @@ introInternal slot (Request patternLambda goalId) =
       liftCommandMT (withInteractionId goalId) $ case candidates of
         [] -> pure $ Left IntroNotFound
         [s] -> do
-          action <- giveGen' slot WithoutForce Intro goalId $ Text.pack s
-          first fromGiveError <$> traverse (expectComputed goalId) action
+          giveAction <- giveGen' slot WithoutForce Intro goalId $ Text.pack s
+          first fromGiveError <$> traverse (expectComputed goalId) giveAction
         _ -> pure $ Left $ IntroAmbiguous $ map Text.pack candidates
   )
     `catchTCErr` (fmap Left . lift . classifyInteractionError IntroUnknownId IntroFailed)

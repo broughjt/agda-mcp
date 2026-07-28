@@ -637,7 +637,7 @@ giveTests warm =
             load Load.Request {Load.requestPath = path, Load.requestArguments = []}
               >>= liftIO . expectLoadOk "load"
 
-          action <-
+          giveAction <-
             give
               Give.Request
                 { Give.requestForce = WithoutForce
@@ -645,7 +645,7 @@ giveTests warm =
                 , Give.requestExpression = "suc zero"
                 }
               >>= liftIO . expectGiveOk "an application in argument position"
-          liftIO $ action @?= GiveVerbatim True
+          liftIO $ giveAction @?= GiveVerbatim True
     ]
 
 refineTests :: IO TCState -> TestTree
@@ -794,7 +794,7 @@ elaborateGiveTests warm =
 
           -- Each level gets its own hole, since elaborating solves the one it
           -- is given.
-          actions <-
+          giveActions <-
             traverse
               ( \(goalId, normalization) ->
                   elaborateGive
@@ -807,7 +807,7 @@ elaborateGiveTests warm =
               )
               (zip [0 ..] [AsIs, Instantiated, HeadNormal, Simplified, Normalised])
           liftIO $
-            actions
+            giveActions
               @?= [ "twice 2"
                   , "twice 2"
                   , "4"

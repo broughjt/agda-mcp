@@ -102,8 +102,8 @@ giveGen' slot force giveRefine goalId expression =
 -- our model of `give_gen` is wrong, so die loudly.
 expectComputed :: InteractionId -> GiveAction -> CommandM Text
 expectComputed _ (GiveComputed text) = pure text
-expectComputed goalId action@(GiveVerbatim _) =
-  liftIO $ throwIO $ NotComputed goalId action
+expectComputed goalId giveAction@(GiveVerbatim _) =
+  liftIO $ throwIO $ NotComputed goalId giveAction
 
 -- Bug: `give_gen` succeeded but produced no give action for the requested
 -- point.
