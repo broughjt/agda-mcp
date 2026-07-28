@@ -12,18 +12,24 @@ import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 import Agda.Interaction.Base (Rewrite (..))
 
+import System.FilePath (takeDirectory, (</>))
+
 import AgdaMCP.Interaction.Load (Request (..), Response (..), load)
 import AgdaMCP.Interaction.Model (
+  Error (..),
   Goal (..),
   GoalShape (..),
   HiddenMetavariable (..),
   NonFatalError (..),
+  Warning (..),
  )
 import Data.Functor (void)
 import Test.Harness (
   currentFile,
   expectLoadError,
   expectLoaded,
+  spanCoordinates,
+  spanText,
   withFixtureSession,
  )
 
@@ -135,8 +141,84 @@ tests =
             assertBool
               "AsIs should be less than or equal to Simplified"
               (AsIs <= Simplified)
+        , testCase "warnings are reported in file order with their locations" $ do
+            (path, response) <-
+              withFixtureSession "test/fixtures/Warnings.agda" $ \path ->
+                (,) path <$> load Request {requestPath = path, requestArguments = []}
+            (goals, hiddenMetavariables, warnings, nonFatalErrors) <-
+              expectLoaded "load" response
+            goals @?= []
+            hiddenMetavariables @?= []
+            nonFatalErrors @?= []
+            map warningLocation warnings
+              @?= [ Just (path, ((8, 1), (8, 12)))
+                  , Just (path, ((13, 1), (13, 13)))
+                  ]
+            map (withoutPath path . firstLine . warningMessage) warnings
+              @?= [ "FIXTURE:8.1-12: warning: -W[no]UnreachableClauses"
+                  , "FIXTURE:13.1-13: warning: -W[no]UnreachableClauses"
+                  ]
+        , testCase "a type error reports its message and span" $ do
+            (path, source, response) <-
+              withFixtureSession "test/fixtures/TypeError.agda" $ \path -> do
+                source <- liftIO $ Text.IO.readFile path
+                (,,) path source
+                  <$> load Request {requestPath = path, requestArguments = []}
+            e <- expectLoadError "load" response
+            assertBool
+              ("expected an UnequalTerms error, got " <> Text.unpack (errorMessage e))
+              ("UnequalTerms" `Text.isInfixOf` errorMessage e)
+            case errorPathSpan e of
+              Just (errorPath, s) -> do
+                errorPath @?= path
+                spanCoordinates s @?= ((6, 9), (6, 10))
+                spanText source s @?= "ℕ"
+              Nothing ->
+                assertFailure "expected the error to carry a span"
+        , testCase "a failed load carries the warnings raised before the error" $ do
+            (path, response) <-
+              withFixtureSession "test/fixtures/WarningThenError.agda" $ \path ->
+                (,) path <$> load Request {requestPath = path, requestArguments = []}
+            e <- expectLoadError "load" response
+            assertBool
+              ("expected an UnequalTerms error, got " <> Text.unpack (errorMessage e))
+              ("UnequalTerms" `Text.isInfixOf` errorMessage e)
+            assertBool
+              "the error message should not also contain the warning"
+              (not $ "UnreachableClauses" `Text.isInfixOf` errorMessage e)
+            map warningLocation (errorWarnings e)
+              @?= [Just (path, ((8, 1), (8, 12)))]
+            map (withoutPath path . firstLine . warningMessage) (errorWarnings e)
+              @?= ["FIXTURE:8.1-12: warning: -W[no]UnreachableClauses"]
+        , testCase "loading a missing file reports an error" $ do
+            response <-
+              withFixtureSession "test/fixtures/HoleNatural.agda" $ \path ->
+                load
+                  Request
+                    { requestPath = takeDirectory path </> "Missing.agda"
+                    , requestArguments = []
+                    }
+            e <- expectLoadError "load" response
+            assertBool
+              ("expected a read failure, got " <> Text.unpack (errorMessage e))
+              ("Cannot read file" `Text.isInfixOf` errorMessage e)
         ]
     ]
+
+warningMessage :: Warning -> Text
+warningMessage (Warning (_, message)) = message
+
+warningLocation :: Warning -> Maybe (FilePath, ((Int, Int), (Int, Int)))
+warningLocation (Warning (pathSpan, _)) =
+  (\(path, s) -> (path, spanCoordinates s)) <$> pathSpan
+
+firstLine :: Text -> Text
+firstLine = Text.takeWhile (/= '\n')
+
+-- Fixtures are staged in a fresh temporary directory, so the path Agda embeds
+-- in rendered messages differs on every run.
+withoutPath :: FilePath -> Text -> Text
+withoutPath path = Text.replace (Text.pack path) "FIXTURE"
 
 brokenHoleNatural :: Text
 brokenHoleNatural =

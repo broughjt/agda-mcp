@@ -6,6 +6,8 @@ module Test.Harness (
   currentFile,
   expectLoaded,
   expectLoadError,
+  spanCoordinates,
+  spanText,
 ) where
 
 import Agda.Interaction.Base (
@@ -35,9 +37,13 @@ import AgdaMCP.Interaction.Model (
   Goal,
   HiddenMetavariable,
   NonFatalError,
+  Position (..),
+  Span (..),
   Warning,
  )
 import Control.Exception (throwIO)
+import Data.Text (Text)
+import Data.Text qualified as Text
 
 withFixtureSession :: FilePath -> (FilePath -> InteractionM a) -> IO a
 withFixtureSession source k = do
@@ -93,3 +99,16 @@ expectLoadError :: String -> Response -> IO Error
 expectLoadError _ (ResponseError e) = pure e
 expectLoadError label other =
   assertFailure $ label <> ": expected ResponseError, got " <> show other
+
+spanCoordinates :: Span -> ((Int, Int), (Int, Int))
+spanCoordinates s =
+  (coordinates (spanStart s), coordinates (spanEnd s))
+ where
+  coordinates p = (positionLine p, positionColumn p)
+
+spanText :: Text -> Span -> Text
+spanText source s =
+  Text.take (end - start) (Text.drop start source)
+ where
+  start = positionOffset $ spanStart s
+  end = positionOffset $ spanEnd s

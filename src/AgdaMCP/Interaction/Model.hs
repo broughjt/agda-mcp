@@ -249,9 +249,9 @@ data IntroError
 -- Generic errors
 
 data Error = Error
-  { agdaErrorMessage :: Text
-  , agdaErrorPathSpan :: Maybe (FilePath, Span)
-  , agdaErrorWarnings :: [Warning]
+  { errorMessage :: Text
+  , errorPathSpan :: Maybe (FilePath, Span)
+  , errorWarnings :: [Warning]
   }
   deriving (Eq, Show)
 
