@@ -5,23 +5,13 @@ module Test.Harness (
   withFixtureSession,
   withFixtureDirectory,
   withStagedFiles,
-  currentFile,
-  expectLoadOk,
-  expectLoadError,
-  spanCoordinates,
-  spanText,
 ) where
 
-import Agda.Interaction.Base (
-  CommandState (..),
-  CurrentFile (..),
- )
 import Agda.Interaction.Options (
   CommandLineOptions (..),
   defaultOptions,
  )
-import Agda.Utils.FileName (filePath)
-import Control.Monad.State (gets, runStateT)
+import Control.Monad.State (runStateT)
 import System.Directory (
   copyFile,
   listDirectory,
@@ -29,26 +19,12 @@ import System.Directory (
 import System.Environment (lookupEnv)
 import System.FilePath (takeExtension, takeFileName, (</>))
 import System.IO.Temp (withSystemTempDirectory)
-import Test.Tasty.HUnit (assertFailure)
 
 import AgdaMCP.Interaction.Internal (
   InteractionM,
-  InteractionState (..),
   newInteractionState,
  )
-import AgdaMCP.Interaction.Load (Response (..))
-import AgdaMCP.Interaction.Model (
-  Error,
-  Goal,
-  HiddenMetavariable,
-  NonFatalError,
-  Position (..),
-  Span (..),
-  Warning,
- )
 import Control.Exception (throwIO)
-import Data.Text (Text)
-import Data.Text qualified as Text
 
 withFixtureSession :: FilePath -> (FilePath -> InteractionM a) -> IO a
 withFixtureSession source k =
@@ -97,35 +73,3 @@ standardLibraryPath =
 runSession :: CommandLineOptions -> InteractionM a -> IO a
 runSession options action =
   fst <$> (newInteractionState options >>= runStateT action)
-
-currentFile :: InteractionM (Maybe FilePath)
-currentFile =
-  gets $ \(InteractionState _ commandState _) ->
-    filePath . currentFilePath <$> theCurrentFile commandState
-
-expectLoadOk ::
-  String ->
-  Response ->
-  IO ([Goal], [HiddenMetavariable], [Warning], [NonFatalError])
-expectLoadOk _ (ResponseOk goals hiddenMetavariables warnings nonFatalErrors) =
-  pure (goals, hiddenMetavariables, warnings, nonFatalErrors)
-expectLoadOk label other =
-  assertFailure $ label <> ": expected ResponseOk, got " <> show other
-
-expectLoadError :: String -> Response -> IO Error
-expectLoadError _ (ResponseError e) = pure e
-expectLoadError label other =
-  assertFailure $ label <> ": expected ResponseError, got " <> show other
-
-spanCoordinates :: Span -> ((Int, Int), (Int, Int))
-spanCoordinates s =
-  (coordinates (spanStart s), coordinates (spanEnd s))
- where
-  coordinates p = (positionLine p, positionColumn p)
-
-spanText :: Text -> Span -> Text
-spanText source s =
-  Text.take (end - start) (Text.drop start source)
- where
-  start = positionOffset $ spanStart s
-  end = positionOffset $ spanEnd s

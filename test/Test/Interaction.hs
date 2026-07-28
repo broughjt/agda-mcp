@@ -2,12 +2,18 @@
 
 module Test.Interaction (tests) where
 
-import Agda.Interaction.Base (Rewrite (..))
+import Agda.Interaction.Base (
+  CurrentFile (..),
+  Rewrite (..),
+  UseForce (..),
+  theCurrentFile,
+ )
 import Agda.Interaction.Response (InteractionOutputCallback, Response_boot (..))
+import Agda.Syntax.Common (InteractionId)
 import Agda.TypeChecking.Monad (initEnv, runTCM, setInteractionOutputCallback)
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad.State (runStateT)
+import Control.Monad.State (gets, runStateT)
 import Data.Functor (void)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Maybe (isJust)
@@ -26,9 +32,14 @@ import Test.Tasty.HUnit (
   (@?=),
  )
 
+import Agda.Utils.FileName (filePath)
 import AgdaMCP.Interaction (InteractionM, newInteractionState)
 import AgdaMCP.Interaction.Context (context)
 import AgdaMCP.Interaction.Context qualified as Context
+import AgdaMCP.Interaction.ElaborateGive (elaborateGive)
+import AgdaMCP.Interaction.ElaborateGive qualified as ElaborateGive
+import AgdaMCP.Interaction.Give (give)
+import AgdaMCP.Interaction.Give qualified as Give
 import AgdaMCP.Interaction.Goal (goal)
 import AgdaMCP.Interaction.Goal qualified as Goal
 import AgdaMCP.Interaction.Internal (InteractionState (..))
@@ -40,28 +51,27 @@ import AgdaMCP.Interaction.Model (
   ContextEntry (..),
   Error (..),
   GiveAction (..),
+  GiveError (..),
   Goal (..),
   GoalReport (..),
   GoalShape (..),
   HiddenMetavariable (..),
+  IntroError (..),
   NonFatalError (..),
+  Position (..),
+  Span (..),
   Warning (..),
  )
 import AgdaMCP.Interaction.Refine (refine)
 import AgdaMCP.Interaction.Refine qualified as Refine
 import Test.Harness (
-  currentFile,
-  expectLoadError,
-  expectLoadOk,
-  spanCoordinates,
-  spanText,
   withFixtureDirectory,
   withFixtureSession,
   withStagedFiles,
  )
 
 tests :: TestTree
-tests = testGroup "interaction" [loadTests, scenarioTests]
+tests = testGroup "interaction" [loadTests, giveFamilyTests, scenarioTests]
 
 loadTests :: TestTree
 loadTests =
@@ -306,6 +316,137 @@ loadTests =
           ("Cannot read file" `Text.isInfixOf` errorMessage e)
     ]
 
+giveFamilyTests :: TestTree
+giveFamilyTests =
+  testGroup
+    "Give family"
+    [ testCase "bogus goal id case for give family" $
+        withFixtureSession "test/fixtures/GiveFamily.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          given <-
+            give
+              Give.Request
+                { Give.requestForce = WithoutForce
+                , Give.requestGoalId = bogusGoalId
+                , Give.requestExpression = "zero"
+                }
+              >>= liftIO . expectGiveError "give"
+          liftIO $ given @?= GiveUnknownId bogusGoalId
+
+          refined <-
+            refine
+              Refine.Request
+                { Refine.requestGoalId = bogusGoalId
+                , Refine.requestExpression = "suc"
+                }
+              >>= liftIO . expectGiveError "refine"
+          liftIO $ refined @?= GiveUnknownId bogusGoalId
+
+          introduced <-
+            intro
+              Intro.Request
+                { Intro.requestPatternLambda = False
+                , Intro.requestGoalId = bogusGoalId
+                }
+              >>= liftIO . expectIntroError "intro"
+          liftIO $ introduced @?= IntroUnknownId bogusGoalId
+
+          elaborated <-
+            elaborateGive
+              ElaborateGive.Request
+                { ElaborateGive.requestNormalization = Normalised
+                , ElaborateGive.requestGoalId = bogusGoalId
+                , ElaborateGive.requestExpression = "zero"
+                }
+              >>= liftIO . expectGiveError "elaborateGive"
+          liftIO $ elaborated @?= GiveUnknownId bogusGoalId
+    , testCase "success case for give family" $
+        withFixtureSession "test/fixtures/GiveFamily.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          given <-
+            give
+              Give.Request
+                { Give.requestForce = WithoutForce
+                , Give.requestGoalId = 0
+                , Give.requestExpression = "zero"
+                }
+              >>= liftIO . expectGiveOk "give keeps the user's own text"
+          liftIO $ given @?= GiveVerbatim False
+
+          refined <-
+            refine
+              Refine.Request
+                { Refine.requestGoalId = 1
+                , Refine.requestExpression = "suc"
+                }
+              >>= liftIO . expectGiveOk "refine leaves a hole"
+          liftIO $ refined @?= GiveComputed "suc ?"
+
+          introduced <-
+            intro
+              Intro.Request
+                { Intro.requestPatternLambda = False
+                , Intro.requestGoalId = 2
+                }
+              >>= liftIO . expectIntroOk "intro picks the sole constructor"
+          liftIO $ introduced @?= GiveComputed "tt"
+
+          elaborated <-
+            elaborateGive
+              ElaborateGive.Request
+                { ElaborateGive.requestNormalization = Normalised
+                , ElaborateGive.requestGoalId = 3
+                , ElaborateGive.requestExpression = "1 + 1"
+                }
+              >>= liftIO . expectGiveOk "elaborateGive normalizes"
+          liftIO $ elaborated @?= GiveComputed "2"
+    , testCase "a failed give-family command leaves its goal usable" $
+        withFixtureSession "test/fixtures/GiveFamily.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          failed <-
+            give
+              Give.Request
+                { Give.requestForce = WithoutForce
+                , Give.requestGoalId = 0
+                , Give.requestExpression = "suc suc"
+                }
+              >>= liftIO . expectGiveError "ill-typed give"
+          case failed of
+            GiveFailed e ->
+              let message = errorMessage e
+               in liftIO $
+                    assertBool
+                      ( "an ill-typed expression is a classified failure: expected "
+                          <> show ("UnequalTerms" :: Text)
+                          <> " within "
+                          <> show message
+                      )
+                      ("UnequalTerms" `Text.isInfixOf` message)
+            other ->
+              liftIO $
+                assertFailure $
+                  "ill-typed give: expected GiveFailed, got " <> show other
+
+          retried <-
+            give
+              Give.Request
+                { Give.requestForce = WithoutForce
+                , Give.requestGoalId = 0
+                , Give.requestExpression = "zero"
+                }
+              >>= liftIO . expectGiveOk "the same goal accepts a later give"
+          liftIO $ retried @?= GiveVerbatim False
+    ]
+
 scenarioTests :: TestTree
 scenarioTests =
   testGroup
@@ -317,16 +458,16 @@ scenarioTests =
       testCase "build a proof of addition associativity" $
         withFixtureSession "test/fixtures/ProofScenario.agda" $ \path -> do
           let request = Load.Request {Load.requestPath = path, Load.requestArguments = []}
-              step label expected actual = liftIO $ assertEqual label expected actual
 
           goals <-
             load request >>= liftIO . fmap goalsOf . expectLoadOk "load"
-          step
-            "the two clauses each leave a hole"
-            [ GoalOfType "zero + n + p ≡ zero + (n + p)"
-            , GoalOfType "suc m + n + p ≡ suc m + (n + p)"
-            ]
-            (map goalShape goals)
+          liftIO $
+            assertEqual
+              "the two clauses each leave a hole"
+              [ GoalOfType "zero + n + p ≡ zero + (n + p)"
+              , GoalOfType "suc m + n + p ≡ suc m + (n + p)"
+              ]
+              (map goalShape goals)
 
           stepContext <-
             context
@@ -334,13 +475,14 @@ scenarioTests =
                 { Context.requestNormalization = AsIs
                 , Context.requestGoalId = 1
                 }
-          step
-            "the inductive step binds the three arguments"
-            (Right (["m", "n", "p"], ["ℕ", "ℕ", "ℕ"]))
-            ( fmap
-                (\entries -> (map contextEntryOriginalName entries, map contextEntryType entries))
-                stepContext
-            )
+          liftIO $
+            assertEqual
+              "the inductive step binds the three arguments"
+              (Right (["m", "n", "p"], ["ℕ", "ℕ", "ℕ"]))
+              ( fmap
+                  (\entries -> (map contextEntryOriginalName entries, map contextEntryType entries))
+                  stepContext
+              )
 
           baseReport <-
             goal
@@ -348,23 +490,25 @@ scenarioTests =
                 { Goal.requestNormalization = AsIs
                 , Goal.requestGoalId = 0
                 }
-          step
-            "the base case sees only the arguments its pattern binds"
-            (Right (GoalOfType "zero + n + p ≡ zero + (n + p)", ["n", "p"]))
-            ( fmap
-                (\r -> (goalReportShape r, map contextEntryOriginalName (goalReportContext r)))
-                baseReport
-            )
+          liftIO $
+            assertEqual
+              "the base case sees only the arguments its pattern binds"
+              (Right (GoalOfType "zero + n + p ≡ zero + (n + p)", ["n", "p"]))
+              ( fmap
+                  (\r -> (goalReportShape r, map contextEntryOriginalName (goalReportContext r)))
+                  baseReport
+              )
 
-          -- The identity type has one constructor, so `intro` is
-          -- unambiguous here.
+          -- The identity type has one constructor, so `intro` is unambiguous
+          -- here.
           introduced <-
             intro
               Intro.Request
                 { Intro.requestPatternLambda = False
                 , Intro.requestGoalId = 0
                 }
-          step "intro closes the base case" (Right (GiveComputed "refl")) introduced
+              >>= liftIO . expectIntroOk "intro closes the base case"
+          liftIO $ introduced @?= GiveComputed "refl"
 
           refined <-
             refine
@@ -372,10 +516,8 @@ scenarioTests =
                 { Refine.requestGoalId = 1
                 , Refine.requestExpression = "cong suc"
                 }
-          step
-            "refine leaves a hole for the recursive call"
-            (Right (GiveComputed "cong suc ?"))
-            refined
+              >>= liftIO . expectGiveOk "refine leaves a hole for the recursive call"
+          liftIO $ refined @?= GiveComputed "cong suc ?"
 
           -- Refine's new hole exists in the session immediately, without
           -- writing the splice to disk and reloading.
@@ -385,20 +527,74 @@ scenarioTests =
                 { Goal.requestNormalization = AsIs
                 , Goal.requestGoalId = 2
                 }
-          step
-            "the hole refine introduced is the recursive call"
-            (Right (GoalOfType "m + n + p ≡ m + (n + p)"))
-            (fmap goalReportShape recursiveCall)
+          liftIO $
+            assertEqual
+              "the hole refine introduced is the recursive call"
+              (Right (GoalOfType "m + n + p ≡ m + (n + p)"))
+              (fmap goalReportShape recursiveCall)
 
-          -- The file on disk never changed, so a reload throws all of that
-          -- away and returns the original two goals.
+          -- The file on disk never changed, so a reload throws all of that away
+          -- and returns the original two goals.
           reloaded <-
             load request >>= liftIO . fmap goalsOf . expectLoadOk "reload"
-          step
-            "reloading discards the session's progress"
-            (map goalShape goals)
-            (map goalShape reloaded)
+          liftIO $
+            assertEqual
+              "reloading discards the session's progress"
+              (map goalShape goals)
+              (map goalShape reloaded)
     ]
+
+currentFile :: InteractionM (Maybe FilePath)
+currentFile =
+  gets $ \(InteractionState _ commandState _) ->
+    filePath . currentFilePath <$> theCurrentFile commandState
+
+expectLoadOk ::
+  String ->
+  Load.Response ->
+  IO ([Goal], [HiddenMetavariable], [Warning], [NonFatalError])
+expectLoadOk _ (Load.ResponseOk goals hiddenMetavariables warnings nonFatalErrors) =
+  pure (goals, hiddenMetavariables, warnings, nonFatalErrors)
+expectLoadOk label other =
+  assertFailure $ label <> ": expected ResponseOk, got " <> show other
+
+expectLoadError :: String -> Load.Response -> IO Error
+expectLoadError _ (Load.ResponseError e) = pure e
+expectLoadError label other =
+  assertFailure $ label <> ": expected ResponseError, got " <> show other
+
+expectGiveOk :: String -> Give.Response -> IO GiveAction
+expectGiveOk _ (Right action) = pure action
+expectGiveOk label other =
+  assertFailure $ label <> ": expected a give action, got " <> show other
+
+expectGiveError :: String -> Give.Response -> IO GiveError
+expectGiveError _ (Left e) = pure e
+expectGiveError label other =
+  assertFailure $ label <> ": expected a give error, got " <> show other
+
+expectIntroOk :: String -> Intro.Response -> IO GiveAction
+expectIntroOk _ (Right action) = pure action
+expectIntroOk label other =
+  assertFailure $ label <> ": expected an intro action, got " <> show other
+
+expectIntroError :: String -> Intro.Response -> IO IntroError
+expectIntroError _ (Left e) = pure e
+expectIntroError label other =
+  assertFailure $ label <> ": expected an intro error, got " <> show other
+
+spanCoordinates :: Span -> ((Int, Int), (Int, Int))
+spanCoordinates s =
+  (coordinates (spanStart s), coordinates (spanEnd s))
+ where
+  coordinates p = (positionLine p, positionColumn p)
+
+spanText :: Text -> Span -> Text
+spanText source s =
+  Text.take (end - start) (Text.drop start source)
+ where
+  start = positionOffset $ spanStart s
+  end = positionOffset $ spanEnd s
 
 goalsOf :: ([Goal], [HiddenMetavariable], [Warning], [NonFatalError]) -> [Goal]
 goalsOf (goals, _, _, _) = goals
@@ -457,3 +653,6 @@ touchWhileChecking armed path (InteractionState tcState commandState slot) = do
     when shouldTouch $
       getModificationTime path >>= setModificationTime path . addUTCTime 1
   callback _ = pure ()
+
+bogusGoalId :: InteractionId
+bogusGoalId = 99
