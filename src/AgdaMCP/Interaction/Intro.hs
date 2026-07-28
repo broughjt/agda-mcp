@@ -13,9 +13,10 @@ import Agda.Syntax.Common (InteractionId)
 import Agda.TypeChecking.Monad (withInteractionId)
 import Control.Monad.State (get, lift)
 import Data.Bifunctor (first)
+import Data.Text (Text)
 import Data.Text qualified as Text
 
-import AgdaMCP.Interaction.Give (giveGen')
+import AgdaMCP.Interaction.Give (expectComputed, giveGen')
 import AgdaMCP.Interaction.Internal (
   GiveSlot,
   InteractionM,
@@ -24,7 +25,6 @@ import AgdaMCP.Interaction.Internal (
   runCommandM,
  )
 import AgdaMCP.Interaction.Model (
-  GiveAction,
   GiveError (..),
   IntroError (..),
   classifyInteractionError,
@@ -38,9 +38,10 @@ data Request = Request
   }
 
 -- `Left` collects every reason no action was produced--a bad ID, a `TCErr`, or
--- `introTactic` finding no/several candidates. `Right` is the introduced
--- give action.
-type Response = Either IntroError GiveAction
+-- `introTactic` finding no/several candidates. `Right` is the introduction form
+-- Agda chose: intro is handed no text of its own, so it can only ever splice
+-- Agda's (see `expectComputed`).
+type Response = Either IntroError Text
 
 intro :: Request -> InteractionM Response
 intro request = do
@@ -56,8 +57,9 @@ introInternal slot (Request patternLambda goalId) =
       candidates <- lift $ introTactic patternLambda goalId
       liftCommandMT (withInteractionId goalId) $ case candidates of
         [] -> pure $ Left IntroNotFound
-        [s] ->
-          first fromGiveError <$> giveGen' slot WithoutForce Intro goalId (Text.pack s)
+        [s] -> do
+          action <- giveGen' slot WithoutForce Intro goalId $ Text.pack s
+          first fromGiveError <$> traverse (expectComputed goalId) action
         _ -> pure $ Left $ IntroAmbiguous $ map Text.pack candidates
   )
     `catchTCErr` (fmap Left . lift . classifyInteractionError IntroUnknownId IntroFailed)

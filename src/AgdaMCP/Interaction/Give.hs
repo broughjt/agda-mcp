@@ -5,7 +5,9 @@ module AgdaMCP.Interaction.Give (
   giveInternal,
   -- Shared with the rest of the give family of commands.
   giveGen',
+  expectComputed,
   NoGiveAction (..),
+  NotComputed (..),
 ) where
 
 import Agda.Interaction.Base (UseForce (..))
@@ -28,7 +30,7 @@ import AgdaMCP.Interaction.Internal (
   runCommandM,
  )
 import AgdaMCP.Interaction.Model (
-  GiveAction,
+  GiveAction (..),
   GiveError (..),
   classifyInteractionError,
   toGiveAction,
@@ -92,9 +94,27 @@ giveGen' slot force giveRefine goalId expression =
   )
     `catchTCErr` (fmap Left . lift . classifyInteractionError GiveUnknownId GiveFailed)
 
+-- `give_gen` only keeps the user's own text for `Give` and `Refine`
+-- (`literally`, InteractionTop.hs:1011), so `Intro` and `ElaborateGive` always
+-- report a `Give_String`. Their callers have nothing to do with a
+-- `GiveVerbatim`--intro is handed no text to keep, and elaborating exists
+-- precisely to replace what the caller wrote. If Agda ever produces it anyway
+-- our model of `give_gen` is wrong, so die loudly.
+expectComputed :: InteractionId -> GiveAction -> CommandM Text
+expectComputed _ (GiveComputed text) = pure text
+expectComputed goalId action@(GiveVerbatim _) =
+  liftIO $ throwIO $ NotComputed goalId action
+
 -- Bug: `give_gen` succeeded but produced no give action for the requested
 -- point.
 newtype NoGiveAction = NoGiveAction InteractionId
   deriving (Show)
 
 instance Exception NoGiveAction
+
+-- Bug: a command that can only splice Agda's own text reported the caller's
+-- text as literal.
+data NotComputed = NotComputed InteractionId GiveAction
+  deriving (Show)
+
+instance Exception NotComputed

@@ -85,7 +85,18 @@ tests =
   withResource warmInteractionState (const $ pure ()) $ \warm ->
     testGroup
       "interaction"
-      (map ($ warm) [loadTests, metasTests, giveFamilyTests, giveTests, scenarioTests])
+      ( map
+          ($ warm)
+          [ loadTests
+          , metasTests
+          , giveFamilyTests
+          , giveTests
+          , refineTests
+          , introTests
+          , elaborateGiveTests
+          , scenarioTests
+          ]
+      )
 
 loadTests :: IO TCState -> TestTree
 loadTests warm =
@@ -488,7 +499,7 @@ giveFamilyTests warm =
                 , Intro.requestGoalId = 2
                 }
               >>= liftIO . expectIntroOk "intro picks the sole constructor"
-          liftIO $ introduced @?= GiveComputed "tt"
+          liftIO $ introduced @?= "tt"
 
           elaborated <-
             elaborateGive
@@ -497,8 +508,8 @@ giveFamilyTests warm =
                 , ElaborateGive.requestGoalId = 3
                 , ElaborateGive.requestExpression = "1 + 1"
                 }
-              >>= liftIO . expectGiveOk "elaborateGive normalizes"
-          liftIO $ elaborated @?= GiveComputed "2"
+              >>= liftIO . expectElaborated "elaborateGive normalizes"
+          liftIO $ elaborated @?= "2"
     , testCase "a failed give family command leaves its goal usable" $
         withFixtureSession warm "test/fixtures/GiveFamily.agda" $ \path -> do
           void $
@@ -637,6 +648,176 @@ giveTests warm =
           liftIO $ action @?= GiveVerbatim True
     ]
 
+refineTests :: IO TCState -> TestTree
+refineTests warm =
+  testGroup
+    "Refine"
+    [ testCase "refine reports what it had to add to the expression" $
+        withFixtureSession warm "test/fixtures/RefineExpressions.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          -- An expression that already fits needs no metavariables, so refine
+          -- keeps the user's text just as give does. `give_gen` computes
+          -- `literally` for `Refine` as well as `Give`.
+          solving <-
+            refine
+              Refine.Request
+                { Refine.requestGoalId = 0
+                , Refine.requestExpression = "zero"
+                }
+              >>= liftIO . expectGiveOk "an expression that needs no arguments"
+          liftIO $ solving @?= GiveVerbatim False
+
+          twoHoles <-
+            refine
+              Refine.Request
+                { Refine.requestGoalId = 1
+                , Refine.requestExpression = "_+_"
+                }
+              >>= liftIO . expectGiveOk "an expression missing two arguments"
+          liftIO $ twoHoles @?= GiveComputed "? + ?"
+    , testCase "refine reports when no number of arguments would fit" $
+        withFixtureSession warm "test/fixtures/RefineExpressions.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          -- `refine` appends up to ten metavariables before giving up
+          -- (BasicOps.hs:267), and `tt` fits at no arity.
+          unrefinable <-
+            refine
+              Refine.Request
+                { Refine.requestGoalId = 2
+                , Refine.requestExpression = "tt"
+                }
+              >>= liftIO . expectGiveFailure "an expression of the wrong type"
+          liftIO $
+            assertBool
+              ( "unrefinable: expected \"CannotRefine\" within "
+                  <> show (errorMessage unrefinable)
+              )
+              ("CannotRefine" `Text.isInfixOf` errorMessage unrefinable)
+    ]
+
+introTests :: IO TCState -> TestTree
+introTests warm =
+  testGroup
+    "Intro"
+    [ testCase "intro reports when the goal has no introduction form" $
+        withFixtureSession warm "test/fixtures/IntroCandidates.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          introduced <-
+            intro
+              Intro.Request
+                { Intro.requestPatternLambda = False
+                , Intro.requestGoalId = 1
+                }
+              >>= liftIO . expectIntroError "a postulated type"
+          liftIO $ introduced @?= IntroNotFound
+    , testCase "intro reports every candidate when the choice is ambiguous" $
+        withFixtureSession warm "test/fixtures/IntroCandidates.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          introduced <-
+            intro
+              Intro.Request
+                { Intro.requestPatternLambda = False
+                , Intro.requestGoalId = 2
+                }
+              >>= liftIO . expectIntroError "a type with two constructors"
+          liftIO $ introduced @?= IntroAmbiguous ["false", "true"]
+    , testCase "intro writes a function goal as a lambda" $
+        withFixtureSession warm "test/fixtures/IntroCandidates.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          lambda <-
+            intro
+              Intro.Request
+                { Intro.requestPatternLambda = False
+                , Intro.requestGoalId = 3
+                }
+              >>= liftIO . expectIntroOk "a function goal"
+          liftIO $ lambda @?= "λ x → ?"
+
+          patternLambda <-
+            intro
+              Intro.Request
+                { Intro.requestPatternLambda = True
+                , Intro.requestGoalId = 4
+                }
+              >>= liftIO . expectIntroOk "a function goal, as a pattern lambda"
+          liftIO $ patternLambda @?= "λ { x → ? }"
+    , -- The candidate `introTactic` proposes is source text that still has to
+      -- scope check where the hole is. The standard library's `⊥` is a record
+      -- whose constructor `Data.Irrelevant.[_]` this fixture never imports, so
+      -- intro proposes a name the give then rejects--reaching `IntroFailed`,
+      -- which is distinct from finding no candidate at all.
+      testCase "intro can propose a constructor that is not in scope" $
+        withFixtureSession warm "test/fixtures/IntroCandidates.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          e <-
+            intro
+              Intro.Request
+                { Intro.requestPatternLambda = False
+                , Intro.requestGoalId = 0
+                }
+              >>= liftIO . expectIntroFailure "an unimported constructor"
+          liftIO $
+            assertBool
+              ( "an unimported constructor: expected \"NotInScope\" within "
+                  <> show (errorMessage e)
+              )
+              ("NotInScope" `Text.isInfixOf` errorMessage e)
+    ]
+
+elaborateGiveTests :: IO TCState -> TestTree
+elaborateGiveTests warm =
+  testGroup
+    "ElaborateGive"
+    [ testCase "the elaborated term is normalized at the requested level" $
+        withFixtureSession warm "test/fixtures/ElaborateNormalization.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          -- Each level gets its own hole, since elaborating solves the one it
+          -- is given.
+          actions <-
+            traverse
+              ( \(goalId, normalization) ->
+                  elaborateGive
+                    ElaborateGive.Request
+                      { ElaborateGive.requestNormalization = normalization
+                      , ElaborateGive.requestGoalId = goalId
+                      , ElaborateGive.requestExpression = "twice 2"
+                      }
+                    >>= liftIO . expectElaborated (show normalization)
+              )
+              (zip [0 ..] [AsIs, Instantiated, HeadNormal, Simplified, Normalised])
+          liftIO $
+            actions
+              @?= [ "twice 2"
+                  , "twice 2"
+                  , "4"
+                  , -- `simplify` collapses onto `AsIs` here, exactly as it does
+                    -- for the goal types the metas report renders.
+                    "twice 2"
+                  , "4"
+                  ]
+    ]
+
 scenarioTests :: IO TCState -> TestTree
 scenarioTests warm =
   testGroup
@@ -698,7 +879,7 @@ scenarioTests warm =
                 , Intro.requestGoalId = 0
                 }
               >>= liftIO . expectIntroOk "intro closes the base case"
-          liftIO $ introduced @?= GiveComputed "refl"
+          liftIO $ introduced @?= "refl"
 
           refined <-
             refine
@@ -762,7 +943,9 @@ expectGiveOk _ (Right action) = pure action
 expectGiveOk label other =
   assertFailure $ label <> ": expected a give action, got " <> show other
 
-expectGiveError :: String -> Give.Response -> IO GiveError
+-- Give and refine answer with a `GiveAction`, elaborate-give with the
+-- elaborated text, but all three fail the same way.
+expectGiveError :: (Show a) => String -> Either GiveError a -> IO GiveError
 expectGiveError _ (Left e) = pure e
 expectGiveError label other =
   assertFailure $ label <> ": expected a give error, got " <> show other
@@ -775,15 +958,29 @@ expectGiveFailure label response = do
     other ->
       assertFailure $ label <> ": expected GiveFailed, got " <> show other
 
-expectIntroOk :: String -> Intro.Response -> IO GiveAction
-expectIntroOk _ (Right action) = pure action
+expectElaborated :: String -> ElaborateGive.Response -> IO Text
+expectElaborated _ (Right elaborated) = pure elaborated
+expectElaborated label other =
+  assertFailure $
+    label <> ": expected an elaborated expression, got " <> show other
+
+expectIntroOk :: String -> Intro.Response -> IO Text
+expectIntroOk _ (Right introduced) = pure introduced
 expectIntroOk label other =
-  assertFailure $ label <> ": expected an intro action, got " <> show other
+  assertFailure $ label <> ": expected an introduction form, got " <> show other
 
 expectIntroError :: String -> Intro.Response -> IO IntroError
 expectIntroError _ (Left e) = pure e
 expectIntroError label other =
   assertFailure $ label <> ": expected an intro error, got " <> show other
+
+expectIntroFailure :: String -> Intro.Response -> IO Error
+expectIntroFailure label response = do
+  e <- expectIntroError label response
+  case e of
+    IntroFailed e' -> pure e'
+    other ->
+      assertFailure $ label <> ": expected IntroFailed, got " <> show other
 
 spanCoordinates :: Span -> ((Int, Int), (Int, Int))
 spanCoordinates s =
