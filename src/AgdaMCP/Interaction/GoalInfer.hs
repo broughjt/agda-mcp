@@ -49,7 +49,7 @@ goalInfer :: Request -> InteractionM Response
 goalInfer = runCommandM . goalInferInternal
 
 goalInferInternal :: Request -> CommandM Response
-goalInferInternal (Request norm goalId expression) =
+goalInferInternal (Request normalization goalId expression) =
   ( do
       -- `interpret Cmd_goal_type_context_infer` (InteractionTop.hs:727-738),
       -- with the blank-expression fallback to `Cmd_goal_type_context`
@@ -59,7 +59,7 @@ goalInferInternal (Request norm goalId expression) =
       (inferredType, faces) <-
         liftLocalState $ withInteractionId goalId $ do
           parsed <- parseExprIn goalId noRange (Text.unpack expression)
-          typeAndFacesInMeta goalId norm parsed
+          typeAndFacesInMeta goalId normalization parsed
       -- Rendered at display scope (no `withInteractionId`), matching EmacsTop's
       -- `auxDoc` (:235-237): `prettyATop` the type, plain `pretty` each face.
       have <-
@@ -69,7 +69,7 @@ goalInferInternal (Request norm goalId expression) =
             Have
               (Text.pack $ render typeDoc)
               (map (Text.pack . render . pretty) faces)
-      report <- liftLocalState $ extractGoalReport norm goalId
+      report <- liftLocalState $ extractGoalReport normalization goalId
       pure $ Right (report, have)
   )
     `catchTCErr` (fmap Left . lift . classifyInteractionError GoalUnknownId GoalFailed)

@@ -58,7 +58,7 @@ context :: Request -> InteractionM Response
 context = runCommandM . contextInternal
 
 contextInternal :: Request -> CommandM Response
-contextInternal (Request norm goalId) =
+contextInternal (Request normalization goalId) =
   -- The meat of `interpret Cmd_context` (InteractionTop.hs:706-707) is
   -- `getResponseContext`. We run the query under `liftLocalState`, the idea
   -- being that display commands should not modify `TCState` (apparently
@@ -66,14 +66,14 @@ contextInternal (Request norm goalId) =
   -- `localTCState` for the same reason (EmacsTop.hs:212). A non-existent id is
   -- classified by `classifyInteractionError`; any other `TCErr` becomes
   -- `GoalFailed`.
-  (Right <$> liftLocalState (extractContext norm goalId))
+  (Right <$> liftLocalState (extractContext normalization goalId))
     `catchTCErr` (fmap Left . lift . classifyInteractionError GoalUnknownId GoalFailed)
 
 -- The extraction mirrors `prettyResponseContext` (EmacsTop.hs:324-373). Also
 -- see the comment above `ContextEntry`.
 extractContext :: Rewrite -> InteractionId -> TCM [ContextEntry]
-extractContext norm goalId = withInteractionId goalId $ do
-  entries <- getResponseContext norm goalId
+extractContext normalization goalId = withInteractionId goalId $ do
+  entries <- getResponseContext normalization goalId
   goalModality <- currentModality
   traverse (extractContextEntry goalModality) entries
 

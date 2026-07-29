@@ -46,7 +46,7 @@ goalCheck :: Request -> InteractionM Response
 goalCheck = runCommandM . goalCheckInternal
 
 goalCheckInternal :: Request -> CommandM Response
-goalCheckInternal (Request norm goalId expression) =
+goalCheckInternal (Request normalization goalId expression) =
   ( do
       -- `interpret Cmd_goal_type_context_check` (InteractionTop.hs:740-748).
       -- Parses the expression, checks it against the goal type (queried `AsIs`,
@@ -61,10 +61,10 @@ goalCheckInternal (Request norm goalId expression) =
             -- checked against a sort-shaped goal. Otherwise our mental model of
             -- Agda is wrong, so we die loudly and signal a bug.
             _ -> liftIO $ throwIO $ CannotCheckAgainstNonType goalId
-          reify =<< normalForm norm term
+          reify =<< normalForm normalization term
       -- Render matching EmacsTop's `auxDoc` (:238-240).
       have <- liftLocalState $ Text.pack . render <$> prettyATop (elaborated :: Expr)
-      report <- liftLocalState $ extractGoalReport norm goalId
+      report <- liftLocalState $ extractGoalReport normalization goalId
       pure $ Right (report, have)
   )
     `catchTCErr` (fmap Left . lift . classifyInteractionError GoalUnknownId GoalFailed)

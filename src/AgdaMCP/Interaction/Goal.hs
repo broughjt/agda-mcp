@@ -46,11 +46,11 @@ goal :: Request -> InteractionM Response
 goal = runCommandM . goalInternal
 
 goalInternal :: Request -> CommandM Response
-goalInternal (Request norm goalId) =
+goalInternal (Request normalization goalId) =
   -- `interpret Cmd_goal_type_context` (InteractionTop.hs:724-725) with
   -- `GoalOnly`. Like the context command we run the query under
   -- `liftLocalState` since a display command should not modify `TCState`.
-  (Right <$> liftLocalState (extractGoalReport norm goalId))
+  (Right <$> liftLocalState (extractGoalReport normalization goalId))
     `catchTCErr` (fmap Left . lift . classifyInteractionError GoalUnknownId GoalFailed)
 
 -- Following the body of `cmd_goal_type_context_and`
@@ -58,26 +58,27 @@ goalInternal (Request norm goalId) =
 -- render time (EmacsTop.hs:227, JSONTop.hs:395). Shared as a helper for the
 -- infer and check wrappers.
 extractGoalReport :: Rewrite -> InteractionId -> TCM GoalReport
-extractGoalReport norm goalId = do
-  context <- extractContext norm goalId
-  shape <- extractGoalShape norm goalId
+extractGoalReport normalization goalId = do
+  context <- extractContext normalization goalId
+  shape <- extractGoalShape normalization goalId
   -- `getIPBoundary` returns the wanted faces. Both frontends render each face
   -- with `pretty` (EmacsTop.hs:228-232, JSONTop.hs:398 uses `encodePretty =
   -- encodeShow . pretty`). Empty when the goal is non-cubical.
-  boundary <- map (Text.pack . render . pretty) <$> getIPBoundary norm goalId
+  boundary <-
+    map (Text.pack . render . pretty) <$> getIPBoundary normalization goalId
   -- Constraints mentioning this goal's metavariable. Emacs renders these with
   -- `prettyTCM` (EmacsTop.hs:245) while JSON uses `pretty`. Apparently the the
   -- two can differ; we follow Emacs.
   constraints <-
     lookupInteractionId goalId
-      >>= getConstraintsMentioning norm
+      >>= getConstraintsMentioning normalization
       >>= traverse (fmap (Text.pack . render) . prettyTCM)
   pure $ GoalReport shape boundary context constraints
 
 -- Obtain the goal shape mirroring `prettyTypeOfMeta` (EmacsTop.hs:378-382)
 extractGoalShape :: Rewrite -> InteractionId -> TCM GoalShape
-extractGoalShape norm goalId = do
-  form <- typeOfMeta norm goalId
+extractGoalShape normalization goalId = do
+  form <- typeOfMeta normalization goalId
   case form of
     OfType _ ty -> GoalOfType . Text.pack . render <$> prettyATop ty
     JustSort _ -> pure GoalSort

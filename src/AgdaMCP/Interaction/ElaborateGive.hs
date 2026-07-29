@@ -41,6 +41,6 @@ elaborateGive request = do
   runCommandM $ elaborateGiveInternal slot request
 
 elaborateGiveInternal :: GiveSlot -> Request -> CommandM Response
-elaborateGiveInternal slot (Request norm goalId expression) =
-  giveGen' slot WithoutForce (ElaborateGive norm) goalId expression
+elaborateGiveInternal slot (Request normalization goalId expression) =
+  giveGen' slot WithoutForce (ElaborateGive normalization) goalId expression
     >>= traverse (expectComputed goalId)
