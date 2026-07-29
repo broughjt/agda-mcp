@@ -26,7 +26,7 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.IO qualified as Text.IO
 import Data.Time (addUTCTime)
-import System.Directory (getModificationTime, setModificationTime)
+import System.Directory (getModificationTime, removeFile, setModificationTime)
 import System.FilePath (takeDirectory, takeFileName, (</>))
 import Test.Tasty (TestTree, testGroup, withResource)
 import Test.Tasty.HUnit (
@@ -91,6 +91,7 @@ tests =
           [ loadTests
           , metasTests
           , contextTests
+          , goalTests
           , giveFamilyTests
           , giveTests
           , refineTests
@@ -593,6 +594,133 @@ contextTests warm =
               Context.Request
                 { Context.requestNormalization = AsIs
                 , Context.requestGoalId = bogusGoalId
+                }
+          liftIO $ response @?= Left (GoalUnknownId bogusGoalId)
+    ]
+
+goalTests :: IO TCState -> TestTree
+goalTests warm =
+  testGroup
+    "Goal"
+    [ testCase "the goal shape is rendered at the requested normalization" $
+        withFixtureSession warm "test/fixtures/Normalization.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          shapes <-
+            traverse
+              ( \normalization ->
+                  goal
+                    Goal.Request
+                      { Goal.requestNormalization = normalization
+                      , Goal.requestGoalId = 0
+                      }
+                    >>= liftIO
+                      . fmap goalReportShape
+                      . expectGoalOk (show normalization)
+              )
+              [AsIs, Instantiated, HeadNormal, Simplified, Normalised]
+          -- `typeOfMeta` composed with `prettyATop`, which is a different path
+          -- from the metas report's, arrives at the same table.
+          liftIO $
+            shapes
+              @?= [ GoalOfType "Twice 2"
+                  , GoalOfType "Twice 2"
+                  , GoalOfType "P (2 + 2)"
+                  , GoalOfType "Twice 2"
+                  , GoalOfType "P 4"
+                  ]
+    , testCase "a goal report carries exactly what the context wrapper returns" $
+        withFixtureSession warm "test/fixtures/ContextBindings.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          report <-
+            goal
+              Goal.Request
+                { Goal.requestNormalization = AsIs
+                , Goal.requestGoalId = 0
+                }
+              >>= liftIO . expectGoalOk "the goal report"
+          entries <-
+            context
+              Context.Request
+                { Context.requestNormalization = AsIs
+                , Context.requestGoalId = 0
+                }
+          liftIO $ do
+            assertEqual
+              "goal composes extractContext rather than reimplementing it"
+              entries
+              (Right $ goalReportContext report)
+            goalReportBoundary report @?= []
+            goalReportConstraints report @?= []
+    , testCase "constraints mentioning the goal are reported" $
+        withFixtureSession warm "test/fixtures/Constrained.agda" $ \path -> do
+          -- The unsolved constraint is reported by the load as well, as a
+          -- non-fatal error, which is why the goal remains queryable.
+          loaded <-
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+          liftIO $
+            assertBool
+              ( "expected an unsolved-constraint error, got "
+                  <> show (metasReportNonFatalErrors loaded)
+              )
+              ( any
+                  (("UnsolvedConstraints" `Text.isInfixOf`) . nonFatalErrorMessage)
+                  (metasReportNonFatalErrors loaded)
+              )
+
+          report <-
+            goal
+              Goal.Request
+                { Goal.requestNormalization = AsIs
+                , Goal.requestGoalId = 0
+                }
+              >>= liftIO . expectGoalOk "the constrained goal"
+          liftIO $ do
+            goalReportShape report @?= GoalOfType "ℕ"
+            case goalReportConstraints report of
+              [equation, assignment] -> do
+                assertBool
+                  ("expected the postponed equation, got " <> show equation)
+                  ("?0 + ?0 = 4 : ℕ" `Text.isInfixOf` equation)
+                assertBool
+                  ("expected the blocked assignment, got " <> show assignment)
+                  ("p ?0" `Text.isInfixOf` assignment)
+              other ->
+                assertFailure $ "expected two constraints, got " <> show other
+    , testCase "a goal query answers from the session, not from the file" $
+        withFixtureSession warm "test/fixtures/ContextBindings.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          let request =
+                Goal.Request
+                  { Goal.requestNormalization = AsIs
+                  , Goal.requestGoalId = 0
+                  }
+          before <- goal request
+          liftIO $ removeFile path
+          after <- goal request
+          liftIO $ do
+            void $ expectGoalOk "after deleting the file" after
+            assertEqual "deleting the file changes nothing" before after
+    , testCase "a bogus goal id is rejected" $
+        withFixtureSession warm "test/fixtures/ContextBindings.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          response <-
+            goal
+              Goal.Request
+                { Goal.requestNormalization = AsIs
+                , Goal.requestGoalId = bogusGoalId
                 }
           liftIO $ response @?= Left (GoalUnknownId bogusGoalId)
     ]
@@ -1201,6 +1329,11 @@ expectContextOk :: String -> Context.Response -> IO [ContextEntry]
 expectContextOk _ (Right entries) = pure entries
 expectContextOk label other =
   assertFailure $ label <> ": expected a context, got " <> show other
+
+expectGoalOk :: String -> Goal.Response -> IO GoalReport
+expectGoalOk _ (Right report) = pure report
+expectGoalOk label other =
+  assertFailure $ label <> ": expected a goal report, got " <> show other
 
 expectGiveOk :: String -> Give.Response -> IO GiveAction
 expectGiveOk _ (Right action) = pure action
