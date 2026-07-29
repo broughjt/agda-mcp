@@ -19,6 +19,7 @@ import Agda.TypeChecking.Monad (
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (gets, runStateT)
+import Data.Char (isDigit)
 import Data.Functor (void)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Maybe (isJust)
@@ -47,6 +48,10 @@ import AgdaMCP.Interaction.Give (give)
 import AgdaMCP.Interaction.Give qualified as Give
 import AgdaMCP.Interaction.Goal (goal)
 import AgdaMCP.Interaction.Goal qualified as Goal
+import AgdaMCP.Interaction.GoalCheck (goalCheck)
+import AgdaMCP.Interaction.GoalCheck qualified as GoalCheck
+import AgdaMCP.Interaction.GoalInfer (Have (..), goalInfer)
+import AgdaMCP.Interaction.GoalInfer qualified as GoalInfer
 import AgdaMCP.Interaction.Internal (InteractionState (..))
 import AgdaMCP.Interaction.Intro (intro)
 import AgdaMCP.Interaction.Intro qualified as Intro
@@ -92,6 +97,7 @@ tests =
           , metasTests
           , contextTests
           , goalTests
+          , inferCheckTests
           , giveFamilyTests
           , giveTests
           , refineTests
@@ -725,6 +731,179 @@ goalTests warm =
           liftIO $ response @?= Left (GoalUnknownId bogusGoalId)
     ]
 
+inferCheckTests :: IO TCState -> TestTree
+inferCheckTests warm =
+  testGroup
+    "Infer and check"
+    [ testCase "an expression that fits infers its type and elaborates" $
+        withFixtureSession warm "test/fixtures/InferCheck.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          (inferReport, have) <-
+            goalInfer
+              GoalInfer.Request
+                { GoalInfer.requestNormalization = AsIs
+                , GoalInfer.requestGoalId = 0
+                , GoalInfer.requestExpression = "suc zero"
+                }
+              >>= liftIO . expectInferOk "infer"
+          liftIO $ do
+            goalReportShape inferReport @?= GoalOfType "ℕ"
+            have @?= Have "ℕ" []
+
+          (checkReport, elaborated) <-
+            goalCheck
+              GoalCheck.Request
+                { GoalCheck.requestNormalization = AsIs
+                , GoalCheck.requestGoalId = 0
+                , GoalCheck.requestExpression = "suc zero"
+                }
+              >>= liftIO . expectCheckOk "check"
+          liftIO $ do
+            goalReportShape checkReport @?= GoalOfType "ℕ"
+            elaborated @?= "1"
+    , testCase "an expression can infer and still fail to check" $
+        withFixtureSession warm "test/fixtures/InferCheck.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          (_, have) <-
+            goalInfer
+              GoalInfer.Request
+                { GoalInfer.requestNormalization = AsIs
+                , GoalInfer.requestGoalId = 0
+                , GoalInfer.requestExpression = "tt"
+                }
+              >>= liftIO . expectInferOk "infer"
+          liftIO $ have @?= Have "⊤" []
+
+          e <-
+            goalCheck
+              GoalCheck.Request
+                { GoalCheck.requestNormalization = AsIs
+                , GoalCheck.requestGoalId = 0
+                , GoalCheck.requestExpression = "tt"
+                }
+              >>= liftIO . expectGoalFailure "check"
+          liftIO $
+            assertBool
+              ("check: expected \"UnequalTerms\" within " <> show (errorMessage e))
+              ("UnequalTerms" `Text.isInfixOf` errorMessage e)
+    , testCase "an unannotated lambda infers a type over fresh metavariables" $
+        withFixtureSession warm "test/fixtures/InferCheck.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          (_, have) <-
+            goalInfer
+              GoalInfer.Request
+                { GoalInfer.requestNormalization = AsIs
+                , GoalInfer.requestGoalId = 0
+                , GoalInfer.requestExpression = "λ x → x"
+                }
+              >>= liftIO . expectInferOk "infer"
+          liftIO $
+            Text.filter (not . isDigit) (haveType have) @?= "(x : _) → _"
+    , testCase "a name that is not in scope fails both commands" $
+        withFixtureSession warm "test/fixtures/InferCheck.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          inferred <-
+            goalInfer
+              GoalInfer.Request
+                { GoalInfer.requestNormalization = AsIs
+                , GoalInfer.requestGoalId = 0
+                , GoalInfer.requestExpression = "nope"
+                }
+              >>= liftIO . expectGoalFailure "infer"
+          checked <-
+            goalCheck
+              GoalCheck.Request
+                { GoalCheck.requestNormalization = AsIs
+                , GoalCheck.requestGoalId = 0
+                , GoalCheck.requestExpression = "nope"
+                }
+              >>= liftIO . expectGoalFailure "check"
+          liftIO $
+            mapM_
+              ( \(label, e) ->
+                  assertBool
+                    (label <> ": expected \"NotInScope\" within " <> show (errorMessage e))
+                    ("NotInScope" `Text.isInfixOf` errorMessage e)
+              )
+              [("infer", inferred), ("check", checked)]
+    , testCase "a bogus goal id is rejected by both commands" $
+        withFixtureSession warm "test/fixtures/InferCheck.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          inferred <-
+            goalInfer
+              GoalInfer.Request
+                { GoalInfer.requestNormalization = AsIs
+                , GoalInfer.requestGoalId = bogusGoalId
+                , GoalInfer.requestExpression = "suc zero"
+                }
+          checked <-
+            goalCheck
+              GoalCheck.Request
+                { GoalCheck.requestNormalization = AsIs
+                , GoalCheck.requestGoalId = bogusGoalId
+                , GoalCheck.requestExpression = "suc zero"
+                }
+          liftIO $ do
+            fmap fst inferred @?= Left (GoalUnknownId bogusGoalId)
+            fmap fst checked @?= Left (GoalUnknownId bogusGoalId)
+    , testCase "the inferred type is rendered at the requested normalization" $
+        withFixtureSession warm "test/fixtures/InferCheck.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          types <-
+            traverse
+              ( \normalization ->
+                  goalInfer
+                    GoalInfer.Request
+                      { GoalInfer.requestNormalization = normalization
+                      , GoalInfer.requestGoalId = 0
+                      , GoalInfer.requestExpression = "twiceTwo"
+                      }
+                    >>= liftIO
+                      . fmap (haveType . snd)
+                      . expectInferOk (show normalization)
+              )
+              [AsIs, Instantiated, HeadNormal, Simplified, Normalised]
+          liftIO $
+            types @?= ["Twice 2", "Twice 2", "P (2 + 2)", "Twice 2", "P 4"]
+    , testCase "the elaborated term is rendered at the requested normalization" $
+        withFixtureSession warm "test/fixtures/InferCheck.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          terms <-
+            traverse
+              ( \normalization ->
+                  goalCheck
+                    GoalCheck.Request
+                      { GoalCheck.requestNormalization = normalization
+                      , GoalCheck.requestGoalId = 0
+                      , GoalCheck.requestExpression = "twice 2"
+                      }
+                    >>= liftIO . fmap snd . expectCheckOk (show normalization)
+              )
+              [AsIs, Instantiated, HeadNormal, Simplified, Normalised]
+          liftIO $ terms @?= ["twice 2", "twice 2", "4", "twice 2", "4"]
+    ]
+
 giveFamilyTests :: IO TCState -> TestTree
 giveFamilyTests warm =
   testGroup
@@ -1334,6 +1513,21 @@ expectGoalOk :: String -> Goal.Response -> IO GoalReport
 expectGoalOk _ (Right report) = pure report
 expectGoalOk label other =
   assertFailure $ label <> ": expected a goal report, got " <> show other
+
+expectInferOk :: String -> GoalInfer.Response -> IO (GoalReport, Have)
+expectInferOk _ (Right inferred) = pure inferred
+expectInferOk label other =
+  assertFailure $ label <> ": expected an inferred type, got " <> show other
+
+expectCheckOk :: String -> GoalCheck.Response -> IO (GoalReport, Text)
+expectCheckOk _ (Right checked) = pure checked
+expectCheckOk label other =
+  assertFailure $ label <> ": expected an elaborated term, got " <> show other
+
+expectGoalFailure :: (Show a) => String -> Either GoalError a -> IO Error
+expectGoalFailure _ (Left (GoalFailed e)) = pure e
+expectGoalFailure label other =
+  assertFailure $ label <> ": expected GoalFailed, got " <> show other
 
 expectGiveOk :: String -> Give.Response -> IO GiveAction
 expectGiveOk _ (Right action) = pure action
