@@ -67,6 +67,9 @@ test-suite agda-mcp-test
   default-language: GHC2021
   ghc-options:
       -Wall
+      -threaded
+      -rtsopts
+      -with-rtsopts=-N
 
 executable agda-mcp
   main-is: Main.hs

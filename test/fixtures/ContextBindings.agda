@@ -22,3 +22,7 @@ normalized twice = ?
 -- An anonymous binder has no name of its own, so Agda generates one.
 anonymous : ℕ → ℕ → ℕ
 anonymous _ n = ?
+
+-- Two anonymous binders, whose generated names collide with each other.
+twoAnonymous : ℕ → ℕ → ℕ
+twoAnonymous _ _ = ?

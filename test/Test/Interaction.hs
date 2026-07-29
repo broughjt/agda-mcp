@@ -518,6 +518,32 @@ contextTests warm =
               @?= [ ("x", "x", False, False)
                   , ("n", "n", True, True)
                   ]
+    , testCase "two anonymous binders are told apart by their reified names" $
+        withFixtureSession warm "test/fixtures/ContextBindings.agda" $ \path -> do
+          void $
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          entries <-
+            context
+              Context.Request
+                { Context.requestNormalization = AsIs
+                , Context.requestGoalId = 4
+                }
+              >>= liftIO . expectContextOk "a clause with two anonymous binders"
+          liftIO $
+            map
+              ( \entry ->
+                  ( contextEntryOriginalName entry
+                  , contextEntryReifiedName entry
+                  , contextEntryOriginalInScope entry
+                  , contextEntryReifiedInScope entry
+                  )
+              )
+              entries
+              @?= [ ("x", "x", False, False)
+                  , ("x", "x₁", False, False)
+                  ]
     , testCase "entry types are rendered at the requested normalization" $
         withFixtureSession warm "test/fixtures/ContextBindings.agda" $ \path -> do
           void $

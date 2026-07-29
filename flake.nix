@@ -23,14 +23,26 @@
             mcp = self.callCabal2nix "mcp" (mcpSrc + "/mcp-server") { };
           };
         };
+        standardLibrary = pkgs.agdaPackages.standard-library;
         packageName = "agda-mcp";
-        package = haskellPackages.callCabal2nix packageName ./. { };
+        # The test suite resolves the pinned standard library through
+        # AGDA_MCP_STDLIB, so the check phase needs it exactly as the dev shell
+        # does. Without it every case fails on a missing library.
+        package = pkgs.haskell.lib.overrideCabal (haskellPackages.callCabal2nix packageName ./. { }) (
+          drv: {
+            preCheck = (drv.preCheck or "") + ''
+              export AGDA_MCP_STDLIB=${standardLibrary}
+            '';
+          }
+        );
       in
       {
         packages = {
           default = package;
           ${packageName} = package;
         };
+
+        checks.${packageName} = package;
 
         apps.default = {
           type = "app";
@@ -41,7 +53,7 @@
         devShells.default = haskellPackages.shellFor {
           packages = _: [ package ];
 
-          AGDA_MCP_STDLIB = pkgs.agdaPackages.standard-library;
+          AGDA_MCP_STDLIB = standardLibrary;
 
           buildInputs = [
             pkgs.cabal-install
