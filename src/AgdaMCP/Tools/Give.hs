@@ -4,7 +4,6 @@ module AgdaMCP.Tools.Give (
   giveTool,
   Request (..),
   Response (..),
-  Item (..),
   Action (..),
   Outcome (..),
   Edit (..),
@@ -25,7 +24,7 @@ import Data.Map qualified as Map
 import Data.Text (Text)
 
 import AgdaMCP.Interaction.Model (Error, Span)
-import AgdaMCP.Tools.Internal (LoadId, ToolM, textToolHandle)
+import AgdaMCP.Tools.Internal (LoadId, LoadIdRefusal, ToolM, textToolHandle)
 import AgdaMCP.Tools.Load qualified as Load
 
 giveTool :: ToolHandler
@@ -94,12 +93,7 @@ giveTool =
 
 data Request = Request
   { giveRequestLoadId :: LoadId
-  , giveRequestItems :: [Item]
-  }
-
-data Item = Item
-  { giveItemGoalId :: InteractionId
-  , giveItemAction :: Action
+  , giveRequestItems :: [(InteractionId, Action)]
   }
 
 data Action
@@ -110,15 +104,20 @@ data Action
     ActionIntro Bool
 
 data Response
-  = ResponseStaleLoadId
-  | ResponseCompleted Outcome Load.Response
+  = -- The load id was refused.
+    ResponseRefused LoadIdRefusal
+  | -- The outcome of the batch of actions, together with the result of a reload
+    -- executed afterwards.
+    ResponseCompleted Outcome Load.Response
 
 -- TODO: Revisit when doing give tool error handling
 data Outcome
   = OutcomeApplied [Edit]
   | OutcomeRefused Refusal
   | OutcomeFileChanged
-  | OutcomeIOError
+  | -- Writing the edits failed. The payload is the rendered `IOException`,
+    -- which is the whole value of the refusal (which path, and why).
+    OutcomeIOError Text
 
 data Edit = Edit
   { editGoalId :: InteractionId
@@ -127,11 +126,15 @@ data Edit = Edit
   , editKind :: EditKind
   }
 
-data EditKind = EditVerbatim | EditComputed
+data EditKind = EditKindVerbatim | EditKindParentheses | EditKindComputed
 
 data Refusal = Refusal
   { refusalGoalId :: InteractionId
-  , refusalSpan :: Span
+  , -- TODO:
+    refusalSpan :: Maybe Span
+  {- ^ The hole being filled. `Nothing` for `RefusedUnknownGoal`, which has no
+  interaction point and therefore no range to report.
+  -}
   , refusalPosition :: BatchPosition
   , refusalReason :: RefusalReason
   }
@@ -142,7 +145,7 @@ data RefusalReason
   = RefusedUnknownGoal
   | RefusedError Error
   | RefusedIntroNotFound
-  | RefusedIntroAmgbiguous [Text]
+  | RefusedIntroAmbiguous [Text]
 
 -- Business logic
 

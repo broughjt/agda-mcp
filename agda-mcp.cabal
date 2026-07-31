@@ -31,6 +31,8 @@ library
     AgdaMCP.Tools.Internal
     AgdaMCP.Tools.Load
     AgdaMCP.Tools.Give
+    AgdaMCP.Tools.Goal
+    AgdaMCP.Tools.Check
   build-depends:
       Agda == 2.8.*,
       aeson,
