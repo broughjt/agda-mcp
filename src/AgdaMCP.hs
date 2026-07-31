@@ -1,6 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# OPTIONS_GHC -Wno-orphans #-}
 
 module AgdaMCP (
   capabilities,
@@ -10,13 +8,9 @@ module AgdaMCP (
   newToolState,
 ) where
 
-import AgdaMCP.Tools (ToolState, loadTool, newToolState)
-
 import Data.Text (Text)
 import MCP.Server (
   Implementation (..),
-  MCPHandlerState,
-  MCPHandlerUser,
   ProcessHandlers,
   ServerCapabilities (..),
   ToolsCapability (..),
@@ -24,8 +18,7 @@ import MCP.Server (
   withToolHandlers,
  )
 
-type instance MCPHandlerState = ToolState
-type instance MCPHandlerUser = ()
+import AgdaMCP.Tools (loadTool, newToolState)
 
 capabilities :: ServerCapabilities
 capabilities =

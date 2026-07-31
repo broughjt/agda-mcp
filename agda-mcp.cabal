@@ -52,6 +52,8 @@ test-suite agda-mcp-test
   other-modules:
     Test.Harness
     Test.Interaction
+    Test.Model
+    Test.Tool
   build-depends:
       Agda == 2.8.*,
       agda-mcp,

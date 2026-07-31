@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module AgdaMCP.Interaction.Model (
   -- Goals
   Goal (..),
@@ -18,9 +20,13 @@ module AgdaMCP.Interaction.Model (
   Error (..),
   Warning (..),
   NonFatalError (..),
+  -- Source identity
+  Hash,
   -- Positions
   Position (..),
   Span (..),
+  spanLength,
+  spanText,
   extractError,
   extractWarning,
   extractNonFatalError,
@@ -57,6 +63,7 @@ import Agda.TypeChecking.Pretty.Warning (
   getAllWarningsOfTCErr,
  )
 import Agda.Utils.FileName (filePath)
+import Agda.Utils.Hash (Hash)
 import Agda.Utils.Maybe.Strict qualified as Strict
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -345,16 +352,6 @@ toSpan i =
     (toPosition (iStart i))
     (toPosition (iEnd i))
 
--- fileSpan :: AbsolutePath -> Agda.Syntax.Position.Range -> Maybe Span
--- fileSpan p r = do
---   rangeFile <- Strict.toLazy $ Agda.Syntax.Position.rangeFile r
---   guard $ Agda.Syntax.Position.rangeFilePath rangeFile == p
---   toSpan <$> Agda.Syntax.Position.rangeToInterval r
-
--- rangeFile' :: Range' p -> Maybe p
--- rangeFile' NoRange = Nothing
--- rangeFile' (Range p _) = Just p
-
 rangePath :: Range -> Maybe FilePath
 rangePath = fmap (filePath . rangeFilePath) . Strict.toLazy . rangeFile
 
@@ -364,29 +361,14 @@ rangeSpan = fmap toSpan . rangeToInterval
 rangePathSpan :: Agda.Syntax.Position.Range -> Maybe (FilePath, Span)
 rangePathSpan r = (,) <$> rangePath r <*> rangeSpan r
 
--- rangeMaybeToFileSpan Agda.Syntax.Position.NoRange = error "unimplemented"
--- rangeMaybeToFileSpan r@(Agda.Syntax.Position.Range a b) =
---   let foo = rangeToInterval r
---    in error "unimplemented"
+-- The text under a span. The argument must be the source text as Agda read it
+-- (`readTextFile`, line endings normalized to LF), since `positionOffset`
+-- counts code points of exactly that text.
+spanText :: Text -> Span -> Text
+spanText t s =
+  Text.take
+    (spanLength s)
+    (Text.drop (positionOffset (spanStart s)) t)
 
--- spanText :: Text -> Span -> Text
--- spanText t s =
---   Text.take
---     (spanLength s)
---     (Text.drop (positionOffset (spanStart s)) t)
-
--- spanLength :: Span -> Int
--- spanLength s = positionOffset (spanEnd s) - positionOffset (spanStart s)
-
--- renderSpan :: Span -> Text
--- renderSpan s
---   | positionLine start == positionLine end =
---       renderPosition start <> "-" <> Text.pack (show (positionColumn end))
---   | otherwise = renderPosition start <> "-" <> renderPosition end
---  where
---   start = spanStart s
---   end = spanEnd s
-
--- renderPosition :: Position -> Text
--- renderPosition (Position _ l c) =
---   Text.pack (show l) <> ":" <> Text.pack (show c)
+spanLength :: Span -> Int
+spanLength s = positionOffset (spanEnd s) - positionOffset (spanStart s)

@@ -7,7 +7,6 @@ module AgdaMCP.Interaction.Metas (
 
 import Agda.Interaction.Base (OutputConstraint_boot (..), Rewrite (..))
 import Agda.Interaction.BasicOps (
-  getGoals',
   getWarningsAndNonFatalErrors,
   typesOfHiddenMetas,
   typesOfVisibleMetas,
