@@ -2,9 +2,14 @@
 
 module AgdaMCP.Tools.Load (
   loadTool,
+  Request (..),
+  Response (..),
+  LoadReport (..),
+  load,
+  renderResponse,
 ) where
 
-import Data.Aeson (object, (.=))
+import Data.Aeson (FromJSON (..), object, withObject, (.:), (.=))
 import Data.Map qualified as Map
 import Data.Text (Text)
 import MCP.Server (
@@ -13,17 +18,32 @@ import MCP.Server (
   toolHandler,
  )
 
+import AgdaMCP.Interaction.Model (
+  ContextEntry,
+  Error,
+  Goal,
+  HiddenMetavariable,
+  NonFatalError,
+  Warning,
+ )
+import AgdaMCP.Tools.Internal (
+  LoadId (..),
+  ToolM,
+  textToolHandle,
+ )
+
 loadTool :: ToolHandler
 loadTool =
   toolHandler
     "load"
-    ( Just
-        "Load and typecheck an Agda source file. Reports open goals (each with \
-        \the local context at the goal), unsolved hidden metavariables, \
-        \non-fatal errors, and warnings on success, or the Agda error if \
-        \checking fails. Relative paths are resolved against the server \
-        \process's working directory; prefer an absolute path when that \
-        \directory may be ambiguous."
+    ( Just ""
+    -- TODO:
+    -- "Load and typecheck an Agda source file. Reports open goals (each with \
+    -- \the local context at the goal), unsolved hidden metavariables, \
+    -- \non-fatal errors, and warnings on success, or the Agda error if \
+    -- \checking fails. Relative paths are resolved against the server \
+    -- \process's working directory; prefer an absolute path when that \
+    -- \directory may be ambiguous."
     )
     ( InputSchema
         "object"
@@ -46,5 +66,35 @@ loadTool =
         )
         (Just ["path"])
     )
-    -- TODO:
-    (error "un")
+    (textToolHandle load renderResponse)
+
+data Request = Request {loadRequestPath :: FilePath}
+
+data Response
+  = ResponseOk LoadReport
+  | ResponseError Error
+  | ResponseStale
+
+data LoadReport = LoadReport
+  { loadReportId :: LoadId
+  , loadReportPath :: FilePath
+  , loadReportGoals :: [(Goal, [ContextEntry])]
+  , loadReportHiddenMetavariables :: [HiddenMetavariable]
+  , loadReportWarnings :: [Warning]
+  , loadReportNonFatalErrors :: [NonFatalError]
+  }
+
+-- Business logic
+
+load :: Request -> ToolM Response
+load = error "un"
+
+-- Request parsing
+
+instance FromJSON Request where
+  parseJSON = withObject "load arguments" $ \o -> Request <$> o .: "path"
+
+-- Response rendering
+
+renderResponse :: Response -> Text
+renderResponse = error "un"
