@@ -18,8 +18,8 @@ import AgdaMCP.Interaction (
   Span (..),
   Warning (..),
  )
-import AgdaMCP.Tools.Internal (LoadId (..))
 import AgdaMCP.Tools.Load (LoadReport (..), Response (..), renderResponse)
+import AgdaMCP.Tools.LoadId (LoadId (..))
 
 tests :: TestTree
 tests =

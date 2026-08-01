@@ -6,11 +6,8 @@ import Agda.TypeChecking.Monad (TCState)
 import Control.Monad.State (runStateT)
 import System.FilePath (takeFileName, (</>))
 
-import AgdaMCP.Tools.Internal (
-  LoadGeneration (..),
-  ToolM,
-  ToolState (..),
- )
+import AgdaMCP.Tools.LoadId (LoadGeneration (..))
+import AgdaMCP.Tools.State (ToolM, ToolState (..))
 import Test.Harness (warmedSession, withStagedFiles)
 
 withFixtureToolSession ::

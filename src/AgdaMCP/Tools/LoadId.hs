@@ -1,0 +1,75 @@
+{-# LANGUAGE OverloadedStrings #-}
+
+module AgdaMCP.Tools.LoadId (
+  LoadId (..),
+  LoadGeneration (..),
+  CurrentLoad (..),
+  LoadIdRefusal (..),
+  currentLoadId,
+  renderLoadId,
+) where
+
+import Data.Aeson (FromJSON (..))
+import Data.Aeson.Types qualified as Aeson
+import Data.Text (Text)
+import Data.Text qualified as Text
+import Data.Text.Read qualified as Text.Read
+import Numeric.Natural (Natural)
+
+import AgdaMCP.Interaction (Hash)
+
+-- An identifier which corresponds to the particular current-file state that
+-- produced a set of interaction ids.
+newtype LoadId = LoadId Natural
+  deriving (Eq, Show)
+
+renderLoadId :: LoadId -> Text
+renderLoadId (LoadId n) = "L" <> Text.pack (show n)
+
+instance FromJSON LoadId where
+  parseJSON = Aeson.withText "load_id" $ \text ->
+    case Text.stripPrefix "L" text of
+      Just digits
+        | Right (n, rest) <- Text.Read.decimal digits
+        , Text.null rest ->
+            pure $ LoadId n
+      _ ->
+        fail $
+          "expected a load_id from a load result, such as \"L17\", but got "
+            <> show text
+
+-- Loading replaces Agda's active interaction state and reuses small
+-- interaction ids, so a goal id only means something against the load that
+-- issued it. This tracks which load that is.
+--
+-- The count is the single source of the current id (see `currentLoadId`) and is
+-- monotonically increasing. A failed or stale load clears `currentLoad` while
+-- leaving the count alone, so no id is ever issued twice. We preserve this
+-- invariant to prevent the case where we validate stale requests.
+data LoadGeneration = LoadGeneration
+  { loadsIssued :: Natural
+  , currentLoad :: Maybe CurrentLoad
+  }
+
+data CurrentLoad = CurrentLoad
+  { currentLoadPath :: FilePath
+  -- ^ Path of the currently loaded file.
+  , currentLoadSourceHash :: Hash
+  -- ^ The hash of the contents of the currently loaded file.
+  }
+  deriving (Eq, Show)
+
+-- The id of the current load, if a load is current. Issuing an id increments
+-- the count, so the live id is always the most recent one issued.
+currentLoadId :: LoadGeneration -> Maybe LoadId
+currentLoadId generation =
+  LoadId (loadsIssued generation) <$ currentLoad generation
+
+-- Why a `LoadId` was refused.
+data LoadIdRefusal
+  = -- Nothing is loaded, so no goal id can mean anything yet.
+    NoCurrentLoad
+  | -- The submitted id names an earlier load generation. The payload is the
+    -- id that *is* current, so the caller can tell how far behind it is.
+    StaleLoadId LoadId
+  deriving (Eq, Show)

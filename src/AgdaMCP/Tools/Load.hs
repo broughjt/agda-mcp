@@ -26,11 +26,9 @@ import AgdaMCP.Interaction (
   NonFatalError,
   Warning,
  )
-import AgdaMCP.Tools.Internal (
-  LoadId (..),
-  ToolM,
-  textToolHandle,
- )
+import AgdaMCP.Tools.LoadId (LoadId (..))
+import AgdaMCP.Tools.MCP (textToolHandle)
+import AgdaMCP.Tools.State (ToolM)
 
 loadTool :: ToolHandler
 loadTool =

@@ -22,16 +22,15 @@ import MCP.Server (
 
 import AgdaMCP.Interaction (Error, GoalReport)
 import AgdaMCP.Interaction.GoalInfer (Have (..))
-import AgdaMCP.Tools.Internal (
-  LoadId,
-  LoadIdRefusal,
-  ToolM,
+import AgdaMCP.Tools.LoadId (LoadId, LoadIdRefusal)
+import AgdaMCP.Tools.MCP (
   goalIdSchema,
   loadIdSchema,
   normalizationSchema,
   parseNormalizationField,
   textToolHandle,
  )
+import AgdaMCP.Tools.State (ToolM)
 
 checkTool :: ToolHandler
 checkTool =

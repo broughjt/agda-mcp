@@ -46,7 +46,10 @@ library
   exposed-modules:
     AgdaMCP
     AgdaMCP.Tools
-    AgdaMCP.Tools.Internal
+    AgdaMCP.Tools.LoadId
+    AgdaMCP.Tools.MCP
+    AgdaMCP.Tools.Render
+    AgdaMCP.Tools.State
     AgdaMCP.Tools.Load
     AgdaMCP.Tools.Give
     AgdaMCP.Tools.Goal

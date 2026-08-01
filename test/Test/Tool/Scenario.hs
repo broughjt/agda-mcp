@@ -25,8 +25,8 @@ import AgdaMCP.Tools.CaseSplit qualified as CaseSplit
 import AgdaMCP.Tools.Check qualified as Check
 import AgdaMCP.Tools.Give qualified as Give
 import AgdaMCP.Tools.Goal qualified as Goal
-import AgdaMCP.Tools.Internal (LoadId (..), LoadIdRefusal (..))
 import AgdaMCP.Tools.Load qualified as Load
+import AgdaMCP.Tools.LoadId (LoadId (..), LoadIdRefusal (..))
 import Test.Tool.Harness (withFixtureToolSession)
 
 tests :: IO TCState -> TestTree

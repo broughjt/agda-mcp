@@ -24,8 +24,10 @@ import Data.Map qualified as Map
 import Data.Text (Text)
 
 import AgdaMCP.Interaction (Error, Span)
-import AgdaMCP.Tools.Internal (LoadId, LoadIdRefusal, ToolM, textToolHandle)
 import AgdaMCP.Tools.Load qualified as Load
+import AgdaMCP.Tools.LoadId (LoadId, LoadIdRefusal)
+import AgdaMCP.Tools.MCP (textToolHandle)
+import AgdaMCP.Tools.State (ToolM)
 
 giveTool :: ToolHandler
 giveTool =

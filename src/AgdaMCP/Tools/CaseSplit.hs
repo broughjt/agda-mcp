@@ -24,15 +24,14 @@ import MCP.Server (
 
 import AgdaMCP.Interaction (Error, Span)
 import AgdaMCP.Interaction.MakeCase (MakeCaseVariant)
-import AgdaMCP.Tools.Internal (
-  LoadId,
-  LoadIdRefusal,
-  ToolM,
+import AgdaMCP.Tools.Load qualified as Load
+import AgdaMCP.Tools.LoadId (LoadId, LoadIdRefusal)
+import AgdaMCP.Tools.MCP (
   goalIdSchema,
   loadIdSchema,
   textToolHandle,
  )
-import AgdaMCP.Tools.Load qualified as Load
+import AgdaMCP.Tools.State (ToolM)
 
 caseSplitTool :: ToolHandler
 caseSplitTool =
