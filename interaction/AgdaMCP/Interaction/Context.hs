@@ -36,11 +36,11 @@ import Agda.TypeChecking.Monad (
 import Control.Monad.State (lift)
 import Data.Text qualified as Text
 
+import AgdaMCP.Interaction.Extract (classifyInteractionError)
 import AgdaMCP.Interaction.Internal (InteractionM, catchTCErr, runCommandM)
 import AgdaMCP.Interaction.Model (
   ContextEntry (..),
   GoalError (..),
-  classifyInteractionError,
  )
 
 data Request = Request

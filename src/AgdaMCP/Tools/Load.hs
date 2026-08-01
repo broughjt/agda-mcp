@@ -18,7 +18,7 @@ import MCP.Server (
   toolHandler,
  )
 
-import AgdaMCP.Interaction.Model (
+import AgdaMCP.Interaction (
   ContextEntry,
   Error,
   Goal,

@@ -12,15 +12,15 @@ import Data.Text.IO qualified as Text.IO
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
-import AgdaMCP.Interaction.GoalInfer (Have (..))
-import AgdaMCP.Interaction.MakeCase (MakeCaseVariant (..))
-import AgdaMCP.Interaction.Model (
+import AgdaMCP.Interaction (
   ContextEntry (..),
   Error (..),
   Goal (..),
   GoalReport (..),
   GoalShape (..),
  )
+import AgdaMCP.Interaction.GoalInfer (Have (..))
+import AgdaMCP.Interaction.MakeCase (MakeCaseVariant (..))
 import AgdaMCP.Tools.CaseSplit qualified as CaseSplit
 import AgdaMCP.Tools.Check qualified as Check
 import AgdaMCP.Tools.Give qualified as Give

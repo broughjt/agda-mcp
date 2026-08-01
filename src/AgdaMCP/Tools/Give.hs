@@ -23,7 +23,7 @@ import Data.Aeson (FromJSON (..), object, (.=))
 import Data.Map qualified as Map
 import Data.Text (Text)
 
-import AgdaMCP.Interaction.Model (Error, Span)
+import AgdaMCP.Interaction (Error, Span)
 import AgdaMCP.Tools.Internal (LoadId, LoadIdRefusal, ToolM, textToolHandle)
 import AgdaMCP.Tools.Load qualified as Load
 

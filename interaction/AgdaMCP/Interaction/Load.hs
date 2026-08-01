@@ -16,12 +16,12 @@ import Control.Monad.State (gets, lift, modify)
 import Data.Maybe (isJust)
 import Data.Text qualified as Text
 
+import AgdaMCP.Interaction.Extract (extractError)
 import AgdaMCP.Interaction.Internal (InteractionM, catchTCErr, runCommandM)
 import AgdaMCP.Interaction.Metas (extractMetas)
 import AgdaMCP.Interaction.Model (
   Error,
   MetasReport,
-  extractError,
  )
 import Data.Text (Text)
 

@@ -18,11 +18,11 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 
 import AgdaMCP.Interaction.Goal (extractGoalReport)
+import AgdaMCP.Interaction.Extract (classifyInteractionError)
 import AgdaMCP.Interaction.Internal (InteractionM, catchTCErr, runCommandM)
 import AgdaMCP.Interaction.Model (
   GoalError (..),
   GoalReport,
-  classifyInteractionError,
  )
 
 data Request = Request

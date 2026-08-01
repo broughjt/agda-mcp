@@ -25,11 +25,12 @@ library interaction
     AgdaMCP.Interaction.Load
     AgdaMCP.Interaction.MakeCase
     AgdaMCP.Interaction.Metas
-    AgdaMCP.Interaction.Model
     AgdaMCP.Interaction.Refine
     AgdaMCP.Interaction.Testing
   other-modules:
+    AgdaMCP.Interaction.Extract
     AgdaMCP.Interaction.Internal
+    AgdaMCP.Interaction.Model
   build-depends:
       Agda == 2.8.*,
       base >= 4.18 && < 5,

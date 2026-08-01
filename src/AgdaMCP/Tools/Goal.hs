@@ -20,7 +20,7 @@ import MCP.Server (
   toolHandler,
  )
 
-import AgdaMCP.Interaction.Model (Error, GoalReport)
+import AgdaMCP.Interaction (Error, GoalReport)
 import AgdaMCP.Tools.Internal (
   LoadId,
   LoadIdRefusal,

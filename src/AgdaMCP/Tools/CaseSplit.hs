@@ -22,8 +22,8 @@ import MCP.Server (
   toolHandler,
  )
 
+import AgdaMCP.Interaction (Error, Span)
 import AgdaMCP.Interaction.MakeCase (MakeCaseVariant)
-import AgdaMCP.Interaction.Model (Error, Span)
 import AgdaMCP.Tools.Internal (
   LoadId,
   LoadIdRefusal,

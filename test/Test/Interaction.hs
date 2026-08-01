@@ -32,7 +32,26 @@ import Test.Tasty.HUnit (
   (@?=),
  )
 
-import AgdaMCP.Interaction (InteractionM, InteractionState)
+import AgdaMCP.Interaction (
+  ContextEntry (..),
+  Error (..),
+  GiveAction (..),
+  GiveError (..),
+  Goal (..),
+  GoalError (..),
+  GoalReport (..),
+  GoalShape (..),
+  HiddenMetavariable (..),
+  InteractionM,
+  InteractionState,
+  IntroError (..),
+  MetasReport (..),
+  NonFatalError (..),
+  Position (..),
+  Span (..),
+  Warning (..),
+  spanText,
+ )
 import AgdaMCP.Interaction.Context (context)
 import AgdaMCP.Interaction.Context qualified as Context
 import AgdaMCP.Interaction.ElaborateGive (elaborateGive)
@@ -58,24 +77,6 @@ import AgdaMCP.Interaction.MakeCase (
 import AgdaMCP.Interaction.MakeCase qualified as MakeCase
 import AgdaMCP.Interaction.Metas (metas)
 import AgdaMCP.Interaction.Metas qualified as Metas
-import AgdaMCP.Interaction.Model (
-  ContextEntry (..),
-  Error (..),
-  GiveAction (..),
-  GiveError (..),
-  Goal (..),
-  GoalError (..),
-  GoalReport (..),
-  GoalShape (..),
-  HiddenMetavariable (..),
-  IntroError (..),
-  MetasReport (..),
-  NonFatalError (..),
-  Position (..),
-  Span (..),
-  Warning (..),
-  spanText,
- )
 import AgdaMCP.Interaction.Refine (refine)
 import AgdaMCP.Interaction.Refine qualified as Refine
 import AgdaMCP.Interaction.Testing (currentFile, observeResponses)

@@ -22,6 +22,7 @@ import Data.IORef (readIORef, writeIORef)
 import Data.Text (Text)
 import Data.Text qualified as Text
 
+import AgdaMCP.Interaction.Extract (classifyInteractionError, toGiveAction)
 import AgdaMCP.Interaction.Internal (
   GiveSlot,
   InteractionM,
@@ -32,8 +33,6 @@ import AgdaMCP.Interaction.Internal (
 import AgdaMCP.Interaction.Model (
   GiveAction (..),
   GiveError (..),
-  classifyInteractionError,
-  toGiveAction,
  )
 
 data Request = Request

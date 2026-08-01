@@ -45,12 +45,11 @@ import Data.List.NonEmpty (NonEmpty, toList)
 import Data.Text (Text)
 import Data.Text qualified as Text
 
+import AgdaMCP.Interaction.Extract (classifyInteractionError, rangeSpan)
 import AgdaMCP.Interaction.Internal (InteractionM, catchTCErr, runCommandM)
 import AgdaMCP.Interaction.Model (
   Error,
   Span,
-  classifyInteractionError,
-  rangeSpan,
  )
 
 data Request = Request

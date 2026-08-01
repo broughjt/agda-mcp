@@ -38,6 +38,12 @@ import Data.List (sortOn)
 import Data.Text (Text)
 import Data.Text qualified as Text
 
+import AgdaMCP.Interaction.Extract (
+  extractError,
+  extractNonFatalError,
+  extractWarning,
+  rangeSpan,
+ )
 import AgdaMCP.Interaction.Internal (InteractionM, catchTCErr, runCommandM)
 import AgdaMCP.Interaction.Model (
   Error,
@@ -47,10 +53,6 @@ import AgdaMCP.Interaction.Model (
   MetasReport (..),
   Position (..),
   Span (..),
-  extractError,
-  extractNonFatalError,
-  extractWarning,
-  rangeSpan,
  )
 
 -- `Cmd_metas` takes the degree of normalization to render goal types at.

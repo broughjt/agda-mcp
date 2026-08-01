@@ -6,7 +6,7 @@ import Data.Text (Text)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 
-import AgdaMCP.Interaction.Model (
+import AgdaMCP.Interaction (
   Position (..),
   Span (..),
   spanLength,

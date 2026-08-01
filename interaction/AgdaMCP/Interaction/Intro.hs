@@ -16,6 +16,7 @@ import Data.Bifunctor (first)
 import Data.Text (Text)
 import Data.Text qualified as Text
 
+import AgdaMCP.Interaction.Extract (classifyInteractionError)
 import AgdaMCP.Interaction.Give (expectComputed, giveGen')
 import AgdaMCP.Interaction.Internal (
   GiveSlot,
@@ -27,7 +28,6 @@ import AgdaMCP.Interaction.Internal (
 import AgdaMCP.Interaction.Model (
   GiveError (..),
   IntroError (..),
-  classifyInteractionError,
  )
 
 -- Intro takes no user expression, since `introTactic` proposes the candidate(s)

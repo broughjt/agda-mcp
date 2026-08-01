@@ -7,7 +7,7 @@ import Data.Text qualified as Text
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 
-import AgdaMCP.Interaction.Model (
+import AgdaMCP.Interaction (
   ContextEntry (..),
   Error (..),
   Goal (..),

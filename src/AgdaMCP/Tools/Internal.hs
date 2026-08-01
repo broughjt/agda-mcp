@@ -50,11 +50,13 @@ import MCP.Server (
  )
 import Numeric.Natural (Natural)
 
-import AgdaMCP.Interaction (InteractionM, InteractionState, newInteractionState)
-import AgdaMCP.Interaction.Model (
+import AgdaMCP.Interaction (
   Hash,
+  InteractionM,
+  InteractionState,
   Position (..),
   Span (..),
+  newInteractionState,
  )
 
 -- Tool state
