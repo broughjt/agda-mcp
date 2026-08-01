@@ -32,11 +32,12 @@ renderResponseTests :: TestTree
 renderResponseTests =
   testGroup
     "renderResponse"
-    [ testCase "successful load with no goals includes its load id" $
+    [ testCase "a successful load reports its load id and the file Agda loaded" $
         renderResponse (ResponseOk report)
-          @?= Text.unlines
+          @?= rendered
             [ "Load succeeded: no goals."
             , "Load ID: L17"
+            , "File: /tmp/Example.agda"
             ]
     , testCase "a single open goal is counted in the singular" $
         renderResponse
@@ -54,9 +55,10 @@ renderResponseTests =
                     ]
                 }
           )
-          @?= Text.unlines
+          @?= rendered
             [ "Load succeeded: 1 goal."
             , "Load ID: L17"
+            , "File: /tmp/Example.agda"
             , ""
             , "?0 at 14:16-17"
             , "  ⊢ ℕ"
@@ -70,10 +72,9 @@ renderResponseTests =
                       ( Goal
                           { goalId = 0
                           , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
-                          , goalShape =
-                              GoalOfType "(y + z) * x ≡ y * x + z * x"
+                          , goalShape = GoalOfType "ℕ"
                           }
-                      , [contextEntry "x" "ℕ", contextEntry "y" "ℕ", contextEntry "z" "ℕ"]
+                      , [contextEntry "x" "ℕ"]
                       )
                     ,
                       ( Goal
@@ -86,18 +87,45 @@ renderResponseTests =
                     ]
                 }
           )
-          @?= Text.unlines
+          @?= rendered
             [ "Load succeeded: 2 goals."
             , "Load ID: L17"
+            , "File: /tmp/Example.agda"
             , ""
             , "?0 at 14:16-17"
             , "  x : ℕ"
-            , "  y : ℕ"
-            , "  z : ℕ"
-            , "  ⊢ (y + z) * x ≡ y * x + z * x"
+            , "  ⊢ ℕ"
             , ""
             , "?1 at 20:5-6"
             , "  ⊢ ℕ"
+            ]
+    , testCase "context entries are reported innermost-first" $
+        renderResponse
+          ( ResponseOk
+              report
+                { loadReportGoals =
+                    [
+                      ( Goal
+                          { goalId = 0
+                          , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
+                          , goalShape =
+                              GoalOfType "(y + z) * x ≡ y * x + z * x"
+                          }
+                      , [contextEntry "x" "ℕ", contextEntry "y" "ℕ", contextEntry "z" "ℕ"]
+                      )
+                    ]
+                }
+          )
+          @?= rendered
+            [ "Load succeeded: 1 goal."
+            , "Load ID: L17"
+            , "File: /tmp/Example.agda"
+            , ""
+            , "?0 at 14:16-17"
+            , "  z : ℕ"
+            , "  y : ℕ"
+            , "  x : ℕ"
+            , "  ⊢ (y + z) * x ≡ y * x + z * x"
             ]
     , testCase "goals keep their own ids in the order they are given" $
         renderResponse
@@ -123,9 +151,10 @@ renderResponseTests =
                     ]
                 }
           )
-          @?= Text.unlines
+          @?= rendered
             [ "Load succeeded: 2 goals."
             , "Load ID: L17"
+            , "File: /tmp/Example.agda"
             , ""
             , "?1 at 5:10-11"
             , "  ⊢ ℕ"
@@ -149,14 +178,15 @@ renderResponseTests =
                     ]
                 }
           )
-          @?= Text.unlines
+          @?= rendered
             [ "Load succeeded: 1 goal."
             , "Load ID: L17"
+            , "File: /tmp/Example.agda"
             , ""
             , "?0 at 14:16-16:4"
             , "  ⊢ ℕ"
             ]
-    , testCase "a goal that is itself a sort says so" $
+    , testCase "a goal that is a sort says so" $
         renderResponse
           ( ResponseOk
               report
@@ -172,12 +202,38 @@ renderResponseTests =
                     ]
                 }
           )
-          @?= Text.unlines
+          @?= rendered
             [ "Load succeeded: 1 goal."
             , "Load ID: L17"
+            , "File: /tmp/Example.agda"
             , ""
             , "?0 at 3:8-9"
             , "  ⊢ Sort"
+            ]
+    , testCase "a goal type that spans lines keeps Agda's own indentation" $
+        renderResponse
+          ( ResponseOk
+              report
+                { loadReportGoals =
+                    [
+                      ( Goal
+                          { goalId = 0
+                          , goalSpan = Span (Position 0 30 8) (Position 0 30 13)
+                          , goalShape = GoalOfType "A\n  → B"
+                          }
+                      , []
+                      )
+                    ]
+                }
+          )
+          @?= rendered
+            [ "Load succeeded: 1 goal."
+            , "Load ID: L17"
+            , "File: /tmp/Example.agda"
+            , ""
+            , "?0 at 30:8-13"
+            , "  ⊢ A"
+            , "    → B"
             ]
     , testCase "a shadowed binding is reported under both of its names" $
         renderResponse
@@ -187,11 +243,32 @@ renderResponseTests =
                     [
                       ( Goal
                           { goalId = 0
-                          , goalSpan =
-                              Span
-                                { spanStart = Position 0 14 16
-                                , spanEnd = Position 0 14 17
-                                }
+                          , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
+                          , goalShape = GoalOfType "ℕ"
+                          }
+                      , [(contextEntry "x" "ℕ") {contextEntryReifiedName = "x₁"}]
+                      )
+                    ]
+                }
+          )
+          @?= rendered
+            [ "Load succeeded: 1 goal."
+            , "Load ID: L17"
+            , "File: /tmp/Example.agda"
+            , ""
+            , "?0 at 14:16-17"
+            , "  x = x₁ : ℕ"
+            , "  ⊢ ℕ"
+            ]
+    , testCase "a shadowed binding that has left scope says so" $
+        renderResponse
+          ( ResponseOk
+              report
+                { loadReportGoals =
+                    [
+                      ( Goal
+                          { goalId = 0
+                          , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
                           , goalShape = GoalOfType "ℕ"
                           }
                       ,
@@ -199,19 +276,48 @@ renderResponseTests =
                             { contextEntryReifiedName = "x₁"
                             , contextEntryReifiedInScope = False
                             }
-                        , contextEntry "x" "ℕ"
                         ]
                       )
                     ]
                 }
           )
-          @?= Text.unlines
+          @?= rendered
             [ "Load succeeded: 1 goal."
             , "Load ID: L17"
+            , "File: /tmp/Example.agda"
             , ""
             , "?0 at 14:16-17"
             , "  x = x₁ : ℕ (not in scope)"
-            , "  x : ℕ"
+            , "  ⊢ ℕ"
+            ]
+    , testCase "a binder out of scope is reported under its reified name" $
+        renderResponse
+          ( ResponseOk
+              report
+                { loadReportGoals =
+                    [
+                      ( Goal
+                          { goalId = 0
+                          , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
+                          , goalShape = GoalOfType "ℕ"
+                          }
+                      ,
+                        [ (contextEntry "x" "ℕ")
+                            { contextEntryReifiedName = "x₁"
+                            , contextEntryOriginalInScope = False
+                            }
+                        ]
+                      )
+                    ]
+                }
+          )
+          @?= rendered
+            [ "Load succeeded: 1 goal."
+            , "Load ID: L17"
+            , "File: /tmp/Example.agda"
+            , ""
+            , "?0 at 14:16-17"
+            , "  x₁ : ℕ"
             , "  ⊢ ℕ"
             ]
     , testCase "two anonymous binders are told apart by their reified names" $
@@ -222,11 +328,7 @@ renderResponseTests =
                     [
                       ( Goal
                           { goalId = 0
-                          , goalSpan =
-                              Span
-                                { spanStart = Position 0 14 16
-                                , spanEnd = Position 0 14 17
-                                }
+                          , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
                           , goalShape = GoalOfType "ℕ"
                           }
                       ,
@@ -244,28 +346,25 @@ renderResponseTests =
                     ]
                 }
           )
-          @?= Text.unlines
+          @?= rendered
             [ "Load succeeded: 1 goal."
             , "Load ID: L17"
+            , "File: /tmp/Example.agda"
             , ""
             , "?0 at 14:16-17"
-            , "  x : ℕ (not in scope)"
             , "  x₁ : ℕ (not in scope)"
+            , "  x : ℕ (not in scope)"
             , "  ⊢ ℕ"
             ]
     , testCase "a let binding is reported with its value" $
         renderResponse
-          ( ResponseOk $
+          ( ResponseOk
               report
                 { loadReportGoals =
                     [
                       ( Goal
                           { goalId = 0
-                          , goalSpan =
-                              Span
-                                { spanStart = Position 0 14 16
-                                , spanEnd = Position 0 14 17
-                                }
+                          , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
                           , goalShape = GoalOfType "ℕ"
                           }
                       ,
@@ -278,89 +377,113 @@ renderResponseTests =
                     ]
                 }
           )
-          @?= Text.unlines
+          @?= rendered
             [ "Load succeeded: 1 goal."
             , "Load ID: L17"
+            , "File: /tmp/Example.agda"
             , ""
             , "?0 at 14:16-17"
-            , "  m : ℕ"
             , "  doubled : ℕ"
             , "  doubled = m + m"
+            , "  m : ℕ"
             , "  ⊢ ℕ"
             ]
     , testCase "binder attributes are reported beside the binding" $
         renderResponse
-          ( ResponseOk $
+          ( ResponseOk
               report
                 { loadReportGoals =
                     [
                       ( Goal
                           { goalId = 0
-                          , goalSpan =
-                              Span
-                                { spanStart = Position 0 14 16
-                                , spanEnd = Position 0 14 17
-                                }
+                          , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
                           , goalShape = GoalOfType "ℕ"
                           }
                       ,
                         [ (contextEntry "eq" "n ≡ n") {contextEntryIsInstance = True}
                         , (contextEntry "n" "ℕ") {contextEntryErased = True}
-                        , (contextEntry "i" "ℕ")
-                            { contextEntryRelevance = Just "irrelevant"
-                            }
-                        , (contextEntry "c" "ℕ") {contextEntryCohesion = Just "flat"}
+                        , (contextEntry "i" "ℕ") {contextEntryRelevance = Just "irrelevant"}
+                        , (contextEntry "c" "ℕ") {contextEntryCohesion = Just "@♭"}
                         , (contextEntry "p" "ℕ") {contextEntryPolarity = Just "unused"}
                         ]
                       )
                     ]
                 }
           )
-          @?= Text.unlines
+          @?= rendered
             [ "Load succeeded: 1 goal."
             , "Load ID: L17"
+            , "File: /tmp/Example.agda"
             , ""
             , "?0 at 14:16-17"
-            , "  eq : n ≡ n (instance)"
-            , "  n : ℕ (erased)"
-            , "  i : ℕ (irrelevant)"
-            , "  c : ℕ (flat)"
             , "  p : ℕ (unused)"
+            , "  @♭ c : ℕ"
+            , "  i : ℕ (irrelevant)"
+            , "  n : ℕ (erased)"
+            , "  eq : n ≡ n (instance)"
             , "  ⊢ ℕ"
             ]
-    , testCase "a binding carrying several attributes lists them all" $
+    , testCase "a binding carrying several attributes lists them in one group" $
         renderResponse
-          ( ResponseOk $
+          ( ResponseOk
               report
                 { loadReportGoals =
                     [
                       ( Goal
                           { goalId = 0
-                          , goalSpan =
-                              Span
-                                { spanStart = Position 0 14 16
-                                , spanEnd = Position 0 14 17
-                                }
+                          , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
                           , goalShape = GoalOfType "ℕ"
                           }
                       ,
-                        [ (contextEntry "eq" "ℕ")
-                            { contextEntryType = "n ≡ n"
-                            , contextEntryIsInstance = True
-                            , contextEntryOriginalInScope = False
+                        [ (contextEntry "x" "A")
+                            { contextEntryReifiedName = "x₁"
                             , contextEntryReifiedInScope = False
+                            , contextEntryIsInstance = True
+                            , contextEntryCohesion = Just "@♭"
+                            , contextEntryPolarity = Just "positive"
+                            , contextEntryErased = True
+                            , contextEntryRelevance = Just "irrelevant"
                             }
                         ]
                       )
                     ]
                 }
           )
-          @?= Text.unlines
+          @?= rendered
             [ "Load succeeded: 1 goal."
             , "Load ID: L17"
+            , "File: /tmp/Example.agda"
             , ""
             , "?0 at 14:16-17"
-            , "  eq : n ≡ n (instance) (not in scope)"
+            , "  @♭ x = x₁ : A (not in scope, erased, irrelevant, positive, instance)"
+            , "  ⊢ ℕ"
+            ]
+    , testCase "a context type that spans lines keeps Agda's own indentation" $
+        renderResponse
+          ( ResponseOk
+              report
+                { loadReportGoals =
+                    [
+                      ( Goal
+                          { goalId = 0
+                          , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
+                          , goalShape = GoalOfType "ℕ"
+                          }
+                      ,
+                        [ (contextEntry "f" "A\n  → B") {contextEntryIsInstance = True}
+                        ]
+                      )
+                    ]
+                }
+          )
+          @?= rendered
+            [ "Load succeeded: 1 goal."
+            , "Load ID: L17"
+            , "File: /tmp/Example.agda"
+            , ""
+            , "?0 at 14:16-17"
+            , "  f : A"
+            , "    → B (instance)"
             , "  ⊢ ℕ"
             ]
     , testCase "unsolved hidden metavariables are reported in their own section" $
@@ -382,12 +505,14 @@ renderResponseTests =
                     ]
                 }
           )
-          @?= Text.unlines
+          @?= rendered
             [ "Load succeeded: no goals."
             , "Load ID: L17"
+            , "File: /tmp/Example.agda"
             , ""
             , "Unsolved metavariables:"
             , "  _12 at 9:5-6 : ℕ"
+            , ""
             , "  _14 : Sort"
             ]
     , testCase "warnings are reported as Agda wrote them" $
@@ -414,9 +539,10 @@ renderResponseTests =
                     ]
                 }
           )
-          @?= Text.unlines
+          @?= rendered
             [ "Load succeeded: no goals."
             , "Load ID: L17"
+            , "File: /tmp/Example.agda"
             , ""
             , "Warnings:"
             , "  /tmp/Example.agda:8.1-12: warning: -W[no]UnreachableClauses"
@@ -424,6 +550,32 @@ renderResponseTests =
             , ""
             , "  /tmp/Example.agda:13.1-13: warning: -W[no]UnreachableClauses"
             , "  Unreachable clause"
+            ]
+    , testCase "each warning is separated from the next" $
+        renderResponse
+          ( ResponseOk
+              report
+                { loadReportWarnings =
+                    [ Warning
+                        ( Just
+                            ( "/tmp/Example.agda"
+                            , Span (Position 0 8 1) (Position 0 8 12)
+                            )
+                        , "a warning"
+                        )
+                    , Warning (Nothing, "another warning")
+                    ]
+                }
+          )
+          @?= rendered
+            [ "Load succeeded: no goals."
+            , "Load ID: L17"
+            , "File: /tmp/Example.agda"
+            , ""
+            , "Warnings:"
+            , "  a warning"
+            , ""
+            , "  another warning"
             ]
     , testCase "a non-fatal error leaves the load successful and its goals open" $
         renderResponse
@@ -443,15 +595,42 @@ renderResponseTests =
                     [NonFatalError (Nothing, "Unsolved constraints")]
                 }
           )
-          @?= Text.unlines
-            [ "Load succeeded: 1 goal."
+          @?= rendered
+            [ "Load succeeded with errors: 1 goal."
             , "Load ID: L17"
+            , "File: /tmp/Example.agda"
             , ""
             , "?0 at 14:16-17"
             , "  ⊢ ℕ"
             , ""
-            , "Errors:"
+            , "Non-fatal errors:"
             , "  Unsolved constraints"
+            ]
+    , testCase "several non-fatal errors are reported in the order they were raised" $
+        renderResponse
+          ( ResponseOk
+              report
+                { loadReportNonFatalErrors =
+                    [ NonFatalError (Nothing, "first non-fatal error")
+                    , NonFatalError
+                        ( Just
+                            ( "/tmp/Example.agda"
+                            , Span (Position 0 10 2) (Position 0 10 9)
+                            )
+                        , "second non-fatal error"
+                        )
+                    ]
+                }
+          )
+          @?= rendered
+            [ "Load succeeded with errors: no goals."
+            , "Load ID: L17"
+            , "File: /tmp/Example.agda"
+            , ""
+            , "Non-fatal errors:"
+            , "  first non-fatal error"
+            , ""
+            , "  second non-fatal error"
             ]
     , testCase "the sections are reported in a fixed order" $
         renderResponse
@@ -487,9 +666,10 @@ renderResponseTests =
                     [NonFatalError (Nothing, "Unsolved constraints")]
                 }
           )
-          @?= Text.unlines
-            [ "Load succeeded: 1 goal."
+          @?= rendered
+            [ "Load succeeded with errors: 1 goal."
             , "Load ID: L17"
+            , "File: /tmp/Example.agda"
             , ""
             , "?0 at 14:16-17"
             , "  x : ℕ"
@@ -501,7 +681,7 @@ renderResponseTests =
             , "Warnings:"
             , "  a warning"
             , ""
-            , "Errors:"
+            , "Non-fatal errors:"
             , "  Unsolved constraints"
             ]
     , testCase "a failed load reports the error and issues no load id" $
@@ -519,7 +699,7 @@ renderResponseTests =
                 , errorWarnings = []
                 }
           )
-          @?= Text.unlines
+          @?= rendered
             [ "Load failed."
             , ""
             , "  /tmp/Example.agda:6.9-10: error: [UnequalTerms]"
@@ -539,26 +719,30 @@ renderResponseTests =
                             )
                         , "a warning"
                         )
+                    , Warning (Nothing, "another warning")
                     ]
                 }
           )
-          @?= Text.unlines
+          @?= rendered
             [ "Load failed."
             , ""
             , "  an error"
             , ""
             , "Warnings:"
             , "  a warning"
+            , ""
+            , "  another warning"
             ]
     , testCase "a stale load issues no load id and asks for another load" $
         renderResponse ResponseStale
-          @?= Text.unlines
-            [ "Load did not finish: the file changed on disk while it was \
+          @?= "Load did not finish: the file changed on disk while it was \
               \being checked. Load it again."
-            ]
     ]
 
 -- Helpers
+
+rendered :: [Text] -> Text
+rendered = Text.intercalate "\n"
 
 report :: LoadReport
 report =
