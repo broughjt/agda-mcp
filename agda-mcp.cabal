@@ -24,6 +24,7 @@ library
     AgdaMCP.Interaction.Internal
     AgdaMCP.Interaction.Intro
     AgdaMCP.Interaction.Load
+    AgdaMCP.Interaction.MakeCase
     AgdaMCP.Interaction.Metas
     AgdaMCP.Interaction.Model
     AgdaMCP.Interaction.Refine

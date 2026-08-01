@@ -22,6 +22,7 @@ import Control.Monad.State (gets, runStateT)
 import Data.Char (isDigit)
 import Data.Functor (void)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -57,6 +58,13 @@ import AgdaMCP.Interaction.Intro (intro)
 import AgdaMCP.Interaction.Intro qualified as Intro
 import AgdaMCP.Interaction.Load (load)
 import AgdaMCP.Interaction.Load qualified as Load
+import AgdaMCP.Interaction.MakeCase (
+  MakeCaseError (..),
+  MakeCaseReport (..),
+  MakeCaseVariant (..),
+  makeCase,
+ )
+import AgdaMCP.Interaction.MakeCase qualified as MakeCase
 import AgdaMCP.Interaction.Metas (metas)
 import AgdaMCP.Interaction.Metas qualified as Metas
 import AgdaMCP.Interaction.Model (
@@ -75,6 +83,7 @@ import AgdaMCP.Interaction.Model (
   Position (..),
   Span (..),
   Warning (..),
+  spanText,
  )
 import AgdaMCP.Interaction.Refine (refine)
 import AgdaMCP.Interaction.Refine qualified as Refine
@@ -103,6 +112,7 @@ tests =
           , refineTests
           , introTests
           , elaborateGiveTests
+          , makeCaseTests
           , scenarioTests
           ]
       )
@@ -1328,6 +1338,166 @@ elaborateGiveTests warm =
                   ]
     ]
 
+makeCaseTests :: IO TCState -> TestTree
+makeCaseTests warm =
+  testGroup
+    "MakeCase"
+    [ testCase "splitting on a variable produces one clause per constructor" $ do
+        (report, extent) <-
+          withMakeCaseFixture warm $ \source goals -> do
+            report <-
+              makeCase
+                MakeCase.Request
+                  { MakeCase.requestGoalId = goalId (goals !! 0)
+                  , MakeCase.requestSplit = MakeCase.SplitVariables ("n" :| [])
+                  }
+                >>= liftIO . expectMakeCaseOk "split at goal 0"
+            pure (report, spanText source (makeCaseReportSpan report))
+        makeCaseReportVariant report @?= MakeCaseFunction
+        makeCaseReportClauses report
+          @?= ["double zero = ?", "double (suc n) = ?"]
+        extent @?= "double n = ?"
+    , testCase "the whole right-hand side is reused for every clause" $ do
+        (report, extent) <-
+          withMakeCaseFixture warm $ \source goals -> do
+            report <-
+              makeCase
+                MakeCase.Request
+                  { MakeCase.requestGoalId = goalId (goals !! 1)
+                  , MakeCase.requestSplit = MakeCase.SplitVariables ("n" :| [])
+                  }
+                >>= liftIO . expectMakeCaseOk "split at goal 1"
+            pure (report, spanText source (makeCaseReportSpan report))
+        makeCaseReportClauses report
+          @?= ["twoHoles zero = ? + ?", "twoHoles (suc n) = ? + ?"]
+        extent @?= "twoHoles n = ? + ?"
+    , testCase "the extent stops before a where block" $ do
+        (report, extent) <-
+          withMakeCaseFixture warm $ \source goals -> do
+            report <-
+              makeCase
+                MakeCase.Request
+                  { MakeCase.requestGoalId = goalId (goals !! 3)
+                  , MakeCase.requestSplit = MakeCase.SplitVariables ("n" :| [])
+                  }
+                >>= liftIO . expectMakeCaseOk "split at goal 3"
+            pure (report, spanText source (makeCaseReportSpan report))
+        makeCaseReportClauses report
+          @?= ["withWhere zero = ?", "withWhere (suc n) = ?"]
+        extent @?= "withWhere n = ?"
+    , testCase "no variables introduces the function's arguments" $ do
+        (report, extent) <-
+          withMakeCaseFixture warm $ \source goals -> do
+            report <-
+              makeCase
+                MakeCase.Request
+                  { MakeCase.requestGoalId = goalId (goals !! 4)
+                  , MakeCase.requestSplit = MakeCase.IntroduceArgumentsOrSplitResult
+                  }
+                >>= liftIO . expectMakeCaseOk "split at goal 4"
+            pure (report, spanText source (makeCaseReportSpan report))
+        makeCaseReportVariant report @?= MakeCaseFunction
+        makeCaseReportClauses report @?= ["introduce x = ?"]
+        extent @?= "introduce = ?"
+    , testCase "a variable that is not in scope is revealed, not split" $ do
+        (report, extent) <-
+          withMakeCaseFixture warm $ \source goals -> do
+            report <-
+              makeCase
+                MakeCase.Request
+                  { MakeCase.requestGoalId = goalId (goals !! 5)
+                  , MakeCase.requestSplit = MakeCase.SplitVariables ("n" :| [])
+                  }
+                >>= liftIO . expectMakeCaseOk "split at goal 5"
+            pure (report, spanText source (makeCaseReportSpan report))
+        makeCaseReportClauses report @?= ["hidden {n} = ?"]
+        extent @?= "hidden = ?"
+    , testCase "the ellipsis sentinel expands a with-clause" $ do
+        (report, extent) <-
+          withMakeCaseFixture warm $ \source goals -> do
+            report <-
+              makeCase
+                MakeCase.Request
+                  { MakeCase.requestGoalId = goalId (goals !! 6)
+                  , MakeCase.requestSplit = MakeCase.ExpandEllipsis
+                  }
+                >>= liftIO . expectMakeCaseOk "split at goal 6"
+            pure (report, spanText source (makeCaseReportSpan report))
+        makeCaseReportClauses report @?= ["filter p (x ∷ xs) | false = ?"]
+        extent @?= "... | false = ?"
+    , testCase "an extended lambda reports clauses without the function name" $ do
+        (report, extent) <-
+          withMakeCaseFixture warm $ \source goals -> do
+            report <-
+              makeCase
+                MakeCase.Request
+                  { MakeCase.requestGoalId = goalId (goals !! 7)
+                  , MakeCase.requestSplit = MakeCase.SplitVariables ("n" :| [])
+                  }
+                >>= liftIO . expectMakeCaseOk "split at goal 7"
+            pure (report, spanText source (makeCaseReportSpan report))
+        makeCaseReportVariant report @?= MakeCaseExtendedLambda
+        makeCaseReportClauses report @?= ["zero → ?", "(suc n) → ?"]
+        extent @?= "n → ?"
+    , testCase "a bogus goal id is reported as an unknown id" $ do
+        e <-
+          withMakeCaseFixture warm $ \_ _ ->
+            makeCase
+              MakeCase.Request
+                { MakeCase.requestGoalId = bogusGoalId
+                , MakeCase.requestSplit = MakeCase.IntroduceArgumentsOrSplitResult
+                }
+              >>= liftIO . expectMakeCaseError "bogus id"
+        e @?= MakeCaseUnknownId bogusGoalId
+    , testCase "a goal outside a clause cannot be split" $ do
+        e <-
+          withMakeCaseFixture warm $ \_ goals ->
+            makeCase
+              MakeCase.Request
+                { MakeCase.requestGoalId = goalId (goals !! 8)
+                , MakeCase.requestSplit = MakeCase.IntroduceArgumentsOrSplitResult
+                }
+              >>= liftIO . expectMakeCaseFailure "a goal in a type signature"
+        assertBool
+          ("expected a \"Cannot split here\" message, got " <> show (errorMessage e))
+          ("Cannot split here" `Text.isInfixOf` errorMessage e)
+    , testCase "an unbound variable name is rejected" $ do
+        e <-
+          withMakeCaseFixture warm $ \_ goals ->
+            makeCase
+              MakeCase.Request
+                { MakeCase.requestGoalId = goalId (goals !! 0)
+                , MakeCase.requestSplit = MakeCase.SplitVariables ("nope" :| [])
+                }
+              >>= liftIO . expectMakeCaseFailure "an unbound variable"
+        assertBool
+          ("expected an \"Unbound variable\" message, got " <> show (errorMessage e))
+          ("Unbound variable nope" `Text.isInfixOf` errorMessage e)
+    , -- `checkClauseIsClean` (MakeCase.hs:463-466) refuses to split a clause
+      -- that holds a solved interaction point, since the split would discard
+      -- what was given.
+      testCase "a clause refined since the last load cannot be split" $ do
+        e <-
+          withMakeCaseFixture warm $ \_ goals -> do
+            void $
+              give
+                Give.Request
+                  { Give.requestForce = WithoutForce
+                  , Give.requestGoalId = goalId (goals !! 1)
+                  , Give.requestExpression = "zero"
+                  }
+                >>= liftIO . expectGiveOk "give into the first hole"
+            makeCase
+              MakeCase.Request
+                { MakeCase.requestGoalId = goalId (goals !! 2)
+                , MakeCase.requestSplit = MakeCase.SplitVariables ("n" :| [])
+                }
+              >>= liftIO . expectMakeCaseFailure "split a refined clause"
+        assertBool
+          ("expected a \"has been refined\" message, got " <> show (errorMessage e))
+          ("refined" `Text.isInfixOf` errorMessage e)
+    ]
+
 scenarioTests :: IO TCState -> TestTree
 scenarioTests warm =
   testGroup
@@ -1599,18 +1769,29 @@ expectIntroFailure label response = do
     other ->
       assertFailure $ label <> ": expected IntroFailed, got " <> show other
 
+expectMakeCaseOk :: String -> MakeCase.Response -> IO MakeCaseReport
+expectMakeCaseOk _ (Right report) = pure report
+expectMakeCaseOk label other =
+  assertFailure $ label <> ": expected a make case report, got " <> show other
+
+expectMakeCaseError :: String -> MakeCase.Response -> IO MakeCaseError
+expectMakeCaseError _ (Left e) = pure e
+expectMakeCaseError label other =
+  assertFailure $ label <> ": expected a make case error, got " <> show other
+
+expectMakeCaseFailure :: String -> MakeCase.Response -> IO Error
+expectMakeCaseFailure label response = do
+  e <- expectMakeCaseError label response
+  case e of
+    MakeCaseFailed e' -> pure e'
+    other ->
+      assertFailure $ label <> ": expected MakeCaseFailed, got " <> show other
+
 spanCoordinates :: Span -> ((Int, Int), (Int, Int))
 spanCoordinates s =
   (coordinates (spanStart s), coordinates (spanEnd s))
  where
   coordinates p = (positionLine p, positionColumn p)
-
-spanText :: Text -> Span -> Text
-spanText source s =
-  Text.take (end - start) (Text.drop start source)
- where
-  start = positionOffset $ spanStart s
-  end = positionOffset $ spanEnd s
 
 warningMessage :: Warning -> Text
 warningMessage (Warning (_, message)) = message
@@ -1669,6 +1850,19 @@ touchWhileChecking armed path (InteractionState tcState commandState slot) = do
     when shouldTouch $
       getModificationTime path >>= setModificationTime path . addUTCTime 1
   callback _ = pure ()
+
+-- Load the make-case fixture and hand the callback the source text Agda read
+-- along with the goals in file-position order, so that cases can name a goal by
+-- where it is rather than by an id creation order does not predict.
+withMakeCaseFixture ::
+  IO TCState -> (Text -> [Goal] -> InteractionM a) -> IO a
+withMakeCaseFixture warm k =
+  withFixtureSession warm "test/fixtures/MakeCase.agda" $ \path -> do
+    report <-
+      load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+        >>= liftIO . expectLoadOk "load"
+    source <- liftIO $ Text.IO.readFile path
+    k source (metasReportGoals report)
 
 bogusGoalId :: InteractionId
 bogusGoalId = 99
