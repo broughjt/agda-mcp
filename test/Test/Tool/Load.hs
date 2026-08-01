@@ -35,7 +35,7 @@ renderResponseTests =
     [ testCase "a successful load reports its load id and the file Agda loaded" $
         renderResponse (ResponseOk report)
           @?= rendered
-            [ "Load succeeded: no goals."
+            [ "Load succeeded: no goals"
             , "Load ID: L17"
             , "File: /tmp/Example.agda"
             ]
@@ -56,7 +56,7 @@ renderResponseTests =
                 }
           )
           @?= rendered
-            [ "Load succeeded: 1 goal."
+            [ "Load succeeded: 1 goal"
             , "Load ID: L17"
             , "File: /tmp/Example.agda"
             , ""
@@ -88,7 +88,7 @@ renderResponseTests =
                 }
           )
           @?= rendered
-            [ "Load succeeded: 2 goals."
+            [ "Load succeeded: 2 goals"
             , "Load ID: L17"
             , "File: /tmp/Example.agda"
             , ""
@@ -117,7 +117,7 @@ renderResponseTests =
                 }
           )
           @?= rendered
-            [ "Load succeeded: 1 goal."
+            [ "Load succeeded: 1 goal"
             , "Load ID: L17"
             , "File: /tmp/Example.agda"
             , ""
@@ -152,7 +152,7 @@ renderResponseTests =
                 }
           )
           @?= rendered
-            [ "Load succeeded: 2 goals."
+            [ "Load succeeded: 2 goals"
             , "Load ID: L17"
             , "File: /tmp/Example.agda"
             , ""
@@ -179,7 +179,7 @@ renderResponseTests =
                 }
           )
           @?= rendered
-            [ "Load succeeded: 1 goal."
+            [ "Load succeeded: 1 goal"
             , "Load ID: L17"
             , "File: /tmp/Example.agda"
             , ""
@@ -203,7 +203,7 @@ renderResponseTests =
                 }
           )
           @?= rendered
-            [ "Load succeeded: 1 goal."
+            [ "Load succeeded: 1 goal"
             , "Load ID: L17"
             , "File: /tmp/Example.agda"
             , ""
@@ -227,7 +227,7 @@ renderResponseTests =
                 }
           )
           @?= rendered
-            [ "Load succeeded: 1 goal."
+            [ "Load succeeded: 1 goal"
             , "Load ID: L17"
             , "File: /tmp/Example.agda"
             , ""
@@ -252,7 +252,7 @@ renderResponseTests =
                 }
           )
           @?= rendered
-            [ "Load succeeded: 1 goal."
+            [ "Load succeeded: 1 goal"
             , "Load ID: L17"
             , "File: /tmp/Example.agda"
             , ""
@@ -282,7 +282,7 @@ renderResponseTests =
                 }
           )
           @?= rendered
-            [ "Load succeeded: 1 goal."
+            [ "Load succeeded: 1 goal"
             , "Load ID: L17"
             , "File: /tmp/Example.agda"
             , ""
@@ -312,7 +312,7 @@ renderResponseTests =
                 }
           )
           @?= rendered
-            [ "Load succeeded: 1 goal."
+            [ "Load succeeded: 1 goal"
             , "Load ID: L17"
             , "File: /tmp/Example.agda"
             , ""
@@ -347,7 +347,7 @@ renderResponseTests =
                 }
           )
           @?= rendered
-            [ "Load succeeded: 1 goal."
+            [ "Load succeeded: 1 goal"
             , "Load ID: L17"
             , "File: /tmp/Example.agda"
             , ""
@@ -378,7 +378,7 @@ renderResponseTests =
                 }
           )
           @?= rendered
-            [ "Load succeeded: 1 goal."
+            [ "Load succeeded: 1 goal"
             , "Load ID: L17"
             , "File: /tmp/Example.agda"
             , ""
@@ -411,7 +411,7 @@ renderResponseTests =
                 }
           )
           @?= rendered
-            [ "Load succeeded: 1 goal."
+            [ "Load succeeded: 1 goal"
             , "Load ID: L17"
             , "File: /tmp/Example.agda"
             , ""
@@ -450,7 +450,7 @@ renderResponseTests =
                 }
           )
           @?= rendered
-            [ "Load succeeded: 1 goal."
+            [ "Load succeeded: 1 goal"
             , "Load ID: L17"
             , "File: /tmp/Example.agda"
             , ""
@@ -477,7 +477,7 @@ renderResponseTests =
                 }
           )
           @?= rendered
-            [ "Load succeeded: 1 goal."
+            [ "Load succeeded: 1 goal"
             , "Load ID: L17"
             , "File: /tmp/Example.agda"
             , ""
@@ -506,7 +506,7 @@ renderResponseTests =
                 }
           )
           @?= rendered
-            [ "Load succeeded: no goals."
+            [ "Load succeeded: no goals"
             , "Load ID: L17"
             , "File: /tmp/Example.agda"
             , ""
@@ -540,7 +540,7 @@ renderResponseTests =
                 }
           )
           @?= rendered
-            [ "Load succeeded: no goals."
+            [ "Load succeeded: no goals"
             , "Load ID: L17"
             , "File: /tmp/Example.agda"
             , ""
@@ -568,7 +568,7 @@ renderResponseTests =
                 }
           )
           @?= rendered
-            [ "Load succeeded: no goals."
+            [ "Load succeeded: no goals"
             , "Load ID: L17"
             , "File: /tmp/Example.agda"
             , ""
@@ -596,7 +596,7 @@ renderResponseTests =
                 }
           )
           @?= rendered
-            [ "Load succeeded with errors: 1 goal."
+            [ "Load succeeded with errors: 1 goal"
             , "Load ID: L17"
             , "File: /tmp/Example.agda"
             , ""
@@ -623,7 +623,7 @@ renderResponseTests =
                 }
           )
           @?= rendered
-            [ "Load succeeded with errors: no goals."
+            [ "Load succeeded with errors: no goals"
             , "Load ID: L17"
             , "File: /tmp/Example.agda"
             , ""
@@ -667,7 +667,7 @@ renderResponseTests =
                 }
           )
           @?= rendered
-            [ "Load succeeded with errors: 1 goal."
+            [ "Load succeeded with errors: 1 goal"
             , "Load ID: L17"
             , "File: /tmp/Example.agda"
             , ""
@@ -700,7 +700,7 @@ renderResponseTests =
                 }
           )
           @?= rendered
-            [ "Load failed."
+            [ "Load failed:"
             , ""
             , "  /tmp/Example.agda:6.9-10: error: [UnequalTerms]"
             , "  ℕ != Set₁"
@@ -724,7 +724,7 @@ renderResponseTests =
                 }
           )
           @?= rendered
-            [ "Load failed."
+            [ "Load failed:"
             , ""
             , "  an error"
             , ""
