@@ -95,6 +95,7 @@ data Request = Request
   { giveRequestLoadId :: LoadId
   , giveRequestItems :: [(InteractionId, Action)]
   }
+  deriving (Eq, Show)
 
 data Action
   = ActionGive Text
@@ -102,6 +103,7 @@ data Action
   | ActionElaborate Rewrite Text
   | -- | whether to use a pattern-matching lambda
     ActionIntro Bool
+  deriving (Eq, Show)
 
 data Response
   = -- The load id was refused.
@@ -109,6 +111,7 @@ data Response
   | -- The outcome of the batch of actions, together with the result of a reload
     -- executed afterwards.
     ResponseCompleted Outcome Load.Response
+  deriving (Eq, Show)
 
 -- TODO: Revisit when doing give tool error handling
 data Outcome
@@ -118,6 +121,7 @@ data Outcome
   | -- Writing the edits failed. The payload is the rendered `IOException`,
     -- which is the whole value of the refusal (which path, and why).
     OutcomeIOError Text
+  deriving (Eq, Show)
 
 data Edit = Edit
   { editGoalId :: InteractionId
@@ -125,8 +129,10 @@ data Edit = Edit
   , editText :: Text
   , editKind :: EditKind
   }
+  deriving (Eq, Show)
 
 data EditKind = EditKindVerbatim | EditKindParentheses | EditKindComputed
+  deriving (Eq, Show)
 
 data Refusal = Refusal
   { refusalGoalId :: InteractionId
@@ -138,14 +144,17 @@ data Refusal = Refusal
   , refusalPosition :: BatchPosition
   , refusalReason :: RefusalReason
   }
+  deriving (Eq, Show)
 
 data BatchPosition = BatchPosition {batchIndex :: Int, batchLength :: Int}
+  deriving (Eq, Show)
 
 data RefusalReason
   = RefusedUnknownGoal
   | RefusedError Error
   | RefusedIntroNotFound
   | RefusedIntroAmbiguous [Text]
+  deriving (Eq, Show)
 
 -- Business logic
 

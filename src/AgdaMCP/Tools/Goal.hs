@@ -72,6 +72,7 @@ data Response
   | -- TODO: Not known the happen in practice
     ResponseFailed Error
   | ResponseOk InteractionId GoalReport
+  deriving (Eq, Show)
 
 -- Business logic
 

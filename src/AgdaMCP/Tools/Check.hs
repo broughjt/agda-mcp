@@ -95,6 +95,7 @@ data Response
   | -- The goal the report answers for, beside the report itself, as in
     -- `Goal.ResponseOk`.
     ResponseOk InteractionId CheckReport
+  deriving (Eq, Show)
 
 data CheckReport = CheckReport
   { checkReportGoal :: GoalReport
@@ -112,6 +113,7 @@ data CheckReport = CheckReport
   Agda's own text and not the caller's (`suc zero` elaborates to `1`).
   -}
   }
+  deriving (Eq, Show)
 
 -- Business logic
 

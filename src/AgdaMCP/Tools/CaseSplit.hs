@@ -95,6 +95,7 @@ data Response
   | {- The goal the split targeted, what happened, and the reload result that
     followed. -}
     ResponseCompleted InteractionId Outcome Load.Response
+  deriving (Eq, Show)
 
 data Outcome
   = OutcomeApplied Edit
@@ -109,6 +110,7 @@ data Outcome
     OutcomeFileChanged
   | -- Writing the edit failed. The payload is the rendered `IOException`.
     OutcomeIOError Text
+  deriving (Eq, Show)
 
 data Edit = Edit
   { editSpan :: Span
@@ -133,6 +135,7 @@ data Edit = Edit
   file bytes are what the integration tests assert against.
   -}
   }
+  deriving (Eq, Show)
 
 -- Business logic
 

@@ -74,6 +74,7 @@ data Response
   = ResponseOk LoadReport
   | ResponseError Error
   | ResponseStale
+  deriving (Eq, Show)
 
 data LoadReport = LoadReport
   { loadReportId :: LoadId
@@ -83,6 +84,7 @@ data LoadReport = LoadReport
   , loadReportWarnings :: [Warning]
   , loadReportNonFatalErrors :: [NonFatalError]
   }
+  deriving (Eq, Show)
 
 -- Business logic
 
