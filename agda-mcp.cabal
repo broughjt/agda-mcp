@@ -10,10 +10,10 @@ author: Jackson Brough
 maintainer: jacksontbrough@gmail.com
 build-type: Simple
 
-library
-  hs-source-dirs: src
+library interaction
+  visibility: private
+  hs-source-dirs: interaction
   exposed-modules:
-    AgdaMCP
     AgdaMCP.Interaction
     AgdaMCP.Interaction.Context
     AgdaMCP.Interaction.ElaborateGive
@@ -21,13 +21,29 @@ library
     AgdaMCP.Interaction.Goal
     AgdaMCP.Interaction.GoalCheck
     AgdaMCP.Interaction.GoalInfer
-    AgdaMCP.Interaction.Internal
     AgdaMCP.Interaction.Intro
     AgdaMCP.Interaction.Load
     AgdaMCP.Interaction.MakeCase
     AgdaMCP.Interaction.Metas
     AgdaMCP.Interaction.Model
     AgdaMCP.Interaction.Refine
+    AgdaMCP.Interaction.Testing
+  other-modules:
+    AgdaMCP.Interaction.Internal
+  build-depends:
+      Agda == 2.8.*,
+      base >= 4.18 && < 5,
+      mtl,
+      stm,
+      text
+  default-language: GHC2021
+  ghc-options:
+      -Wall
+
+library
+  hs-source-dirs: src
+  exposed-modules:
+    AgdaMCP
     AgdaMCP.Tools
     AgdaMCP.Tools.Internal
     AgdaMCP.Tools.Load
@@ -37,14 +53,13 @@ library
     AgdaMCP.Tools.CaseSplit
   build-depends:
       Agda == 2.8.*,
+      agda-mcp:interaction,
       aeson,
       atomic-write,
       base >= 4.18 && < 5,
       containers,
       mcp,
       mtl,
-      parsec,
-      stm,
       text
   default-language: GHC2021
   ghc-options:
@@ -65,6 +80,7 @@ test-suite agda-mcp-test
   build-depends:
       Agda == 2.8.*,
       agda-mcp,
+      agda-mcp:interaction,
       base >= 4.18 && < 5,
       directory,
       filepath,

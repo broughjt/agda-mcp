@@ -13,10 +13,7 @@ import Agda.Interaction.Options (
   CommandLineOptions (..),
   defaultOptions,
  )
-import Agda.TypeChecking.Monad (
-  PersistentTCState (..),
-  TCState (..),
- )
+import Agda.TypeChecking.Monad (TCState)
 import Control.Monad.State (runStateT)
 import System.Directory (
   copyFile,
@@ -26,12 +23,16 @@ import System.Environment (lookupEnv)
 import System.FilePath (takeExtension, takeFileName, (</>))
 import System.IO.Temp (withSystemTempDirectory)
 
-import AgdaMCP.Interaction.Internal (
+import AgdaMCP.Interaction (
   InteractionM,
-  InteractionState (..),
+  InteractionState,
   newInteractionState,
  )
 import AgdaMCP.Interaction.Load qualified as Load
+import AgdaMCP.Interaction.Testing (
+  interactionTCState,
+  withWarmPersistentState,
+ )
 import Control.Exception (throwIO)
 
 -- Cache Agda standard library interface file loading
@@ -40,28 +41,20 @@ warmInteractionState =
   withStagedFiles ["test/fixtures/Warmup.agda"] $ \directory options -> do
     state <- newInteractionState options
     let target = directory </> "Warmup.agda"
-    (response, InteractionState tcState _ _) <-
+    (response, warmed) <-
       runStateT
         (Load.load Load.Request {Load.requestPath = target, Load.requestArguments = []})
         state
     case response of
-      Load.ResponseOk {} -> pure tcState
+      Load.ResponseOk {} -> pure $ interactionTCState warmed
       other ->
         throwIO $
           userError $
             "The test warm-up fixture failed to load: " <> show other
 
 warmedSession :: IO TCState -> CommandLineOptions -> IO InteractionState
-warmedSession warm options = do
-  warmState <- warm
-  InteractionState tcState commandState slot <- newInteractionState options
-  let persistent =
-        (stPersistentState warmState)
-          { stInteractionOutputCallback =
-              stInteractionOutputCallback (stPersistentState tcState)
-          }
-  pure $
-    InteractionState tcState {stPersistentState = persistent} commandState slot
+warmedSession warm options =
+  withWarmPersistentState <$> warm <*> newInteractionState options
 
 withFixtureSession ::
   IO TCState -> FilePath -> (FilePath -> InteractionM a) -> IO a

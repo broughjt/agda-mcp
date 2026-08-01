@@ -3,22 +3,15 @@
 module Test.Interaction (tests) where
 
 import Agda.Interaction.Base (
-  CurrentFile (..),
   Rewrite (..),
   UseForce (..),
-  theCurrentFile,
  )
 import Agda.Interaction.Response (InteractionOutputCallback, Response_boot (..))
 import Agda.Syntax.Common (InteractionId)
-import Agda.TypeChecking.Monad (
-  TCState,
-  initEnv,
-  runTCM,
-  setInteractionOutputCallback,
- )
+import Agda.TypeChecking.Monad (TCState)
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad.State (gets, runStateT)
+import Control.Monad.State (runStateT)
 import Data.Char (isDigit)
 import Data.Functor (void)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
@@ -39,8 +32,7 @@ import Test.Tasty.HUnit (
   (@?=),
  )
 
-import Agda.Utils.FileName (filePath)
-import AgdaMCP.Interaction (InteractionM)
+import AgdaMCP.Interaction (InteractionM, InteractionState)
 import AgdaMCP.Interaction.Context (context)
 import AgdaMCP.Interaction.Context qualified as Context
 import AgdaMCP.Interaction.ElaborateGive (elaborateGive)
@@ -53,7 +45,6 @@ import AgdaMCP.Interaction.GoalCheck (goalCheck)
 import AgdaMCP.Interaction.GoalCheck qualified as GoalCheck
 import AgdaMCP.Interaction.GoalInfer (Have (..), goalInfer)
 import AgdaMCP.Interaction.GoalInfer qualified as GoalInfer
-import AgdaMCP.Interaction.Internal (InteractionState (..))
 import AgdaMCP.Interaction.Intro (intro)
 import AgdaMCP.Interaction.Intro qualified as Intro
 import AgdaMCP.Interaction.Load (load)
@@ -87,6 +78,7 @@ import AgdaMCP.Interaction.Model (
  )
 import AgdaMCP.Interaction.Refine (refine)
 import AgdaMCP.Interaction.Refine qualified as Refine
+import AgdaMCP.Interaction.Testing (currentFile, observeResponses)
 import Test.Harness (
   warmInteractionState,
   warmedSession,
@@ -1677,11 +1669,6 @@ scenarioTests warm =
           liftIO $ elaborated @?= body
     ]
 
-currentFile :: InteractionM (Maybe FilePath)
-currentFile =
-  gets $ \(InteractionState _ commandState _) ->
-    filePath . currentFilePath <$> theCurrentFile commandState
-
 expectLoadOk ::
   String ->
   Load.Response ->
@@ -1839,10 +1826,7 @@ withStaleFixtureSession warm source k =
 -- the two modification time samples.
 touchWhileChecking ::
   IORef Bool -> FilePath -> InteractionState -> IO InteractionState
-touchWhileChecking armed path (InteractionState tcState commandState slot) = do
-  ((), tcState') <-
-    runTCM initEnv tcState $ setInteractionOutputCallback callback
-  pure $ InteractionState tcState' commandState slot
+touchWhileChecking armed path = observeResponses callback
  where
   callback :: InteractionOutputCallback
   callback (Resp_RunningInfo _ _) = liftIO $ do
