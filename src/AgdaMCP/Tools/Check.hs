@@ -12,8 +12,10 @@ module AgdaMCP.Tools.Check (
 import Agda.Interaction.Base (Rewrite)
 import Agda.Syntax.Common (InteractionId (..))
 import Data.Aeson (FromJSON (..), object, withObject, (.:), (.=))
+import Data.Aeson.Types qualified as Aeson
 import Data.Map qualified as Map
 import Data.Text (Text)
+import Data.Text qualified as Text
 import MCP.Server (
   InputSchema (..),
   ToolHandler,
@@ -79,21 +81,19 @@ data Request = Request
   { checkRequestLoadId :: LoadId
   , checkRequestGoalId :: InteractionId
   , checkRequestNormalization :: Rewrite
-  , -- TODO:
-    checkRequestExpression :: Text
+  , checkRequestExpression :: Text
   {- ^ Non-blank; a blank expression is a class-2 argument error rather than
   the wrapper's business. (The `goal` wrapper is what answers "just show me
   the goal", and `goal` is the tool for it.)
   -}
   }
+  deriving (Eq, Show)
 
 data Response
   = ResponseRefused LoadIdRefusal
   | ResponseUnknownGoal InteractionId
   | ResponseFailed Error
-  | -- The goal the report answers for, beside the report itself, as in
-    -- `Goal.ResponseOk`.
-    ResponseOk InteractionId CheckReport
+  | ResponseOk InteractionId Rewrite CheckReport
   deriving (Eq, Show)
 
 data CheckReport = CheckReport
@@ -127,7 +127,16 @@ instance FromJSON Request where
       <$> o .: "load_id"
       <*> (InteractionId <$> o .: "goal")
       <*> parseNormalizationField o
-      <*> o .: "expression"
+      <*> Aeson.explicitParseField parseExpression o "expression"
+
+parseExpression :: Aeson.Value -> Aeson.Parser Text
+parseExpression = Aeson.withText "expression" $ \text ->
+  if Text.null (Text.strip text)
+    then
+      fail $
+        "expected an Agda expression to try at the goal, but got "
+          <> show text
+    else pure text
 
 -- Response rendering
 

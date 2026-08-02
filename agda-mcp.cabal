@@ -79,6 +79,7 @@ test-suite agda-mcp-test
     Test.Interaction
     Test.Model
     Test.Tool
+    Test.Tool.Check
     Test.Tool.Goal
     Test.Tool.Harness
     Test.Tool.Load

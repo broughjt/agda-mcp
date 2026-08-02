@@ -356,7 +356,7 @@ expectGoalOk label other =
   assertFailure $ label <> ": expected ResponseOk, got " <> show other
 
 expectCheckOk :: String -> Check.Response -> IO Check.CheckReport
-expectCheckOk _ (Check.ResponseOk _ report) = pure report
+expectCheckOk _ (Check.ResponseOk _ _ report) = pure report
 expectCheckOk label other =
   assertFailure $ label <> ": expected ResponseOk, got " <> show other
 
