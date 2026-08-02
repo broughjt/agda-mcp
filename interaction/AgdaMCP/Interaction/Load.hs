@@ -1,19 +1,31 @@
 module AgdaMCP.Interaction.Load (
   Request (..),
   Response (..),
+  LoadedFile (..),
   load,
+  SourceHashUnavailable (..),
 ) where
 
 import Agda.Interaction.Base (
   CommandState (..),
+  CurrentFile (..),
   Rewrite (..),
  )
 import Agda.Interaction.Command (CommandM)
 import Agda.Interaction.Imports (Mode (..))
 import Agda.Interaction.InteractionTop (cmd_load')
+import Agda.Syntax.Common.Pretty (prettyShow)
 import Agda.TypeChecking.Monad (TCErr (..))
+import Agda.TypeChecking.Monad.Base (
+  Interface (iSourceHash),
+  ModuleInfo (miInterface),
+ )
+import Agda.TypeChecking.Monad.Imports (getVisitedModule)
+import Agda.Utils.FileName (filePath)
+import Agda.Utils.Hash (Hash)
+import Control.Exception (Exception, throwIO)
+import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (gets, lift, modify)
-import Data.Maybe (isJust)
 import Data.Text qualified as Text
 
 import AgdaMCP.Interaction.Extract (extractError)
@@ -50,13 +62,19 @@ data Request = Request {requestPath :: FilePath, requestArguments :: [Text]}
 data Response
   = -- The success path: the file type-checked and Agda updated the interaction
     -- state.
-    ResponseOk MetasReport
+    ResponseOk LoadedFile MetasReport
   | -- The failure path: a `TCErr` was thrown in `cmd_load'`; state is rolled
     -- back as described in app/Main.hs.
     ResponseError Error
   | -- The stale path: the file changed on disk while it was being type checked,
     -- so Agda discarded the interaction state.
     ResponseStale
+  deriving (Eq, Show)
+
+data LoadedFile = LoadedFile
+  { loadedFilePath :: FilePath
+  , loadedFileSourceHash :: Hash
+  }
   deriving (Eq, Show)
 
 load :: Request -> InteractionM Response
@@ -73,17 +91,18 @@ loadInternal (Request path arguments) = do
         -- `cmd_load'` clears `theCurrentFile` as its first action and resets it
         -- only inside the `when (t == t')` block, so after a non-throwing return
         -- `theCurrentFile` is `Just` exactly when the fresh path was
-        -- taken. `isJust` therefore distinguishes the two with no race against
-        -- further disk changes.
-        Right <$> gets (isJust . theCurrentFile)
+        -- taken. Reading it back therefore distinguishes the two with no race
+        -- against further disk changes.
+        Right <$> gets theCurrentFile
     )
       `catchTCErr` handler
   case outcome of
-    Right True -> ResponseOk <$> lift (extractMetas AsIs)
-    Right False -> pure ResponseStale
+    Right (Just current) ->
+      ResponseOk <$> extractLoadedFile current <*> lift (extractMetas AsIs)
+    Right Nothing -> pure ResponseStale
     Left e -> pure $ ResponseError e
  where
-  handler :: TCErr -> CommandM (Either Error Bool)
+  handler :: TCErr -> CommandM (Either Error (Maybe CurrentFile))
   handler e = do
     -- Even though `cmd_load'` clears `theCurrentFile` during its setup
     -- (:851-853), the automatic state rollback in the `StateT` and `TCM`
@@ -92,3 +111,33 @@ loadInternal (Request path arguments) = do
     -- `runInteraction`. We match this behavior here.
     modify $ \state -> state {theCurrentFile = Nothing}
     Left <$> lift (extractError e)
+
+extractLoadedFile :: CurrentFile -> CommandM LoadedFile
+extractLoadedFile current =
+  -- `visitModule` records the interface even when the module has warnings such
+  -- as open holes (Imports.hs:467; warnings only skip `storeDecodedModule`), so
+  -- the module we have just loaded always has one. If it does not, our mental
+  -- model of Agda is wrong.
+  lift (getVisitedModule $ currentFileModule current)
+    >>= maybe unavailable loaded
+ where
+  path :: FilePath
+  path = filePath $ currentFilePath current
+
+  unavailable :: CommandM LoadedFile
+  unavailable =
+    liftIO $
+      throwIO $
+        SourceHashUnavailable path $
+          Text.pack $
+            prettyShow (currentFileModule current)
+
+  loaded :: ModuleInfo -> CommandM LoadedFile
+  loaded = pure . LoadedFile path . iSourceHash . miInterface
+
+-- Bug: the module Agda reported as loaded has no visited interface, so the
+-- source hash callers fingerprint edits against cannot be obtained.
+data SourceHashUnavailable = SourceHashUnavailable FilePath Text
+  deriving (Show)
+
+instance Exception SourceHashUnavailable

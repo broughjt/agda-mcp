@@ -199,11 +199,12 @@ data GiveAction
 
 -- How a give/refine/elaborate command can fail.
 data GiveError
-  = -- A bogus interaction id (`withInteractionId`'s lookup failed).
+  = -- A bogus interaction id (the interaction point lookup failed).
     GiveUnknownId InteractionId
   | -- Any other `TCErr`. For example, a parse error, `CannotGive`,
-    -- `CannotRefine`, or an ill-typed expression.
-    GiveFailed Error
+    -- `CannotRefine`, or an ill-typed expression. The `Span` is the hole the
+    -- command was filling.
+    GiveFailed Span Error
   deriving (Eq, Show)
 
 -- Ways in which an intro command can fail. This is a superset of `GiveError`,
@@ -212,9 +213,9 @@ data GiveError
 -- (`Info_Intro_ConstructorUnknown`).
 data IntroError
   = IntroUnknownId InteractionId
-  | IntroFailed Error
-  | IntroNotFound
-  | IntroAmbiguous [Text]
+  | IntroFailed Span Error
+  | IntroNotFound Span
+  | IntroAmbiguous Span [Text]
   deriving (Eq, Show)
 
 -- Generic errors

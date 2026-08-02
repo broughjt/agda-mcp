@@ -10,14 +10,19 @@ import Agda.Interaction.BasicOps (introTactic)
 import Agda.Interaction.Command (CommandM)
 import Agda.Interaction.InteractionTop (GiveRefine (..), liftCommandMT)
 import Agda.Syntax.Common (InteractionId)
+import Agda.Syntax.Position (Range)
 import Agda.TypeChecking.Monad (withInteractionId)
 import Control.Monad.State (get, lift)
-import Data.Bifunctor (first)
+import Data.Bifunctor (bimap)
 import Data.Text (Text)
 import Data.Text qualified as Text
 
-import AgdaMCP.Interaction.Extract (classifyInteractionError)
-import AgdaMCP.Interaction.Give (expectComputed, giveGen')
+import AgdaMCP.Interaction.Extract (extractError)
+import AgdaMCP.Interaction.Give (
+  expectComputed,
+  giveGen',
+  withResolvedHole,
+ )
 import AgdaMCP.Interaction.Internal (
   GiveSlot,
   InteractionM,
@@ -26,8 +31,8 @@ import AgdaMCP.Interaction.Internal (
   runCommandM,
  )
 import AgdaMCP.Interaction.Model (
-  GiveError (..),
   IntroError (..),
+  Span,
  )
 
 -- Intro takes no user expression, since `introTactic` proposes the candidate(s)
@@ -38,10 +43,9 @@ data Request = Request
   }
 
 -- `Left` collects every reason no action was produced--a bad ID, a `TCErr`, or
--- `introTactic` finding no/several candidates. `Right` is the introduction form
--- Agda chose: intro is handed no text of its own, so it can only ever splice
--- Agda's (see `expectComputed`).
-type Response = Either IntroError Text
+-- `introTactic` finding no/several candidates. `Right` is the hole and the
+-- introduction form Agda chose.
+type Response = Either IntroError (Span, Text)
 
 intro :: Request -> InteractionM Response
 intro request = do
@@ -50,22 +54,24 @@ intro request = do
 
 introInternal :: GiveSlot -> Request -> CommandM Response
 introInternal slot (Request patternLambda goalId) =
+  withResolvedHole IntroUnknownId goalId $
+    introInHole slot patternLambda goalId
+
+introInHole ::
+  GiveSlot -> Bool -> InteractionId -> Range -> Span -> CommandM Response
+introInHole slot patternLambda goalId range holeSpan =
   -- `interpret Cmd_intro` (InteractionTop.hs:653-660). `introTactic` runs
   -- outside `withInteractionId` and the give runs inside it. Mirror the split
   -- exactly.
   ( do
       candidates <- lift $ introTactic patternLambda goalId
       liftCommandMT (withInteractionId goalId) $ case candidates of
-        [] -> pure $ Left IntroNotFound
+        [] -> pure $ Left $ IntroNotFound holeSpan
         [s] -> do
-          giveAction <- giveGen' slot WithoutForce Intro goalId $ Text.pack s
-          first fromGiveError <$> traverse (expectComputed goalId) giveAction
-        _ -> pure $ Left $ IntroAmbiguous $ map Text.pack candidates
+          outcome <- giveGen' slot WithoutForce Intro goalId range $ Text.pack s
+          bimap (IntroFailed holeSpan) (holeSpan,)
+            <$> traverse (expectComputed goalId) outcome
+        _ ->
+          pure $ Left $ IntroAmbiguous holeSpan $ map Text.pack candidates
   )
-    `catchTCErr` (fmap Left . lift . classifyInteractionError IntroUnknownId IntroFailed)
-
--- Embed the shared driver's `GiveError` into intro's richer error type. The
--- `NotFound`/`Ambiguous` cases never come from a give, so they are absent here.
-fromGiveError :: GiveError -> IntroError
-fromGiveError (GiveUnknownId goalId) = IntroUnknownId goalId
-fromGiveError (GiveFailed err) = IntroFailed err
+    `catchTCErr` (fmap (Left . IntroFailed holeSpan) . lift . extractError)

@@ -66,7 +66,7 @@ import AgdaMCP.Interaction.GoalInfer (Have (..), goalInfer)
 import AgdaMCP.Interaction.GoalInfer qualified as GoalInfer
 import AgdaMCP.Interaction.Intro (intro)
 import AgdaMCP.Interaction.Intro qualified as Intro
-import AgdaMCP.Interaction.Load (load)
+import AgdaMCP.Interaction.Load (LoadedFile (..), load)
 import AgdaMCP.Interaction.Load qualified as Load
 import AgdaMCP.Interaction.MakeCase (
   MakeCaseError (..),
@@ -146,6 +146,37 @@ loadTests warm =
             void $ liftIO $ expectLoadOk "load" response
             (,) path <$> currentFile
         recorded @?= Just path
+    , testCase "a successful load reports the file Agda loaded, canonically" $ do
+        (path, reported) <-
+          withFixtureSession warm "test/fixtures/HoleNatural.agda" $ \path -> do
+            let path' =
+                  takeDirectory path </> "." </> takeFileName path
+            file <-
+              load
+                Load.Request
+                  { Load.requestPath = path'
+                  , Load.requestArguments = []
+                  }
+                >>= liftIO . expectLoadedFile "load"
+            pure (path, file)
+        loadedFilePath reported @?= path
+    , testCase "the reported source hash follows the file's contents" $ do
+        (first', unchanged, edited) <-
+          withFixtureSession warm "test/fixtures/HoleNatural.agda" $ \path -> do
+            let request =
+                  Load.Request {Load.requestPath = path, Load.requestArguments = []}
+            first' <- load request >>= liftIO . expectLoadedFile "first load"
+            unchanged <- load request >>= liftIO . expectLoadedFile "second load"
+            liftIO $ Text.IO.writeFile path commentedHoleNatural
+            edited <- load request >>= liftIO . expectLoadedFile "load after editing"
+            pure (first', unchanged, edited)
+        assertEqual
+          "an unchanged file hashes the same"
+          (loadedFileSourceHash first')
+          (loadedFileSourceHash unchanged)
+        assertBool
+          "an edited file hashes differently"
+          (loadedFileSourceHash edited /= loadedFileSourceHash first')
     , testCase "a failed load clears the recorded current file" $ do
         (afterSuccess, afterFailure) <-
           withFixtureSession warm "test/fixtures/HoleNatural.agda" $ \path -> do
@@ -1023,6 +1054,64 @@ giveFamilyTests warm =
                 }
               >>= liftIO . expectElaborated "elaborateGive normalizes"
           liftIO $ elaborated @?= "2"
+    , testCase "every give family command reports the hole it worked in" $
+        withFixtureSession warm "test/fixtures/GiveFamily.agda" $ \path -> do
+          report <-
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          given <-
+            give
+              Give.Request
+                { Give.requestForce = WithoutForce
+                , Give.requestGoalId = 0
+                , Give.requestExpression = "zero"
+                }
+              >>= liftIO . expectGiveHole "give"
+          liftIO $ (given @?=) =<< goalSpanOf "the given goal" 0 report
+
+          refined <-
+            refine
+              Refine.Request
+                { Refine.requestGoalId = 1
+                , Refine.requestExpression = "suc"
+                }
+              >>= liftIO . expectGiveHole "refine"
+          liftIO $ (refined @?=) =<< goalSpanOf "the refined goal" 1 report
+
+          introduced <-
+            intro
+              Intro.Request
+                { Intro.requestPatternLambda = False
+                , Intro.requestGoalId = 2
+                }
+              >>= liftIO . expectIntroHole "intro"
+          liftIO $ (introduced @?=) =<< goalSpanOf "the introduced goal" 2 report
+
+          elaborated <-
+            elaborateGive
+              ElaborateGive.Request
+                { ElaborateGive.requestNormalization = Normalised
+                , ElaborateGive.requestGoalId = 3
+                , ElaborateGive.requestExpression = "1 + 1"
+                }
+              >>= liftIO . expectGiveHole "elaborateGive"
+          liftIO $ (elaborated @?=) =<< goalSpanOf "the elaborated goal" 3 report
+    , testCase "a rejected give reports the hole it was refused at" $
+        withFixtureSession warm "test/fixtures/GiveFamily.agda" $ \path -> do
+          report <-
+            load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+              >>= liftIO . expectLoadOk "load"
+
+          (hole, _) <-
+            give
+              Give.Request
+                { Give.requestForce = WithoutForce
+                , Give.requestGoalId = 0
+                , Give.requestExpression = "suc suc"
+                }
+              >>= liftIO . expectGiveRefusal "ill-typed give"
+          liftIO $ (hole @?=) =<< goalSpanOf "the refused goal" 0 report
     , testCase "a failed give family command leaves its goal usable" $
         withFixtureSession warm "test/fixtures/GiveFamily.agda" $ \path -> do
           void $
@@ -1220,7 +1309,7 @@ introTests warm =
     "Intro"
     [ testCase "intro reports when the goal has no introduction form" $
         withFixtureSession warm "test/fixtures/IntroCandidates.agda" $ \path -> do
-          void $
+          report <-
             load Load.Request {Load.requestPath = path, Load.requestArguments = []}
               >>= liftIO . expectLoadOk "load"
 
@@ -1231,10 +1320,11 @@ introTests warm =
                 , Intro.requestGoalId = 1
                 }
               >>= liftIO . expectIntroError "a postulated type"
-          liftIO $ introduced @?= IntroNotFound
+          hole <- liftIO $ goalSpanOf "the postulated goal" 1 report
+          liftIO $ introduced @?= IntroNotFound hole
     , testCase "intro reports every candidate when the choice is ambiguous" $
         withFixtureSession warm "test/fixtures/IntroCandidates.agda" $ \path -> do
-          void $
+          report <-
             load Load.Request {Load.requestPath = path, Load.requestArguments = []}
               >>= liftIO . expectLoadOk "load"
 
@@ -1245,7 +1335,8 @@ introTests warm =
                 , Intro.requestGoalId = 2
                 }
               >>= liftIO . expectIntroError "a type with two constructors"
-          liftIO $ introduced @?= IntroAmbiguous ["false", "true"]
+          hole <- liftIO $ goalSpanOf "the ambiguous goal" 2 report
+          liftIO $ introduced @?= IntroAmbiguous hole ["false", "true"]
     , testCase "intro writes a function goal as a lambda" $
         withFixtureSession warm "test/fixtures/IntroCandidates.agda" $ \path -> do
           void $
@@ -1674,8 +1765,13 @@ expectLoadOk ::
   String ->
   Load.Response ->
   IO MetasReport
-expectLoadOk _ (Load.ResponseOk report) = pure report
+expectLoadOk _ (Load.ResponseOk _ report) = pure report
 expectLoadOk label other =
+  assertFailure $ label <> ": expected ResponseOk, got " <> show other
+
+expectLoadedFile :: String -> Load.Response -> IO LoadedFile
+expectLoadedFile _ (Load.ResponseOk file _) = pure file
+expectLoadedFile label other =
   assertFailure $ label <> ": expected ResponseOk, got " <> show other
 
 expectLoadError :: String -> Load.Response -> IO Error
@@ -1714,8 +1810,14 @@ expectGoalFailure label other =
   assertFailure $ label <> ": expected GoalFailed, got " <> show other
 
 expectGiveOk :: String -> Give.Response -> IO GiveAction
-expectGiveOk _ (Right action) = pure action
+expectGiveOk _ (Right (_, action)) = pure action
 expectGiveOk label other =
+  assertFailure $ label <> ": expected a give action, got " <> show other
+
+-- The hole a give-family command reports having filled.
+expectGiveHole :: (Show a) => String -> Either GiveError (Span, a) -> IO Span
+expectGiveHole _ (Right (holeSpan, _)) = pure holeSpan
+expectGiveHole label other =
   assertFailure $ label <> ": expected a give action, got " <> show other
 
 -- Give and refine answer with a `GiveAction`, elaborate-give with the
@@ -1726,22 +1828,31 @@ expectGiveError label other =
   assertFailure $ label <> ": expected a give error, got " <> show other
 
 expectGiveFailure :: String -> Give.Response -> IO Error
-expectGiveFailure label response = do
+expectGiveFailure label response = snd <$> expectGiveRefusal label response
+
+-- A failed give reports the hole it was working in alongside the error.
+expectGiveRefusal :: String -> Give.Response -> IO (Span, Error)
+expectGiveRefusal label response = do
   e <- expectGiveError label response
   case e of
-    GiveFailed e' -> pure e'
+    GiveFailed holeSpan e' -> pure (holeSpan, e')
     other ->
       assertFailure $ label <> ": expected GiveFailed, got " <> show other
 
 expectElaborated :: String -> ElaborateGive.Response -> IO Text
-expectElaborated _ (Right elaborated) = pure elaborated
+expectElaborated _ (Right (_, elaborated)) = pure elaborated
 expectElaborated label other =
   assertFailure $
     label <> ": expected an elaborated expression, got " <> show other
 
 expectIntroOk :: String -> Intro.Response -> IO Text
-expectIntroOk _ (Right introduced) = pure introduced
+expectIntroOk _ (Right (_, introduced)) = pure introduced
 expectIntroOk label other =
+  assertFailure $ label <> ": expected an introduction form, got " <> show other
+
+expectIntroHole :: String -> Intro.Response -> IO Span
+expectIntroHole _ (Right (holeSpan, _)) = pure holeSpan
+expectIntroHole label other =
   assertFailure $ label <> ": expected an introduction form, got " <> show other
 
 expectIntroError :: String -> Intro.Response -> IO IntroError
@@ -1753,7 +1864,7 @@ expectIntroFailure :: String -> Intro.Response -> IO Error
 expectIntroFailure label response = do
   e <- expectIntroError label response
   case e of
-    IntroFailed e' -> pure e'
+    IntroFailed _ e' -> pure e'
     other ->
       assertFailure $ label <> ": expected IntroFailed, got " <> show other
 
@@ -1774,6 +1885,18 @@ expectMakeCaseFailure label response = do
     MakeCaseFailed e' -> pure e'
     other ->
       assertFailure $ label <> ": expected MakeCaseFailed, got " <> show other
+
+goalSpanOf :: String -> InteractionId -> MetasReport -> IO Span
+goalSpanOf label wanted report =
+  case filter ((== wanted) . goalId) (metasReportGoals report) of
+    [only] -> pure $ goalSpan only
+    other ->
+      assertFailure $
+        label
+          <> ": expected exactly one goal "
+          <> show wanted
+          <> ", got "
+          <> show other
 
 spanCoordinates :: Span -> ((Int, Int), (Int, Int))
 spanCoordinates s =
@@ -1798,6 +1921,18 @@ firstLine = Text.takeWhile (/= '\n')
 -- in rendered messages differs on every run.
 withoutPath :: FilePath -> Text -> Text
 withoutPath path = Text.replace (Text.pack path) "FIXTURE"
+
+commentedHoleNatural :: Text
+commentedHoleNatural =
+  Text.unlines
+    [ "module HoleNatural where"
+    , ""
+    , "open import Data.Nat"
+    , ""
+    , "-- Doubling would be nicer."
+    , "foo : ℕ → ℕ"
+    , "foo n = {!!}"
+    ]
 
 brokenHoleNatural :: Text
 brokenHoleNatural =
