@@ -84,9 +84,11 @@ test-suite agda-mcp-test
     Test.Tool.Scenario
   build-depends:
       Agda == 2.8.*,
+      aeson,
       agda-mcp,
       agda-mcp:interaction,
       base >= 4.18 && < 5,
+      containers,
       directory,
       filepath,
       mtl,

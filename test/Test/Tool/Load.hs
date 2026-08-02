@@ -2,6 +2,8 @@
 
 module Test.Tool.Load (tests) where
 
+import Data.Aeson qualified as Aeson
+import Data.Map qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Test.Tasty (TestTree, testGroup)
@@ -17,16 +19,45 @@ import AgdaMCP.Interaction (
   Span (..),
   Warning (..),
  )
-import AgdaMCP.Tools.Load (LoadReport (..), Response (..), renderResponse)
+import AgdaMCP.Tools.Load (
+  LoadReport (..),
+  Request (..),
+  Response (..),
+  renderResponse,
+ )
 import AgdaMCP.Tools.LoadId (LoadId (..))
+import AgdaMCP.Tools.MCP (parseArguments)
 import Test.Corpus qualified as Corpus
 
 tests :: TestTree
 tests =
   testGroup
     "Load"
-    [ renderResponseTests
+    [ parseArgumentsTests
+    , renderResponseTests
     ]
+
+parseArgumentsTests :: TestTree
+parseArgumentsTests =
+  testGroup
+    "parseArguments"
+    [ testCase "a call with no arguments at all is missing its path" $
+        parseRequest Nothing
+          @?= Left "Error in $: key \"path\" not found"
+    , testCase "a call without a path is refused" $
+        parseRequest (Just Map.empty)
+          @?= Left "Error in $: key \"path\" not found"
+    , testCase "a path that is not a string is refused" $
+        parseRequest (Just $ Map.fromList [("path", Aeson.Number 5)])
+          @?= Left "Error in $.path: expected String, but encountered Number"
+    , testCase "a string path parses" $
+        parseRequest
+          (Just $ Map.fromList [("path", Aeson.String "/tmp/Example.agda")])
+          @?= Right (Request "/tmp/Example.agda")
+    ]
+ where
+  parseRequest :: Maybe (Map.Map Text Aeson.Value) -> Either Text Request
+  parseRequest = parseArguments
 
 renderResponseTests :: TestTree
 renderResponseTests =
