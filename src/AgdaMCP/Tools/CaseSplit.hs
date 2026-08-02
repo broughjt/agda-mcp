@@ -230,5 +230,5 @@ validateVariable = error "un"
 -- TODO: Report the extent replaced, the clauses written, and the reload's
 -- goals, which are the ids the caller must use from here. Inline exact, as
 -- the other tools' renderers are.
-renderResponse :: Response -> Text
+renderResponse :: Response -> Either Text Text
 renderResponse = error "un"

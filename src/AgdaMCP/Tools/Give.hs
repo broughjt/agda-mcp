@@ -170,5 +170,5 @@ instance FromJSON Request where
 
 -- Response rendering
 
-renderResponse :: Response -> Text
+renderResponse :: Response -> Either Text Text
 renderResponse = error "un"

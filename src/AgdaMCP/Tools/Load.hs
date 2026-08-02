@@ -82,7 +82,7 @@ loadTool =
         )
         (Just ["path"])
     )
-    (textToolHandle load renderResponse)
+    (textToolHandle load $ Right . renderResponse)
 
 data Request = Request {loadRequestPath :: FilePath}
   deriving (Eq, Show)

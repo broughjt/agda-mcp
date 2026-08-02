@@ -5,6 +5,7 @@ module AgdaMCP.Tools.MCP (
   parseArguments,
   parseNormalizationField,
   normalizations,
+  renderNormalization,
   loadIdSchema,
   goalIdSchema,
   normalizationSchema,
@@ -30,15 +31,20 @@ import MCP.Server (
 
 import AgdaMCP.Tools.State (ToolM, runToolM)
 
+-- The renderer's `Left` is agent misuse, while `Right` is a normal result.
 textToolHandle ::
   (FromJSON p) =>
   (p -> ToolM q) ->
-  (q -> Text) ->
+  (q -> Either Text Text) ->
   (Maybe (Map Text Value) -> MCPServerT (ProcessResult CallToolResult))
 textToolHandle handle renderResponse =
   either
     (pure . ProcessSuccess . toolTextError)
-    ( fmap (ProcessSuccess . toolTextResult . (: []) . renderResponse)
+    ( fmap
+        ( ProcessSuccess
+            . either toolTextError (toolTextResult . (: []))
+            . renderResponse
+        )
         . runToolM
         . handle
     )
@@ -86,6 +92,13 @@ normalizations =
     , ("simplified", Simplified)
     , ("normalized", Normalised)
     ]
+
+renderNormalization :: Rewrite -> Text
+renderNormalization AsIs = "asis"
+renderNormalization Instantiated = "instantiated"
+renderNormalization HeadNormal = "headnormal"
+renderNormalization Simplified = "simplified"
+renderNormalization Normalised = "normalized"
 
 -- Schema elements shared by multiple tools
 

@@ -64,13 +64,14 @@ data Request = Request
   , goalRequestGoalId :: InteractionId
   , goalRequestNormalization :: Rewrite
   }
+  deriving (Eq, Show)
 
 data Response
   = ResponseRefused LoadIdRefusal
   | ResponseUnknownGoal InteractionId
   | -- TODO: Not known the happen in practice
     ResponseFailed Error
-  | ResponseOk InteractionId GoalReport
+  | ResponseOk InteractionId Rewrite GoalReport
   deriving (Eq, Show)
 
 -- Business logic
@@ -89,12 +90,12 @@ instance FromJSON Request where
 
 -- Response rendering
 
-renderResponse :: Response -> Text
+renderResponse :: Response -> Either Text Text
 renderResponse = error "un"
 
 -- Shared with the check tool, which reports the same goal alongside its
--- expression results. The context is outermost first with let bindings last --
--- the reverse of the order Agda's own `*Goal type etc.*` buffer displays -- so
--- this is where that order is chosen deliberately.
-renderGoalReport :: InteractionId -> GoalReport -> Text
+-- expression results. The wrapper hands the context outermost first with let
+-- bindings last; this renderer reverses it to innermost-first against the
+-- `⊢`, the same deliberate choice load's renderer makes.
+renderGoalReport :: Rewrite -> InteractionId -> GoalReport -> Text
 renderGoalReport = error "un"
