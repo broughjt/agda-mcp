@@ -80,6 +80,7 @@ import AgdaMCP.Interaction.Metas qualified as Metas
 import AgdaMCP.Interaction.Refine (refine)
 import AgdaMCP.Interaction.Refine qualified as Refine
 import AgdaMCP.Interaction.Testing (currentFile, observeResponses)
+import Test.Corpus qualified as Corpus
 import Test.Harness (
   warmInteractionState,
   warmedSession,
@@ -205,25 +206,20 @@ loadTests warm =
               pure (before, after)
           after @?= before
     , testCase "load arguments do not persist across loads" $ do
-        (withSafe, withoutSafe) <-
+        (path, withSafe, withoutSafe) <-
           withFixtureSession warm "test/fixtures/SafePostulate.agda" $ \path -> do
             withSafe <-
               load Load.Request {Load.requestPath = path, Load.requestArguments = ["--safe"]}
             withoutSafe <-
               load Load.Request {Load.requestPath = path, Load.requestArguments = []}
-            pure (withSafe, withoutSafe)
+            pure (path, withSafe, withoutSafe)
         -- `--safe` rejects the postulate as a non-fatal error
         report <- expectLoadOk "load with --safe" withSafe
         metasReportGoals report @?= []
         metasReportHiddenMetavariables report @?= []
         metasReportWarnings report @?= []
-        case metasReportNonFatalErrors report of
-          [NonFatalError (_, message)] ->
-            assertBool
-              ("expected a SafeFlagPostulate error, got " <> Text.unpack message)
-              ("SafeFlagPostulate" `Text.isInfixOf` message)
-          other ->
-            assertFailure $ "expected one non-fatal error, got " <> show other
+        map (Corpus.normalizeNonFatalError path) (metasReportNonFatalErrors report)
+          @?= [Corpus.safeFlagPostulate]
         expectLoadOk "load without arguments" withoutSafe
           >>= (@?= MetasReport [] [] [] [])
     , testCase "hidden metavariables are reported alongside goals" $ do
@@ -247,16 +243,8 @@ loadTests warm =
         metasReportGoals report @?= []
         metasReportHiddenMetavariables report @?= []
         metasReportNonFatalErrors report @?= []
-        map warningLocation (metasReportWarnings report)
-          @?= [ Just (path, ((8, 1), (8, 12)))
-              , Just (path, ((13, 1), (13, 13)))
-              ]
-        map
-          (withoutPath path . firstLine . warningMessage)
-          (metasReportWarnings report)
-          @?= [ "FIXTURE:8.1-12: warning: -W[no]UnreachableClauses"
-              , "FIXTURE:13.1-13: warning: -W[no]UnreachableClauses"
-              ]
+        map (Corpus.normalizeWarning path) (metasReportWarnings report)
+          @?= Corpus.unreachableClauseWarnings
     , testCase "a type error reports its message and span" $ do
         (path, source, response) <-
           withFixtureSession warm "test/fixtures/TypeError.agda" $ \path -> do
@@ -264,32 +252,17 @@ loadTests warm =
             (,,) path source
               <$> load Load.Request {Load.requestPath = path, Load.requestArguments = []}
         e <- expectLoadError "load" response
-        assertBool
-          ("expected an UnequalTerms error, got " <> Text.unpack (errorMessage e))
-          ("UnequalTerms" `Text.isInfixOf` errorMessage e)
+        Corpus.normalizeError path e @?= Corpus.typeError
         case errorPathSpan e of
-          Just (errorPath, s) -> do
-            errorPath @?= path
-            spanCoordinates s @?= ((6, 9), (6, 10))
-            spanText source s @?= "ℕ"
-          Nothing ->
-            assertFailure "expected the error to carry a span"
+          Just (_, s) -> spanText source s @?= "ℕ"
+          Nothing -> assertFailure "expected the error to carry a span"
     , testCase "a failed load carries the warnings raised before the error" $ do
         (path, response) <-
           withFixtureSession warm "test/fixtures/WarningThenError.agda" $ \path ->
             (,) path
               <$> load Load.Request {Load.requestPath = path, Load.requestArguments = []}
         e <- expectLoadError "load" response
-        assertBool
-          ("expected an UnequalTerms error, got " <> Text.unpack (errorMessage e))
-          ("UnequalTerms" `Text.isInfixOf` errorMessage e)
-        assertBool
-          "the error message should not also contain the warning"
-          (not $ "UnreachableClauses" `Text.isInfixOf` errorMessage e)
-        map warningLocation (errorWarnings e)
-          @?= [Just (path, ((8, 1), (8, 12)))]
-        map (withoutPath path . firstLine . warningMessage) (errorWarnings e)
-          @?= ["FIXTURE:8.1-12: warning: -W[no]UnreachableClauses"]
+        Corpus.normalizeError path e @?= Corpus.warningThenError
     , testCase "a file changed while it is checked loads as stale" $ do
         (response1, maybeCurrentFile, response2) <-
           withStaleFixtureSession warm "test/fixtures/HoleNatural.agda" $
@@ -731,14 +704,9 @@ goalTests warm =
             load Load.Request {Load.requestPath = path, Load.requestArguments = []}
               >>= liftIO . expectLoadOk "load"
           liftIO $
-            assertBool
-              ( "expected an unsolved-constraint error, got "
-                  <> show (metasReportNonFatalErrors loaded)
-              )
-              ( any
-                  (("UnsolvedConstraints" `Text.isInfixOf`) . nonFatalErrorMessage)
-                  (metasReportNonFatalErrors loaded)
-              )
+            map (Corpus.normalizeNonFatalError path) (metasReportNonFatalErrors loaded)
+              @?= [Corpus.unsolvedConstraints]
+          liftIO $ metasReportGoals loaded @?= [Corpus.constrainedGoal]
 
           report <-
             goal
@@ -1904,9 +1872,6 @@ spanCoordinates s =
  where
   coordinates p = (positionLine p, positionColumn p)
 
-warningMessage :: Warning -> Text
-warningMessage (Warning (_, message)) = message
-
 nonFatalErrorMessage :: NonFatalError -> Text
 nonFatalErrorMessage (NonFatalError (_, message)) = message
 
@@ -1916,11 +1881,6 @@ warningLocation (Warning (pathSpan, _)) =
 
 firstLine :: Text -> Text
 firstLine = Text.takeWhile (/= '\n')
-
--- Fixtures are staged in a fresh temporary directory, so the path Agda embeds
--- in rendered messages differs on every run.
-withoutPath :: FilePath -> Text -> Text
-withoutPath path = Text.replace (Text.pack path) "FIXTURE"
 
 commentedHoleNatural :: Text
 commentedHoleNatural =

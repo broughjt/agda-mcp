@@ -9,7 +9,6 @@ import Test.Tasty.HUnit (testCase, (@?=))
 
 import AgdaMCP.Interaction (
   ContextEntry (..),
-  Error (..),
   Goal (..),
   GoalShape (..),
   HiddenMetavariable (..),
@@ -20,6 +19,7 @@ import AgdaMCP.Interaction (
  )
 import AgdaMCP.Tools.Load (LoadReport (..), Response (..), renderResponse)
 import AgdaMCP.Tools.LoadId (LoadId (..))
+import Test.Corpus qualified as Corpus
 
 tests :: TestTree
 tests =
@@ -519,37 +519,23 @@ renderResponseTests =
         renderResponse
           ( ResponseOk
               report
-                { loadReportWarnings =
-                    [ Warning
-                        ( Just
-                            ( "/tmp/Example.agda"
-                            , Span (Position 0 8 1) (Position 0 8 12)
-                            )
-                        , "/tmp/Example.agda:8.1-12: warning: -W[no]UnreachableClauses\n\
-                          \Unreachable clause"
-                        )
-                    , Warning
-                        ( Just
-                            ( "/tmp/Example.agda"
-                            , Span (Position 0 13 1) (Position 0 13 13)
-                            )
-                        , "/tmp/Example.agda:13.1-13: warning: -W[no]UnreachableClauses\n\
-                          \Unreachable clause"
-                        )
-                    ]
+                { loadReportPath = Corpus.fixtureFile "Warnings.agda"
+                , loadReportWarnings = Corpus.unreachableClauseWarnings
                 }
           )
           @?= rendered
             [ "Load succeeded: no goals"
             , "Load ID: L17"
-            , "File: /tmp/Example.agda"
+            , "File: /fixture/Warnings.agda"
             , ""
             , "Warnings:"
-            , "  /tmp/Example.agda:8.1-12: warning: -W[no]UnreachableClauses"
+            , "  /fixture/Warnings.agda:8.1-12: warning: -W[no]UnreachableClauses"
             , "  Unreachable clause"
+            , "  when checking the definition of first"
             , ""
-            , "  /tmp/Example.agda:13.1-13: warning: -W[no]UnreachableClauses"
+            , "  /fixture/Warnings.agda:13.1-13: warning: -W[no]UnreachableClauses"
             , "  Unreachable clause"
+            , "  when checking the definition of second"
             ]
     , testCase "each warning is separated from the next" $
         renderResponse
@@ -581,30 +567,42 @@ renderResponseTests =
         renderResponse
           ( ResponseOk
               report
-                { loadReportGoals =
-                    [
-                      ( Goal
-                          { goalId = 0
-                          , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
-                          , goalShape = GoalOfType "ℕ"
-                          }
-                      , []
-                      )
-                    ]
-                , loadReportNonFatalErrors =
-                    [NonFatalError (Nothing, "Unsolved constraints")]
+                { loadReportPath = Corpus.fixtureFile "Constrained.agda"
+                , loadReportGoals = [(Corpus.constrainedGoal, [])]
+                , loadReportNonFatalErrors = [Corpus.unsolvedConstraints]
                 }
           )
           @?= rendered
             [ "Load succeeded with errors: 1 goal"
             , "Load ID: L17"
-            , "File: /tmp/Example.agda"
+            , "File: /fixture/Constrained.agda"
             , ""
-            , "?0 at 14:16-17"
+            , "?0 at 12:17-18"
             , "  ⊢ ℕ"
             , ""
             , "Non-fatal errors:"
-            , "  Unsolved constraints"
+            , "  error: [UnsolvedConstraints]"
+            , "  Failed to solve the following constraints:"
+            , "    ?0 + ?0 = 4 : ℕ (blocked on _n_4)"
+            ]
+    , testCase "a non-fatal error keeps Agda's own indentation" $
+        renderResponse
+          ( ResponseOk
+              report
+                { loadReportPath = Corpus.fixtureFile "SafePostulate.agda"
+                , loadReportNonFatalErrors = [Corpus.safeFlagPostulate]
+                }
+          )
+          @?= rendered
+            [ "Load succeeded with errors: no goals"
+            , "Load ID: L17"
+            , "File: /fixture/SafePostulate.agda"
+            , ""
+            , "Non-fatal errors:"
+            , "  /fixture/SafePostulate.agda:4.3-24: error: [SafeFlagPostulate]"
+            , "  Cannot postulate cheat with safe flag"
+            , "  when scope checking the declaration"
+            , "    cheat : {A : Set} → A"
             ]
     , testCase "several non-fatal errors are reported in the order they were raised" $
         renderResponse
@@ -685,53 +683,27 @@ renderResponseTests =
             , "  Unsolved constraints"
             ]
     , testCase "a failed load reports the error and issues no load id" $
-        renderResponse
-          ( ResponseError
-              Error
-                { errorMessage =
-                    "/tmp/Example.agda:6.9-10: error: [UnequalTerms]\n\
-                    \ℕ != Set₁"
-                , errorPathSpan =
-                    Just
-                      ( "/tmp/Example.agda"
-                      , Span (Position 0 6 9) (Position 0 6 10)
-                      )
-                , errorWarnings = []
-                }
-          )
+        renderResponse (ResponseError Corpus.typeError)
           @?= rendered
             [ "Load failed:"
             , ""
-            , "  /tmp/Example.agda:6.9-10: error: [UnequalTerms]"
-            , "  ℕ != Set₁"
+            , "  /fixture/TypeError.agda:6.9-10: error: [UnequalTerms]"
+            , "  Set !=< ℕ"
+            , "  when checking that the expression ℕ has type ℕ"
             ]
     , testCase "a failed load reports the warnings raised before the error" $
-        renderResponse
-          ( ResponseError
-              Error
-                { errorMessage = "an error"
-                , errorPathSpan = Nothing
-                , errorWarnings =
-                    [ Warning
-                        ( Just
-                            ( "/tmp/Example.agda"
-                            , Span (Position 0 8 1) (Position 0 8 12)
-                            )
-                        , "a warning"
-                        )
-                    , Warning (Nothing, "another warning")
-                    ]
-                }
-          )
+        renderResponse (ResponseError Corpus.warningThenError)
           @?= rendered
             [ "Load failed:"
             , ""
-            , "  an error"
+            , "  /fixture/WarningThenError.agda:11.9-10: error: [UnequalTerms]"
+            , "  Set !=< ℕ"
+            , "  when checking that the expression ℕ has type ℕ"
             , ""
             , "Warnings:"
-            , "  a warning"
-            , ""
-            , "  another warning"
+            , "  /fixture/WarningThenError.agda:8.1-12: warning: -W[no]UnreachableClauses"
+            , "  Unreachable clause"
+            , "  when checking the definition of first"
             ]
     , testCase "a stale load issues no load id and asks for another load" $
         renderResponse ResponseStale

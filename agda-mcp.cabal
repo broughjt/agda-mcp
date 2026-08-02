@@ -74,6 +74,7 @@ test-suite agda-mcp-test
   main-is: Main.hs
   hs-source-dirs: test
   other-modules:
+    Test.Corpus
     Test.Harness
     Test.Interaction
     Test.Model
