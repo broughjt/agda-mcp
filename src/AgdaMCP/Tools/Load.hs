@@ -12,12 +12,10 @@ module AgdaMCP.Tools.Load (
 import Agda.Interaction.Base (Rewrite (..))
 import Agda.Syntax.Common (InteractionId (..))
 import Control.Exception (Exception, throwIO)
-import Control.Monad (guard)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (gets, modify)
 import Data.Aeson (FromJSON (..), object, withObject, (.:), (.=))
 import Data.Map qualified as Map
-import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import MCP.Server (
@@ -27,15 +25,14 @@ import MCP.Server (
  )
 
 import AgdaMCP.Interaction (
-  ContextEntry (..),
+  ContextEntry,
   Error (..),
   Goal (..),
   GoalError,
-  GoalShape (..),
   HiddenMetavariable (..),
   MetasReport (..),
   NonFatalError (..),
-  Warning (..),
+  Warning,
  )
 import AgdaMCP.Interaction.Context qualified as Context
 import AgdaMCP.Interaction.Load qualified as Interaction.Load
@@ -46,7 +43,15 @@ import AgdaMCP.Tools.LoadId (
   renderLoadId,
  )
 import AgdaMCP.Tools.MCP (textToolHandle)
-import AgdaMCP.Tools.Render (renderSpan)
+import AgdaMCP.Tools.Render (
+  blocks,
+  indent,
+  renderContextEntry,
+  renderShape,
+  renderSpan,
+  renderWarning,
+  section,
+ )
 import AgdaMCP.Tools.State (ToolM, ToolState (..), liftInteraction)
 
 loadTool :: ToolHandler
@@ -235,40 +240,6 @@ renderGoal goal entries =
       : map (indent . renderContextEntry) (reverse entries)
         <> [indent $ "⊢ " <> renderShape (goalShape goal)]
 
-renderShape :: GoalShape -> Text
-renderShape (GoalOfType t) = t
-renderShape GoalSort = "Sort"
-
--- Follows `prettyResponseContext` (EmacsTop.hs:324-373), minus its `align 10`
--- padding. We render cohesion as a prefix, the three-form name rule, one
--- comma-separated attribute group in Agda's order appended after the type, and
--- a let value on its own line.
-renderContextEntry :: ContextEntry -> Text
-renderContextEntry entry =
-  case contextEntryLetValue entry of
-    Nothing -> typed
-    Just value -> typed <> "\n" <> name <> " = " <> value
- where
-  typed = nameWithMaybeCohesion <> " : " <> contextEntryType entry <> attributeGroup
-  nameWithMaybeCohesion = maybe name (<> (" " <> name)) $ contextEntryCohesion entry
-  name
-    | not (contextEntryOriginalInScope entry) = contextEntryReifiedName entry
-    | contextEntryOriginalName entry == contextEntryReifiedName entry =
-        contextEntryOriginalName entry
-    | otherwise =
-        contextEntryOriginalName entry <> " = " <> contextEntryReifiedName entry
-  attributeGroup
-    | null attributes = ""
-    | otherwise = " (" <> Text.intercalate ", " attributes <> ")"
-  attributes =
-    catMaybes
-      [ "not in scope" <$ guard (not $ contextEntryReifiedInScope entry)
-      , "erased" <$ guard (contextEntryErased entry)
-      , contextEntryRelevance entry
-      , contextEntryPolarity entry
-      , "instance" <$ guard (contextEntryIsInstance entry)
-      ]
-
 renderHiddenMetavariable :: HiddenMetavariable -> Text
 renderHiddenMetavariable metavariable =
   indent $
@@ -277,23 +248,7 @@ renderHiddenMetavariable metavariable =
       <> " : "
       <> renderShape (hiddenMetavariableShape metavariable)
 
--- The structural location beside the message is not rendered: the message
--- embeds its own location, so printing both would print it twice.
-renderWarning :: Warning -> Text
-renderWarning (Warning (_, message)) = indent message
-
+-- Like warnings, the structural location beside the message is not rendered:
+-- the message embeds its own location.
 renderNonFatalError :: NonFatalError -> Text
 renderNonFatalError (NonFatalError (_, message)) = indent message
-
--- Blocks are separated by one blank line.
-blocks :: [Text] -> Text
-blocks = Text.intercalate "\n\n"
-
--- A titled section around its already-indented items, or the empty string.
-section :: Text -> [Text] -> [Text]
-section _ [] = []
-section title items = [title <> "\n" <> blocks items]
-
--- Every line, so multi-line payloads keep their own internal indentation.
-indent :: Text -> Text
-indent = Text.intercalate "\n" . map ("  " <>) . Text.splitOn "\n"

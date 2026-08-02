@@ -11,40 +11,62 @@ module AgdaMCP.Tools.Goal (
 
 import Agda.Interaction.Base (Rewrite)
 import Agda.Syntax.Common (InteractionId (..))
+import Control.Monad.State (gets)
 import Data.Aeson (FromJSON (..), withObject, (.:))
 import Data.Map qualified as Map
 import Data.Text (Text)
+import Data.Text qualified as Text
 import MCP.Server (
   InputSchema (..),
   ToolHandler,
   toolHandler,
  )
 
-import AgdaMCP.Interaction (Error, GoalReport)
-import AgdaMCP.Tools.LoadId (LoadId, LoadIdRefusal)
+import AgdaMCP.Interaction (
+  Error (..),
+  GoalError (..),
+  GoalReport (..),
+ )
+import AgdaMCP.Interaction.Goal qualified as Interaction.Goal
+import AgdaMCP.Tools.LoadId (
+  LoadId,
+  LoadIdRefusal (..),
+  currentLoadId,
+  renderLoadId,
+ )
 import AgdaMCP.Tools.MCP (
   goalIdSchema,
   loadIdSchema,
   normalizationSchema,
   parseNormalizationField,
+  renderNormalization,
   textToolHandle,
  )
-import AgdaMCP.Tools.State (ToolM)
+import AgdaMCP.Tools.Render (
+  blocks,
+  indent,
+  renderContextEntry,
+  renderShape,
+  renderWarning,
+  section,
+ )
+import AgdaMCP.Tools.State (ToolM, ToolState (..), liftInteraction)
 
 goalTool :: ToolHandler
 goalTool =
   toolHandler
     "goal"
-    ( Just ""
-    -- TODO:
-    -- "Inspect a single open goal in the currently loaded Agda file, without \
-    -- \modifying anything. Reports the goal's type, the local context at the \
-    -- \goal, its cubical boundary, and any unsolved constraints mentioning \
-    -- \it. Types are reported at the requested `normalization`, simplified by \
-    -- \default. Goal IDs are only \
-    -- \meaningful against the load that issued them, so pass the `load_id` \
-    -- \from that load result; an ID from an earlier load is refused. To try \
-    -- \an expression at a goal, use `check` instead."
+    ( Just
+        "Inspect one open goal in the currently loaded Agda file without \
+        \modifying anything. Reports the goal's type, the local context at \
+        \the goal (innermost binding first), its cubical boundary, and any \
+        \unsolved constraints mentioning it. Types are rendered at the \
+        \requested `normalization`, `simplified` by default — note \
+        \`simplified` does not unfold definitions; ask for `normalized` when \
+        \you want them unfolded. Goal IDs are only meaningful against the \
+        \load that issued them: pass the `load_id` from that load's result; \
+        \an ID from an earlier load is refused. To try an expression at a \
+        \goal, use `check` instead."
     )
     ( InputSchema
         "object"
@@ -69,7 +91,7 @@ data Request = Request
 data Response
   = ResponseRefused LoadIdRefusal
   | ResponseUnknownGoal InteractionId
-  | -- TODO: Not known the happen in practice
+  | -- No known reproducer.
     ResponseFailed Error
   | ResponseOk InteractionId Rewrite GoalReport
   deriving (Eq, Show)
@@ -77,7 +99,31 @@ data Response
 -- Business logic
 
 goal :: Request -> ToolM Response
-goal = error "un"
+goal request = do
+  -- Validation is pure over the load generation and runs before any command.
+  generation <- gets toolLoadGeneration
+  case currentLoadId generation of
+    Nothing -> pure $ ResponseRefused NoCurrentLoad
+    Just current
+      | goalRequestLoadId request /= current ->
+          pure $ ResponseRefused $ StaleLoadId current
+      | otherwise -> do
+          response <-
+            liftInteraction $
+              Interaction.Goal.goal
+                Interaction.Goal.Request
+                  { Interaction.Goal.requestNormalization =
+                      goalRequestNormalization request
+                  , Interaction.Goal.requestGoalId = goalRequestGoalId request
+                  }
+          pure $ case response of
+            Left (GoalUnknownId unknownId) -> ResponseUnknownGoal unknownId
+            Left (GoalFailed e) -> ResponseFailed e
+            Right report ->
+              ResponseOk
+                (goalRequestGoalId request)
+                (goalRequestNormalization request)
+                report
 
 -- Request parsing
 
@@ -91,11 +137,47 @@ instance FromJSON Request where
 -- Response rendering
 
 renderResponse :: Response -> Either Text Text
-renderResponse = error "un"
+renderResponse (ResponseRefused NoCurrentLoad) =
+  Left
+    "No load is current. Either no file has been loaded yet, or the most \
+    \recent load failed. Load the file, then use the load ID and goal IDs \
+    \from that load result."
+renderResponse (ResponseRefused (StaleLoadId current)) =
+  Left $
+    "The supplied load ID is from an earlier load. The current load ID is "
+      <> renderLoadId current
+      <> ". Each load makes fresh goal ID assignments, so use the load ID and \
+         \goal IDs from the most recent load result. If you no longer have that \
+         \result, load the file again."
+renderResponse (ResponseUnknownGoal unknownId) =
+  Left $
+    "No goal ?"
+      <> Text.pack (show $ interactionId unknownId)
+      <> " in the current load. Check the goal IDs in the most recent load \
+         \result."
+renderResponse (ResponseFailed e) =
+  Right $
+    blocks $
+      ["Goal query failed:", indent $ errorMessage e]
+        <> section "Warnings:" (map renderWarning $ errorWarnings e)
+renderResponse (ResponseOk goalId rewrite report) =
+  Right $ renderGoalReport rewrite goalId report
 
--- Shared with the check tool, which reports the same goal alongside its
--- expression results. The wrapper hands the context outermost first with let
--- bindings last; this renderer reverses it to innermost-first against the
--- `⊢`, the same deliberate choice load's renderer makes.
 renderGoalReport :: Rewrite -> InteractionId -> GoalReport -> Text
-renderGoalReport = error "un"
+renderGoalReport rewrite goalId report =
+  blocks $
+    [ Text.intercalate "\n" $
+        header
+          -- We reverse context entries so they are listed innermost-first.
+          : map (indent . renderContextEntry) (reverse $ goalReportContext report)
+            <> [indent $ "⊢ " <> renderShape (goalReportShape report)]
+    ]
+      <> section "Boundary:" (map indent $ goalReportBoundary report)
+      <> section "Constraints:" (map indent $ goalReportConstraints report)
+ where
+  header =
+    "?"
+      <> Text.pack (show $ interactionId goalId)
+      <> " ("
+      <> renderNormalization rewrite
+      <> ")"

@@ -107,7 +107,6 @@ loadIdSchema =
   Aeson.object
     [ "type" Aeson..= ("string" :: Text)
     , "description"
-        -- TODO:
         Aeson..= ( "The `load_id` from the load result that issued this goal \
                    \ID. Goal IDs are renumbered by every load, so an ID from an \
                    \earlier load is refused rather than misread." ::
@@ -120,8 +119,10 @@ goalIdSchema =
   Aeson.object
     [ "type" Aeson..= ("integer" :: Text)
     , "description"
-        -- TODO:
-        Aeson..= ("The target goal's interaction ID (`?N`) from a load result" :: Text)
+        Aeson..= ( "The target goal's interaction ID: the N of `?N` in that \
+                   \load's result." ::
+                     Text
+                 )
     ]
 
 normalizationSchema :: Value
@@ -130,11 +131,11 @@ normalizationSchema =
     [ "type" Aeson..= ("string" :: Text)
     , "enum" Aeson..= (Map.keys normalizations :: [Text])
     , "description"
-        -- TODO:
-        Aeson..= ( "How much to normalize the reported goal type and context. \
-                   \Defaults to `simplified`, which is what Agda's own goal \
-                   \display shows; `normalized` unfolds definitions all the \
-                   \way, `asis` reports the types exactly as written." ::
+        Aeson..= ( "How much to normalize the reported types. Defaults to \
+                   \`simplified`, which is what Agda's own goal display shows \
+                   \but does not unfold definitions; `normalized` unfolds \
+                   \definitions all the way; `asis` reports types exactly as \
+                   \written." ::
                      Text
                  )
     ]
