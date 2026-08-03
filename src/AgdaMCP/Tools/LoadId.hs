@@ -7,6 +7,8 @@ module AgdaMCP.Tools.LoadId (
   LoadIdRefusal (..),
   currentLoadId,
   renderLoadId,
+  requireCurrentLoad,
+  renderLoadIdRefusal,
 ) where
 
 import Data.Aeson (FromJSON (..))
@@ -73,3 +75,23 @@ data LoadIdRefusal
     -- id that *is* current, so the caller can tell how far behind it is.
     StaleLoadId LoadId
   deriving (Eq, Show)
+
+requireCurrentLoad :: LoadGeneration -> LoadId -> Either LoadIdRefusal LoadId
+requireCurrentLoad generation submitted =
+  case currentLoadId generation of
+    Nothing -> Left NoCurrentLoad
+    Just current
+      | submitted == current -> Right current
+      | otherwise -> Left $ StaleLoadId current
+
+renderLoadIdRefusal :: LoadIdRefusal -> Text
+renderLoadIdRefusal NoCurrentLoad =
+  "No load is current. Either no file has been loaded yet, or the most \
+  \recent load failed. Load the file, then use the load ID and goal IDs \
+  \from that load result."
+renderLoadIdRefusal (StaleLoadId current) =
+  "The supplied load ID is from an earlier load. The current load ID is "
+    <> renderLoadId current
+    <> ". Each load makes fresh goal ID assignments, so use the load ID and \
+       \goal IDs from the most recent load result. If you no longer have that \
+       \result, load the file again."

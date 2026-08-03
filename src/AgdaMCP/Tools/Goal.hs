@@ -30,9 +30,9 @@ import AgdaMCP.Interaction (
 import AgdaMCP.Interaction.Goal qualified as Interaction.Goal
 import AgdaMCP.Tools.LoadId (
   LoadId,
-  LoadIdRefusal (..),
-  currentLoadId,
-  renderLoadId,
+  LoadIdRefusal,
+  renderLoadIdRefusal,
+  requireCurrentLoad,
  )
 import AgdaMCP.Tools.MCP (
   goalIdSchema,
@@ -102,28 +102,25 @@ goal :: Request -> ToolM Response
 goal request = do
   -- Validation is pure over the load generation and runs before any command.
   generation <- gets toolLoadGeneration
-  case currentLoadId generation of
-    Nothing -> pure $ ResponseRefused NoCurrentLoad
-    Just current
-      | goalRequestLoadId request /= current ->
-          pure $ ResponseRefused $ StaleLoadId current
-      | otherwise -> do
-          response <-
-            liftInteraction $
-              Interaction.Goal.goal
-                Interaction.Goal.Request
-                  { Interaction.Goal.requestNormalization =
-                      goalRequestNormalization request
-                  , Interaction.Goal.requestGoalId = goalRequestGoalId request
-                  }
-          pure $ case response of
-            Left (GoalUnknownId unknownId) -> ResponseUnknownGoal unknownId
-            Left (GoalFailed e) -> ResponseFailed e
-            Right report ->
-              ResponseOk
-                (goalRequestGoalId request)
-                (goalRequestNormalization request)
-                report
+  case requireCurrentLoad generation (goalRequestLoadId request) of
+    Left refusal -> pure $ ResponseRefused refusal
+    Right _ -> do
+      response <-
+        liftInteraction $
+          Interaction.Goal.goal
+            Interaction.Goal.Request
+              { Interaction.Goal.requestNormalization =
+                  goalRequestNormalization request
+              , Interaction.Goal.requestGoalId = goalRequestGoalId request
+              }
+      pure $ case response of
+        Left (GoalUnknownId unknownId) -> ResponseUnknownGoal unknownId
+        Left (GoalFailed e) -> ResponseFailed e
+        Right report ->
+          ResponseOk
+            (goalRequestGoalId request)
+            (goalRequestNormalization request)
+            report
 
 -- Request parsing
 
@@ -137,18 +134,7 @@ instance FromJSON Request where
 -- Response rendering
 
 renderResponse :: Response -> Either Text Text
-renderResponse (ResponseRefused NoCurrentLoad) =
-  Left
-    "No load is current. Either no file has been loaded yet, or the most \
-    \recent load failed. Load the file, then use the load ID and goal IDs \
-    \from that load result."
-renderResponse (ResponseRefused (StaleLoadId current)) =
-  Left $
-    "The supplied load ID is from an earlier load. The current load ID is "
-      <> renderLoadId current
-      <> ". Each load makes fresh goal ID assignments, so use the load ID and \
-         \goal IDs from the most recent load result. If you no longer have that \
-         \result, load the file again."
+renderResponse (ResponseRefused refusal) = Left $ renderLoadIdRefusal refusal
 renderResponse (ResponseUnknownGoal unknownId) =
   Left $
     "No goal ?"

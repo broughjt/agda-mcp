@@ -18,7 +18,7 @@ import MCP.Server (
   withToolHandlers,
  )
 
-import AgdaMCP.Tools (goalTool, loadTool, newToolState)
+import AgdaMCP.Tools (checkTool, goalTool, loadTool, newToolState)
 
 capabilities :: ServerCapabilities
 capabilities =
@@ -38,4 +38,4 @@ instructions :: Text
 instructions = "Interact with Agda"
 
 handlers :: ProcessHandlers
-handlers = withToolHandlers [loadTool, goalTool] defaultProcessHandlers
+handlers = withToolHandlers [loadTool, goalTool, checkTool] defaultProcessHandlers
