@@ -76,12 +76,13 @@ data LoadIdRefusal
     StaleLoadId LoadId
   deriving (Eq, Show)
 
-requireCurrentLoad :: LoadGeneration -> LoadId -> Either LoadIdRefusal LoadId
+requireCurrentLoad ::
+  LoadGeneration -> LoadId -> Either LoadIdRefusal CurrentLoad
 requireCurrentLoad generation submitted =
-  case currentLoadId generation of
+  case (,) <$> currentLoadId generation <*> currentLoad generation of
     Nothing -> Left NoCurrentLoad
-    Just current
-      | submitted == current -> Right current
+    Just (current, load)
+      | submitted == current -> Right load
       | otherwise -> Left $ StaleLoadId current
 
 renderLoadIdRefusal :: LoadIdRefusal -> Text

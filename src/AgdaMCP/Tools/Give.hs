@@ -19,7 +19,12 @@ module AgdaMCP.Tools.Give (
 
 import MCP.Server (InputSchema (..), ToolHandler, toolHandler)
 
+import Agda.Interaction.Base (UseForce (..))
 import Agda.Syntax.Common (InteractionId (..))
+import Control.Exception (throwIO)
+import Control.Monad.Except (ExceptT (..), runExceptT)
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad.State (gets)
 import Data.Aeson (FromJSON (..), object, (.:), (.=))
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Aeson.Types qualified as Aeson
@@ -30,12 +35,33 @@ import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
 
-import AgdaMCP.Interaction (Error (..), Span)
+import AgdaMCP.Interaction (
+  Error (..),
+  GiveAction (..),
+  GiveError (..),
+  Span,
+ )
+import AgdaMCP.Interaction.Give qualified as Interaction.Give
+import AgdaMCP.Interaction.Refine qualified as Interaction.Refine
 import AgdaMCP.Tools.Load qualified as Load
-import AgdaMCP.Tools.LoadId (LoadId, LoadIdRefusal, renderLoadIdRefusal)
+import AgdaMCP.Tools.LoadId (
+  CurrentLoad (..),
+  LoadId,
+  LoadIdRefusal,
+  renderLoadIdRefusal,
+  requireCurrentLoad,
+ )
 import AgdaMCP.Tools.MCP (goalIdSchema, loadIdSchema, textToolHandle)
 import AgdaMCP.Tools.Render (blocks, indent, renderWarning, section)
-import AgdaMCP.Tools.State (ToolM)
+import AgdaMCP.Tools.Source (
+  Source (..),
+  SourceUnreadable (..),
+  SourceUnwritable (..),
+  readSource,
+  spliceEdits,
+  writeSource,
+ )
+import AgdaMCP.Tools.State (ToolM, ToolState (..), liftInteraction)
 
 giveTool :: ToolHandler
 giveTool =
@@ -175,7 +201,98 @@ data RefusalReason
 -- Business logic
 
 give :: Request -> ToolM Response
-give = error "un"
+give (Request loadId items) =
+  gets toolLoadGeneration
+    >>= either
+      (pure . ResponseRefused)
+      ( \current ->
+          ResponseCompleted
+            <$> (attempt current)
+            <*> (Load.load Load.Request {Load.loadRequestPath = currentLoadPath current})
+      )
+      . flip requireCurrentLoad loadId
+ where
+  attempt :: CurrentLoad -> ToolM Outcome
+  attempt current = do
+    source <- liftIO $ readSource path
+    case source of
+      Left unreadable ->
+        pure $ OutcomeSourceUnreadable $ sourceUnreadableMessage unreadable
+      Right file
+        | sourceHash file == currentLoadSourceHash current ->
+            runItems >>= either (pure . OutcomeRefused) (commit $ sourceText file)
+        | otherwise ->
+            pure OutcomeFileChanged
+   where
+    path = currentLoadPath current
+
+    commit :: Text -> [Edit] -> ToolM Outcome
+    commit original edits = do
+      spliced <-
+        -- The hash matched, so the text on disk is the text Agda checked and
+        -- every span is a hole in it. Any left from `spliceEdits` is a bug on
+        -- our part.
+        either (liftIO . throwIO) pure $
+          spliceEdits original $
+            map (\e -> (editSpan e, editText e)) edits
+      written <- liftIO $ writeSource path spliced
+      pure $ case written of
+        Left unwritable ->
+          OutcomeWriteFailed $ sourceUnwritableMessage unwritable
+        Right () -> OutcomeApplied edits
+
+  runItems :: ToolM (Either Refusal [Edit])
+  runItems = runExceptT $ traverse (ExceptT . uncurry runItem) (zip [0 ..] items)
+
+  runItem :: Int -> Item -> ToolM (Either Refusal Edit)
+  runItem index (goalId, action) = do
+    response <- liftInteraction $ case action of
+      ActionGive expression ->
+        Interaction.Give.give
+          Interaction.Give.Request
+            { Interaction.Give.requestForce = WithoutForce
+            , Interaction.Give.requestGoalId = goalId
+            , Interaction.Give.requestExpression = expression
+            }
+      ActionRefine expression ->
+        Interaction.Refine.refine
+          Interaction.Refine.Request
+            { Interaction.Refine.requestGoalId = goalId
+            , Interaction.Refine.requestExpression = expression
+            }
+    pure $ case response of
+      Left (GiveUnknownId unknownId) ->
+        Left $ refused unknownId Nothing RefusedUnknownGoal
+      Left (GiveFailed hole e) ->
+        Left $ refused goalId (Just hole) (RefusedError e)
+      Right (hole, giveAction) ->
+        Right $ toEdit goalId (actionExpression action) hole giveAction
+   where
+    refused unknownId hole reason =
+      Refusal
+        { refusalGoalId = unknownId
+        , refusalSpan = hole
+        , refusalPosition = BatchPosition index (length items)
+        , refusalReason = reason
+        }
+
+actionExpression :: Action -> Text
+actionExpression (ActionGive expression) = expression
+actionExpression (ActionRefine expression) = expression
+
+toEdit :: InteractionId -> Text -> Span -> GiveAction -> Edit
+toEdit goalId expression hole action =
+  Edit
+    { editGoalId = goalId
+    , editSpan = hole
+    , editText = text
+    , editKind = kind
+    }
+ where
+  (text, kind) = case action of
+    GiveVerbatim False -> (expression, EditKindVerbatim)
+    GiveVerbatim True -> ("(" <> expression <> ")", EditKindParentheses)
+    GiveComputed computed -> (computed, EditKindComputed)
 
 -- Request parsing
 
