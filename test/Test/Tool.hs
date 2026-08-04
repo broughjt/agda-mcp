@@ -21,6 +21,6 @@ tests =
       , Load.tests
       , Goal.tests warm
       , Check.tests warm
-      , Give.tests
+      , Give.tests warm
       , Scenario.tests warm
       ]

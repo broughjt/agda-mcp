@@ -2,12 +2,16 @@
 
 module Test.Tool.Give (tests) where
 
+import Agda.Syntax.Common (InteractionId)
+import Agda.TypeChecking.Monad (TCState)
+import Control.Monad.IO.Class (liftIO)
 import Data.Aeson qualified as Aeson
 import Data.Map qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Text.IO qualified as Text.IO
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (testCase, (@?=))
+import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 
 import AgdaMCP.Interaction (
   Error (..),
@@ -27,19 +31,24 @@ import AgdaMCP.Tools.Give (
   RefusalReason (..),
   Request (..),
   Response (..),
+  give,
   renderResponse,
  )
 import AgdaMCP.Tools.Load qualified as Load
 import AgdaMCP.Tools.LoadId (LoadId (..), LoadIdRefusal (..))
 import AgdaMCP.Tools.MCP (parseArguments)
+import AgdaMCP.Tools.State (ToolM)
+import Data.Functor (void)
 import Test.Corpus qualified as Corpus
+import Test.Tool.Harness (withFixtureToolSession)
 
-tests :: TestTree
-tests =
+tests :: IO TCState -> TestTree
+tests warm =
   testGroup
     "Give"
     [ parseArgumentsTests
     , renderResponseTests
+    , sessionTests warm
     ]
 
 parseArgumentsTests :: TestTree
@@ -385,7 +394,179 @@ renderResponseTests =
  where
   renders response expected = renderResponse response @?= Right expected
 
+sessionTests :: IO TCState -> TestTree
+sessionTests warm =
+  testGroup
+    "sessions"
+    [ testCase "a file edited on disk since the load is refused unwritten" $
+        withFixtureToolSession warm "test/fixtures/HoleNatural.agda" $ \path -> do
+          void $ expectLoaded (LoadId 1) path
+          liftIO $ Text.IO.appendFile path onDiskEdit
+          (outcome, report) <-
+            give (Request (LoadId 1) [(0, ActionGive "zero")])
+              >>= liftIO . expectCompleted "a give against an edited file"
+          liftIO $ do
+            outcome @?= OutcomeFileChanged
+            contentsShouldBe path (holeNatural <> onDiskEdit)
+            Load.loadReportId report @?= LoadId 2
+            goals report @?= [(0, GoalOfType "ℕ")]
+    , testCase
+        "when the file is edited on disk and the expression would be rejected, \
+        \the edit is reported rather than the rejection"
+        $ withFixtureToolSession warm "test/fixtures/GiveExpressions.agda"
+        $ \path -> do
+          _ <- expectLoaded (LoadId 1) path
+          liftIO $ Text.IO.appendFile path onDiskEdit
+          (outcome, _) <-
+            give (Request (LoadId 1) [(0, ActionGive "suc suc")])
+              >>= liftIO . expectCompleted "an ill-typed give against an edited file"
+          liftIO $ outcome @?= OutcomeFileChanged
+    , testCase "a literate file is spliced inside its code block" $
+        withFixtureToolSession warm "test/fixtures/Literate.lagda.md" $ \path -> do
+          void $ expectLoaded (LoadId 1) path
+          (outcome, report) <-
+            give (Request (LoadId 1) [(0, ActionGive "suc zero")])
+              >>= liftIO . expectCompleted "a give into a literate hole"
+          liftIO $ do
+            case outcome of
+              OutcomeApplied [applied] -> do
+                editGoalId applied @?= 0
+                editText applied @?= "suc zero"
+                editKind applied @?= EditKindVerbatim
+              other -> assertFailure $ "unexpected outcome: " <> show other
+            contentsShouldBe path literateFilled
+            Load.loadReportId report @?= LoadId 2
+            goals report @?= []
+    , testCase "the holes a refine leaves behind arrive in its reload" $
+        withFixtureToolSession warm "test/fixtures/RefineExpressions.agda" $ \path -> do
+          before <- expectLoaded (LoadId 1) path
+          (outcome, report) <-
+            give (Request (LoadId 1) [(1, ActionRefine "_+_")])
+              >>= liftIO . expectCompleted "a refine missing two arguments"
+          liftIO $ do
+            case outcome of
+              OutcomeApplied [applied] -> do
+                editGoalId applied @?= 1
+                editText applied @?= "? + ?"
+                editKind applied @?= EditKindComputed
+              other -> assertFailure $ "unexpected outcome: " <> show other
+            lineShouldBe path 10 "twoHoles = ? + ?"
+            goalShapes before @?= replicate 3 (GoalOfType "ℕ")
+            Load.loadReportId report @?= LoadId 2
+            goalShapes report @?= replicate 4 (GoalOfType "ℕ")
+    , testCase "a rejected batch is reloaded and issues the next load id" $
+        withFixtureToolSession warm "test/fixtures/GiveExpressions.agda" $ \path -> do
+          before <- expectLoaded (LoadId 1) path
+          contents <- liftIO $ Text.IO.readFile path
+          (outcome, report) <-
+            give (Request (LoadId 1) [(0, ActionGive "suc suc")])
+              >>= liftIO . expectCompleted "an ill-typed give"
+          liftIO $ do
+            case outcome of
+              OutcomeRefused refusal -> do
+                refusalGoalId refusal @?= 0
+                refusalPosition refusal @?= BatchPosition 0 1
+                case refusalReason refusal of
+                  RefusedError e ->
+                    assertBool
+                      ("expected \"UnequalTerms\" within " <> show (errorMessage e))
+                      ("UnequalTerms" `Text.isInfixOf` errorMessage e)
+                  other -> assertFailure $ "unexpected reason: " <> show other
+              other -> assertFailure $ "unexpected outcome: " <> show other
+            contentsShouldBe path contents
+            Load.loadReportId report @?= LoadId 2
+            goals report @?= goals before
+    , testCase
+        "a goal id that is not in the load is reloaded and issues the next load id"
+        $ withFixtureToolSession warm "test/fixtures/GiveExpressions.agda"
+        $ \path -> do
+          _ <- expectLoaded (LoadId 1) path
+          contents <- liftIO $ Text.IO.readFile path
+          (outcome, report) <-
+            give (Request (LoadId 1) [(99, ActionGive "zero")])
+              >>= liftIO . expectCompleted "a give at a goal that does not exist"
+          liftIO $ do
+            outcome
+              @?= OutcomeRefused
+                Refusal
+                  { refusalGoalId = 99
+                  , refusalSpan = Nothing
+                  , refusalPosition = BatchPosition 0 1
+                  , refusalReason = RefusedUnknownGoal
+                  }
+            contentsShouldBe path contents
+            Load.loadReportId report @?= LoadId 2
+    ]
+
 -- Helpers
+
+expectLoaded :: LoadId -> FilePath -> ToolM Load.LoadReport
+expectLoaded loadId path = do
+  report <-
+    Load.load Load.Request {Load.loadRequestPath = path}
+      >>= liftIO . expectLoadOk "load"
+  liftIO $ Load.loadReportId report @?= loadId
+  pure report
+
+expectLoadOk :: String -> Load.Response -> IO Load.LoadReport
+expectLoadOk _ (Load.ResponseOk report) = pure report
+expectLoadOk label other =
+  assertFailure $ label <> ": expected ResponseOk, got " <> show other
+
+expectCompleted :: String -> Response -> IO (Outcome, Load.LoadReport)
+expectCompleted label (ResponseCompleted outcome resync) =
+  (,) outcome <$> expectLoadOk (label <> "'s resync") resync
+expectCompleted label other =
+  assertFailure $ label <> ": expected ResponseCompleted, got " <> show other
+
+goals :: Load.LoadReport -> [(InteractionId, GoalShape)]
+goals = map (\(g, _) -> (goalId g, goalShape g)) . Load.loadReportGoals
+
+goalShapes :: Load.LoadReport -> [GoalShape]
+goalShapes = map snd . goals
+
+contentsShouldBe :: FilePath -> Text -> IO ()
+contentsShouldBe path expected = do
+  contents <- Text.IO.readFile path
+  contents @?= expected
+
+lineShouldBe :: FilePath -> Int -> Text -> IO ()
+lineShouldBe path number expected = do
+  contents <- Text.IO.readFile path
+  Text.lines contents !! (number - 1) @?= expected
+
+onDiskEdit :: Text
+onDiskEdit = "\n-- edited on disk\n"
+
+holeNatural :: Text
+holeNatural =
+  Text.unlines
+    [ "module HoleNatural where"
+    , ""
+    , "open import Data.Nat"
+    , ""
+    , "foo : ℕ → ℕ"
+    , "foo n = {!!}"
+    ]
+
+literateFilled :: Text
+literateFilled =
+  Text.unlines
+    [ "# Literate"
+    , ""
+    , "Prose before the code block."
+    , ""
+    , "```agda"
+    , "module Literate where"
+    , ""
+    , "open import Data.Nat using (ℕ; zero; suc)"
+    , ""
+    , "two : ℕ"
+    , "two = suc zero"
+    , "```"
+    , ""
+    , "Prose after the code block."
+    ]
 
 rendered :: [Text] -> Text
 rendered = Text.intercalate "\n"
