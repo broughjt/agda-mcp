@@ -13,7 +13,7 @@ import AgdaMCP.Interaction (Position (..), Span (..))
 import AgdaMCP.Tools.Source (
   Source (..),
   SpliceViolation (..),
-  checkClauseExtent,
+  checkClauseSpan,
   checkHole,
   readSource,
   reindent,
@@ -94,7 +94,7 @@ tests =
                     ]
                 )
         , -- What a span covers is the caller's business (`checkHole`,
-          -- `checkClauseExtent`), so a clause extent splices like any other.
+          -- `checkClauseSpan`), so a clause span splices like any other.
           -- The clause's own indentation falls out of the reindent column.
           testCase "a span over a whole clause is replaced" $
             spliceEdits
@@ -153,14 +153,14 @@ tests =
                 (SpanNotHole (Span (Position 0 1 1) (Position 2 1 3)) "f ")
         ]
     , testGroup
-        "checkClauseExtent"
+        "checkClauseSpan"
         [ testCase "a clause holding a hole passes" $
-            checkClauseExtent
+            checkClauseSpan
               (source ["double : ℕ → ℕ", "double n = ?", ""])
               (Span (Position 15 2 1) (Position 27 2 13))
               @?= Right ()
-        , testCase "an extent with no hole in it is refused" $
-            checkClauseExtent
+        , testCase "a span with no hole in it is refused" $
+            checkClauseSpan
               (source ["double : ℕ → ℕ", "double n = ?", ""])
               (Span (Position 0 1 1) (Position 6 1 7))
               @?= Left

@@ -1395,7 +1395,7 @@ makeCaseTests warm =
   testGroup
     "MakeCase"
     [ testCase "splitting on a variable produces one clause per constructor" $ do
-        (report, extent) <-
+        (report, replaced) <-
           withMakeCaseFixture warm $ \source goals -> do
             report <-
               makeCase
@@ -1408,9 +1408,9 @@ makeCaseTests warm =
         makeCaseReportVariant report @?= MakeCaseFunction
         makeCaseReportClauses report
           @?= ["double zero = ?", "double (suc n) = ?"]
-        extent @?= "double n = ?"
+        replaced @?= "double n = ?"
     , testCase "the whole right-hand side is reused for every clause" $ do
-        (report, extent) <-
+        (report, replaced) <-
           withMakeCaseFixture warm $ \source goals -> do
             report <-
               makeCase
@@ -1422,9 +1422,9 @@ makeCaseTests warm =
             pure (report, spanText source (makeCaseReportSpan report))
         makeCaseReportClauses report
           @?= ["twoHoles zero = ? + ?", "twoHoles (suc n) = ? + ?"]
-        extent @?= "twoHoles n = ? + ?"
-    , testCase "the extent stops before a where block" $ do
-        (report, extent) <-
+        replaced @?= "twoHoles n = ? + ?"
+    , testCase "the span stops before a where block" $ do
+        (report, replaced) <-
           withMakeCaseFixture warm $ \source goals -> do
             report <-
               makeCase
@@ -1436,7 +1436,7 @@ makeCaseTests warm =
             pure (report, spanText source (makeCaseReportSpan report))
         makeCaseReportClauses report
           @?= ["withWhere zero = ?", "withWhere (suc n) = ?"]
-        extent @?= "withWhere n = ?"
+        replaced @?= "withWhere n = ?"
     , testCase "only a clause carrying a where block reports the collapse" $ do
         (withWhereReport, doubleReport) <-
           withMakeCaseFixture warm $ \_ goals -> do
@@ -1458,7 +1458,7 @@ makeCaseTests warm =
         makeCaseReportCollapsesWhere withWhereReport @?= True
         makeCaseReportCollapsesWhere doubleReport @?= False
     , testCase "no variables introduces the function's arguments" $ do
-        (report, extent) <-
+        (report, replaced) <-
           withMakeCaseFixture warm $ \source goals -> do
             report <-
               makeCase
@@ -1470,9 +1470,9 @@ makeCaseTests warm =
             pure (report, spanText source (makeCaseReportSpan report))
         makeCaseReportVariant report @?= MakeCaseFunction
         makeCaseReportClauses report @?= ["introduce x = ?"]
-        extent @?= "introduce = ?"
+        replaced @?= "introduce = ?"
     , testCase "a variable that is not in scope is revealed, not split" $ do
-        (report, extent) <-
+        (report, replaced) <-
           withMakeCaseFixture warm $ \source goals -> do
             report <-
               makeCase
@@ -1483,9 +1483,9 @@ makeCaseTests warm =
                 >>= liftIO . expectMakeCaseOk "split at goal 5"
             pure (report, spanText source (makeCaseReportSpan report))
         makeCaseReportClauses report @?= ["hidden {n} = ?"]
-        extent @?= "hidden = ?"
+        replaced @?= "hidden = ?"
     , testCase "the ellipsis sentinel expands a with-clause" $ do
-        (report, extent) <-
+        (report, replaced) <-
           withMakeCaseFixture warm $ \source goals -> do
             report <-
               makeCase
@@ -1496,9 +1496,9 @@ makeCaseTests warm =
                 >>= liftIO . expectMakeCaseOk "split at goal 6"
             pure (report, spanText source (makeCaseReportSpan report))
         makeCaseReportClauses report @?= ["filter p (x ∷ xs) | false = ?"]
-        extent @?= "... | false = ?"
+        replaced @?= "... | false = ?"
     , testCase "an extended lambda reports clauses without the function name" $ do
-        (report, extent) <-
+        (report, replaced) <-
           withMakeCaseFixture warm $ \source goals -> do
             report <-
               makeCase
@@ -1510,9 +1510,9 @@ makeCaseTests warm =
             pure (report, spanText source (makeCaseReportSpan report))
         makeCaseReportVariant report @?= MakeCaseExtendedLambda
         makeCaseReportClauses report @?= ["zero → ?", "(suc n) → ?"]
-        extent @?= "n → ?"
+        replaced @?= "n → ?"
     , testCase "an extended lambda in layout syntax reports the same as one in braces" $ do
-        (report, extent) <-
+        (report, replaced) <-
           withMakeCaseFixture warm $ \source goals -> do
             report <-
               makeCase
@@ -1524,7 +1524,7 @@ makeCaseTests warm =
             pure (report, spanText source (makeCaseReportSpan report))
         makeCaseReportVariant report @?= MakeCaseExtendedLambda
         makeCaseReportClauses report @?= ["zero → ?", "(suc n) → ?"]
-        extent @?= "n → ?"
+        replaced @?= "n → ?"
     , testCase "a bogus goal id is reported as an unknown id" $ do
         e <-
           withMakeCaseFixture warm $ \_ _ ->

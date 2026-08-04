@@ -12,7 +12,7 @@ module AgdaMCP.Tools.Source (
   commitEdits,
   spliceEdits,
   checkHole,
-  checkClauseExtent,
+  checkClauseSpan,
   reindent,
 ) where
 
@@ -136,11 +136,11 @@ checkHole source hole =
  where
   toBeReplaced = spanText source hole
 
-checkClauseExtent :: Text -> Span -> Either SpliceViolation ()
-checkClauseExtent source extent =
-  unless (containsHole replaced) $ Left (SpanNotClause extent replaced)
+checkClauseSpan :: Text -> Span -> Either SpliceViolation ()
+checkClauseSpan source span' =
+  unless (containsHole replaced) $ Left (SpanNotClause span' replaced)
  where
-  replaced = spanText source extent
+  replaced = spanText source span'
   containsHole text = "?" `Text.isInfixOf` text || "{!" `Text.isInfixOf` text
 
 isHole :: Text -> Bool

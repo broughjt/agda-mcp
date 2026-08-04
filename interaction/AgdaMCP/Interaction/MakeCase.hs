@@ -145,7 +145,7 @@ data MakeCaseReport = MakeCaseReport
   {- ^ True exactly when replacing `makeCaseReportSpan` leaves a `where` block
   attached to the last generated clause alone.
 
-  The split clause carried a `where` block, which the extent above deliberately
+  The split clause carried a `where` block, which the span above deliberately
   excludes. Layout binds a `where` block to the clause it follows, so after the
   replacement the block belongs to the last generated clause and the earlier
   ones can no longer see its bindings. Splitting on `n` in:
@@ -224,7 +224,7 @@ makeCaseInternal (Request goalId split) =
         unicode <- getsTC $ optUseUnicode . getPragmaOptions
         documents <-
           lift $ inTopContext $ addContext telescope $ traverse prettyAUnqualify clauses
-        (extent, collapsesWhere) <- lift $ extractClauseExtent goalId
+        (span', collapsesWhere) <- lift $ extractClauseSpan goalId
         pure $
           Right
             MakeCaseReport
@@ -233,7 +233,7 @@ makeCaseInternal (Request goalId split) =
                   map
                     (Text.pack . extlam_dropName unicode caseContext . decorate)
                     documents
-              , makeCaseReportSpan = extent
+              , makeCaseReportSpan = span'
               , makeCaseReportCollapsesWhere = collapsesWhere
               }
   )
@@ -250,8 +250,8 @@ splitInput ExpandEllipsis = "."
 clause being replaced carries a `where` block (see
 `makeCaseReportCollapsesWhere`).
 -}
-extractClauseExtent :: InteractionId -> TCM (Span, Bool)
-extractClauseExtent goalId = do
+extractClauseSpan :: InteractionId -> TCM (Span, Bool)
+extractClauseSpan goalId = do
   -- Both of the failure modes here are bugs, since we execute this after
   -- `makeCase` has succeeded. A goal that is not in a clause fails inside
   -- `makeCase` with a `CaseSplitError` ("Cannot split here, as we are not in a

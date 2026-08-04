@@ -62,7 +62,7 @@ import AgdaMCP.Tools.Render (
 import AgdaMCP.Tools.Source (
   SourceRefusal (..),
   SourceUnwritable (..),
-  checkClauseExtent,
+  checkClauseSpan,
   commitEdits,
   readChecked,
  )
@@ -185,7 +185,7 @@ caseSplit (Request loadId goalId variables) =
 
     commit :: Text -> MakeCaseReport -> ToolM Outcome
     commit original report = do
-      either (liftIO . throwIO) pure $ checkClauseExtent original span'
+      either (liftIO . throwIO) pure $ checkClauseSpan original span'
       written <- liftIO $ commitEdits path original [(span', replacement)]
       pure $ case written of
         Left unwritable ->
@@ -214,13 +214,13 @@ non-whitespace column. That covers ordinary function clauses, `λ where` and
 `λ { }` alike, so `MakeCaseVariant` does not drive layout.
 -}
 clauseLayout :: Text -> Span -> ClauseLayout
-clauseLayout source extent
+clauseLayout source span'
   | Text.all isSpace linePrefix = OnePerLine
   | otherwise = Inline
  where
   linePrefix =
     Text.takeWhileEnd (/= '\n') $
-      Text.take (positionOffset $ spanStart extent) source
+      Text.take (positionOffset $ spanStart span') source
 
 layoutClauses :: ClauseLayout -> [Text] -> Text
 layoutClauses OnePerLine = Text.intercalate "\n"
