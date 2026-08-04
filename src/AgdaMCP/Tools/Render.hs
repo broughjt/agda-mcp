@@ -5,6 +5,9 @@ module AgdaMCP.Tools.Render (
   renderShape,
   renderContextEntry,
   renderWarning,
+  renderFileChanged,
+  renderSourceUnreadable,
+  renderWriteFailed,
   blocks,
   section,
   indent,
@@ -76,6 +79,27 @@ renderContextEntry entry =
 -- embeds its own location, so printing both would print it twice.
 renderWarning :: Warning -> Text
 renderWarning (Warning (_, message)) = indent message
+
+renderFileChanged :: Text
+renderFileChanged =
+  "The file on disk no longer matches the source Agda checked, so no edits \
+  \were written. It has been reloaded below; goal IDs from the earlier load \
+  \are no longer valid."
+
+renderSourceUnreadable :: Text -> Text
+renderSourceUnreadable message =
+  blocks
+    [ "Could not read the file to check it still matches the source Agda \
+      \checked, so no edits were written."
+    , indent message
+    ]
+
+renderWriteFailed :: Text -> Text
+renderWriteFailed message =
+  blocks
+    [ "Could not write the file. It was not modified."
+    , indent message
+    ]
 
 -- Blocks are separated by one blank line.
 blocks :: [Text] -> Text

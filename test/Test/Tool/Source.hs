@@ -13,6 +13,8 @@ import AgdaMCP.Interaction (Position (..), Span (..))
 import AgdaMCP.Tools.Source (
   Source (..),
   SpliceViolation (..),
+  checkClauseExtent,
+  checkHole,
   readSource,
   reindent,
   spliceEdits,
@@ -91,12 +93,25 @@ tests =
                     , ""
                     ]
                 )
-        , testCase "a span over something that is not a hole is refused" $
+        , -- What a span covers is the caller's business (`checkHole`,
+          -- `checkClauseExtent`), so a clause extent splices like any other.
+          -- The clause's own indentation falls out of the reindent column.
+          testCase "a span over a whole clause is replaced" $
             spliceEdits
-              (source ["f : ℕ", "f = ?", ""])
-              [(Span (Position 0 1 1) (Position 2 1 3), "refl")]
-              @?= Left
-                (SpanNotHole (Span (Position 0 1 1) (Position 2 1 3)) "f ")
+              (source ["double : ℕ → ℕ", "double n = ?", ""])
+              [
+                ( Span (Position 15 2 1) (Position 27 2 13)
+                , "double zero = ?\ndouble (suc n) = ?"
+                )
+              ]
+              @?= Right
+                ( source
+                    [ "double : ℕ → ℕ"
+                    , "double zero = ?"
+                    , "double (suc n) = ?"
+                    , ""
+                    ]
+                )
         , testCase "a span reaching past the end of the text is refused" $
             spliceEdits
               (source ["f : ℕ", "f = ?", ""])
@@ -117,6 +132,39 @@ tests =
         , testCase "no edits leaves the source alone" $
             spliceEdits (source ["f : ℕ", "f = ?", ""]) []
               @?= Right (source ["f : ℕ", "f = ?", ""])
+        ]
+    , testGroup
+        "checkHole"
+        [ testCase "a bare hole passes" $
+            checkHole
+              (source ["f : ℕ", "f = ?", ""])
+              (Span (Position 10 2 5) (Position 11 2 6))
+              @?= Right ()
+        , testCase "a braced hole passes, delimiters included" $
+            checkHole
+              (source ["f = {! !}", ""])
+              (Span (Position 4 1 5) (Position 9 1 10))
+              @?= Right ()
+        , testCase "anything else is refused" $
+            checkHole
+              (source ["f : ℕ", "f = ?", ""])
+              (Span (Position 0 1 1) (Position 2 1 3))
+              @?= Left
+                (SpanNotHole (Span (Position 0 1 1) (Position 2 1 3)) "f ")
+        ]
+    , testGroup
+        "checkClauseExtent"
+        [ testCase "a clause holding a hole passes" $
+            checkClauseExtent
+              (source ["double : ℕ → ℕ", "double n = ?", ""])
+              (Span (Position 15 2 1) (Position 27 2 13))
+              @?= Right ()
+        , testCase "an extent with no hole in it is refused" $
+            checkClauseExtent
+              (source ["double : ℕ → ℕ", "double n = ?", ""])
+              (Span (Position 0 1 1) (Position 6 1 7))
+              @?= Left
+                (SpanNotClause (Span (Position 0 1 1) (Position 6 1 7)) "double")
         ]
     , testGroup
         "reindent"

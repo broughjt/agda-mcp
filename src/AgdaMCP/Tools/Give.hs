@@ -24,11 +24,10 @@ import Agda.Syntax.Common (InteractionId (..))
 import Control.Exception (throwIO)
 import Control.Monad.Except (ExceptT (..), runExceptT)
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad.State (gets)
 import Data.Aeson (FromJSON (..), object, (.:), (.=))
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Aeson.Types qualified as Aeson
-import Data.Foldable (toList)
+import Data.Foldable (toList, traverse_)
 import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Set qualified as Set
@@ -49,19 +48,25 @@ import AgdaMCP.Tools.LoadId (
   LoadId,
   LoadIdRefusal,
   renderLoadIdRefusal,
-  requireCurrentLoad,
  )
 import AgdaMCP.Tools.MCP (goalIdSchema, loadIdSchema, textToolHandle)
-import AgdaMCP.Tools.Render (blocks, indent, renderWarning, section)
-import AgdaMCP.Tools.Source (
-  Source (..),
-  SourceUnreadable (..),
-  SourceUnwritable (..),
-  readSource,
-  spliceEdits,
-  writeSource,
+import AgdaMCP.Tools.Render (
+  blocks,
+  indent,
+  renderFileChanged,
+  renderSourceUnreadable,
+  renderWarning,
+  renderWriteFailed,
+  section,
  )
-import AgdaMCP.Tools.State (ToolM, ToolState (..), liftInteraction)
+import AgdaMCP.Tools.Source (
+  SourceRefusal (..),
+  SourceUnwritable (..),
+  checkHole,
+  commitEdits,
+  readChecked,
+ )
+import AgdaMCP.Tools.State (ToolM, liftInteraction)
 
 giveTool :: ToolHandler
 giveTool =
@@ -202,40 +207,30 @@ data RefusalReason
 
 give :: Request -> ToolM Response
 give (Request loadId items) =
-  gets toolLoadGeneration
-    >>= either
-      (pure . ResponseRefused)
-      ( \current ->
-          ResponseCompleted
-            <$> (attempt current)
-            <*> (Load.load Load.Request {Load.loadRequestPath = currentLoadPath current})
-      )
-      . flip requireCurrentLoad loadId
+  either ResponseRefused (uncurry ResponseCompleted)
+    <$> Load.withEditableLoad loadId attempt
  where
   attempt :: CurrentLoad -> ToolM Outcome
   attempt current = do
-    source <- liftIO $ readSource path
+    source <- liftIO $ readChecked path (currentLoadSourceHash current)
     case source of
-      Left unreadable ->
-        pure $ OutcomeSourceUnreadable $ sourceUnreadableMessage unreadable
-      Right file
-        | sourceHash file == currentLoadSourceHash current ->
-            runItems >>= either (pure . OutcomeRefused) (commit $ sourceText file)
-        | otherwise ->
-            pure OutcomeFileChanged
+      Left (RefusalUnreadable message) -> pure $ OutcomeSourceUnreadable message
+      Left RefusalChanged -> pure OutcomeFileChanged
+      Right original ->
+        runItems >>= either (pure . OutcomeRefused) (commit original)
    where
     path = currentLoadPath current
 
     commit :: Text -> [Edit] -> ToolM Outcome
     commit original edits = do
-      spliced <-
-        -- The hash matched, so the text on disk is the text Agda checked and
-        -- every span is a hole in it. Any left from `spliceEdits` is a bug on
-        -- our part.
-        either (liftIO . throwIO) pure $
-          spliceEdits original $
+      -- The hash matched, so the text on disk is the text Agda checked and
+      -- every span is a hole in it. A violation is a bug on our part.
+      either (liftIO . throwIO) pure $
+        traverse_ (checkHole original . editSpan) edits
+      written <-
+        liftIO $
+          commitEdits path original $
             map (\e -> (editSpan e, editText e)) edits
-      written <- liftIO $ writeSource path spliced
       pure $ case written of
         Left unwritable ->
           OutcomeWriteFailed $ sourceUnwritableMessage unwritable
@@ -394,21 +389,9 @@ renderOutcome (OutcomeApplied edits) =
       )
       (map renderEdit edits)
 renderOutcome (OutcomeRefused refusal) = renderRefusal refusal
-renderOutcome OutcomeFileChanged =
-  "The file on disk no longer matches the source Agda checked, so no edits \
-  \were written. It has been reloaded below; goal IDs from the earlier load \
-  \are no longer valid."
-renderOutcome (OutcomeSourceUnreadable message) =
-  blocks
-    [ "Could not read the file to check it still matches the source Agda \
-      \checked, so no edits were written."
-    , indent message
-    ]
-renderOutcome (OutcomeWriteFailed message) =
-  blocks
-    [ "Could not write the file. It was not modified."
-    , indent message
-    ]
+renderOutcome OutcomeFileChanged = renderFileChanged
+renderOutcome (OutcomeSourceUnreadable message) = renderSourceUnreadable message
+renderOutcome (OutcomeWriteFailed message) = renderWriteFailed message
 
 renderEdit :: Edit -> Text
 renderEdit edit =

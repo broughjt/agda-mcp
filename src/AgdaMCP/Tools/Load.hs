@@ -6,6 +6,7 @@ module AgdaMCP.Tools.Load (
   Response (..),
   LoadReport (..),
   load,
+  withEditableLoad,
   renderResponse,
 ) where
 
@@ -40,7 +41,9 @@ import AgdaMCP.Tools.LoadId (
   CurrentLoad (..),
   LoadGeneration (..),
   LoadId (..),
+  LoadIdRefusal,
   renderLoadId,
+  requireCurrentLoad,
  )
 import AgdaMCP.Tools.MCP (textToolHandle)
 import AgdaMCP.Tools.Render (
@@ -151,6 +154,23 @@ load (Request path) = do
       >>= either
         (liftIO . throwIO . LoadContextUnavailable (goalId goal))
         (pure . (,) goal)
+
+{- | Validate the load id, perform an action against the file that load left
+behind, then reload it.
+-}
+withEditableLoad ::
+  LoadId ->
+  (CurrentLoad -> ToolM outcome) ->
+  ToolM (Either LoadIdRefusal (outcome, Response))
+withEditableLoad loadId handle =
+  gets toolLoadGeneration
+    >>= either (pure . Left) run . flip requireCurrentLoad loadId
+ where
+  run current =
+    fmap Right $
+      (,)
+        <$> handle current
+        <*> load Request {loadRequestPath = currentLoadPath current}
 
 issueLoadId :: Interaction.Load.LoadedFile -> ToolM LoadId
 issueLoadId file = do

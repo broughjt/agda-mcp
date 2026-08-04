@@ -2,12 +2,17 @@
 
 module AgdaMCP.Tools.Source (
   Source (..),
+  SourceRefusal (..),
   SourceUnreadable (..),
   SourceUnwritable (..),
   SpliceViolation (..),
   readSource,
+  readChecked,
   writeSource,
+  commitEdits,
   spliceEdits,
+  checkHole,
+  checkClauseExtent,
   reindent,
 ) where
 
@@ -19,6 +24,7 @@ import Control.Exception (
   IOException,
   catches,
   displayException,
+  throwIO,
   try,
  )
 import Control.Monad (unless)
@@ -66,6 +72,21 @@ readSource path =
   rendered :: (Exception e) => e -> SourceUnreadable
   rendered = SourceUnreadable . Text.pack . displayException
 
+data SourceRefusal
+  = RefusalUnreadable Text
+  | RefusalChanged
+  deriving (Eq, Show)
+
+readChecked :: FilePath -> Hash -> IO (Either SourceRefusal Text)
+readChecked path expected = do
+  found <- readSource path
+  pure $ case found of
+    Left unreadable ->
+      Left $ RefusalUnreadable $ sourceUnreadableMessage unreadable
+    Right file
+      | sourceHash file == expected -> Right $ sourceText file
+      | otherwise -> Left RefusalChanged
+
 -- TODO: This normalizes CRLFs to LFs. Doing better than that is a future me
 -- problem.
 writeSource :: FilePath -> Text -> IO (Either SourceUnwritable ())
@@ -76,6 +97,11 @@ writeSource path text =
         )
  where
   failed = SourceUnwritable . Text.pack . displayException
+
+commitEdits ::
+  FilePath -> Text -> [(Span, Text)] -> IO (Either SourceUnwritable ())
+commitEdits path original edits =
+  either throwIO (writeSource path) (spliceEdits original edits)
 
 spliceEdits :: Text -> [(Span, Text)] -> Either SpliceViolation Text
 spliceEdits source edits = do
@@ -92,19 +118,30 @@ spliceEdits source edits = do
   checkDisjoint _ = Right ()
 
   validate :: Span -> Either SpliceViolation ()
-  validate hole = do
-    let start = positionOffset (spanStart hole)
-        end = positionOffset (spanEnd hole)
+  validate span' = do
+    let start = positionOffset (spanStart span')
+        end = positionOffset (spanEnd span')
     unless (0 <= start && start <= end && end <= Text.length source) $
-      Left (SpanOutOfBounds hole (Text.length source))
-    let replaced = spanText source hole
-    unless (isHole replaced) $ Left (SpanNotHole hole replaced)
+      Left (SpanOutOfBounds span' (Text.length source))
 
   apply :: Text -> (Span, Text) -> Text
   apply text (hole, replacement) =
     Text.take (positionOffset (spanStart hole)) text
       <> reindent (positionColumn (spanStart hole) - 1) replacement
       <> Text.drop (positionOffset (spanEnd hole)) text
+
+checkHole :: Text -> Span -> Either SpliceViolation ()
+checkHole source hole =
+  unless (isHole toBeReplaced) $ Left (SpanNotHole hole toBeReplaced)
+ where
+  toBeReplaced = spanText source hole
+
+checkClauseExtent :: Text -> Span -> Either SpliceViolation ()
+checkClauseExtent source extent =
+  unless (containsHole replaced) $ Left (SpanNotClause extent replaced)
+ where
+  replaced = spanText source extent
+  containsHole text = "?" `Text.isInfixOf` text || "{!" `Text.isInfixOf` text
 
 isHole :: Text -> Bool
 isHole text =
@@ -124,17 +161,11 @@ reindent column text =
     | Text.null line = line
     | otherwise = Text.replicate column " " <> line
 
-{- | Bug: a splice was asked to write somewhere that is not a hole in the text
-Agda checked.
--}
 data SpliceViolation
-  = -- The span reaches outside the source text.
-    SpanOutOfBounds Span Int
-  | -- The text under the span is not a hole.
-    SpanNotHole Span Text
-  | -- Two edits in one batch cover overlapping text, so neither should be
-    -- applied.
-    SpansOverlap Span Span
+  = SpanOutOfBounds Span Int
+  | SpanNotHole Span Text
+  | SpanNotClause Span Text
+  | SpansOverlap Span Span
   deriving (Eq, Show)
 
 instance Exception SpliceViolation
