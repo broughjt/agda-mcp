@@ -42,6 +42,7 @@ import Control.Exception (Exception, throwIO)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (lift)
 import Data.List.NonEmpty (NonEmpty, toList)
+import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.Text qualified as Text
 
@@ -144,6 +145,39 @@ data MakeCaseReport = MakeCaseReport
   clauses are built by `makeAbstractClause` (MakeCase.hs:525-528), which reuses
   the split clause's right-hand side but passes `A.noWhereDecls`.
   -}
+  , makeCaseReportCollapsesWhere :: Bool
+  {- ^ True exactly when replacing `makeCaseReportSpan` leaves a `where` block
+  attached to the last generated clause alone.
+
+  The split clause carried a `where` block, which the extent above deliberately
+  excludes. Layout binds a `where` block to the clause it follows, so after the
+  replacement the block belongs to the last generated clause and the earlier
+  ones can no longer see its bindings. Splitting on `n` in:
+
+  ```
+  withWhere : ℕ → ℕ
+  withWhere n = ? + helper
+    where
+      helper : ℕ
+      helper = zero
+  ```
+
+  produces:
+
+  ```
+  withWhere : ℕ → ℕ
+  withWhere zero = ? + helper
+  withWhere (suc n) = ? + helper
+    where
+      helper : ℕ
+      helper = zero
+  ```
+
+  in which `helper` is out of scope in the first clause, though it was in scope
+  for the clause that was split. The right-hand side is reused whole for every
+  generated clause, so the caller wrote nothing wrong and yet the file no longer
+  typechecks. Emacs behaves identically, so this is reported rather than fixed.
+  -}
   }
   deriving (Eq, Show)
 
@@ -194,7 +228,7 @@ makeCaseInternal (Request goalId split) =
         unicode <- getsTC $ optUseUnicode . getPragmaOptions
         documents <-
           lift $ inTopContext $ addContext telescope $ traverse prettyAUnqualify clauses
-        extent <- lift $ extractClauseSpan goalId
+        (extent, collapsesWhere) <- lift $ extractClauseExtent goalId
         pure $
           Right
             MakeCaseReport
@@ -204,6 +238,7 @@ makeCaseInternal (Request goalId split) =
                     (Text.pack . extlam_dropName unicode caseContext . decorate)
                     documents
               , makeCaseReportSpan = extent
+              , makeCaseReportCollapsesWhere = collapsesWhere
               }
   )
     `catchTCErr` (fmap Left . lift . classifyInteractionError MakeCaseUnknownId MakeCaseFailed)
@@ -215,9 +250,12 @@ splitInput (SplitVariables variables) =
 splitInput IntroduceArgumentsOrSplitResult = ""
 splitInput ExpandEllipsis = "."
 
--- | The span the replacement clauses are meant to replace.
-extractClauseSpan :: InteractionId -> TCM Span
-extractClauseSpan goalId = do
+{- | The span the replacement clauses are meant to replace, and whether the
+clause being replaced carries a `where` block (see
+`makeCaseReportCollapsesWhere`).
+-}
+extractClauseExtent :: InteractionId -> TCM (Span, Bool)
+extractClauseExtent goalId = do
   -- Both of the failure modes here are bugs, since we execute this after
   -- `makeCase` has succeeded. A goal that is not in a clause fails inside
   -- `makeCase` with a `CaseSplitError` ("Cannot split here, as we are not in a
@@ -227,9 +265,10 @@ extractClauseSpan goalId = do
     IPNoClause -> liftIO $ throwIO $ MakeCaseNoClause goalId
     IPClause {ipcClause = clause} -> do
       let range = fuseRange (A.clauseLHS clause) (A.clauseRHS clause)
+          collapsesWhere = isJust $ A.whereDecls $ A.clauseWhereDecls clause
       maybe
         (liftIO $ throwIO $ MakeCaseClauseNoRange goalId $ Text.pack $ prettyShow range)
-        pure
+        (pure . (,collapsesWhere))
         (rangeSpan range)
 
 data MakeCaseBug

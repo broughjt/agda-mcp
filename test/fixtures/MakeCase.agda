@@ -41,3 +41,8 @@ extended = λ { n → ? }
 -- A goal in a type signature, which is not the right-hand side of a clause.
 notAClause : ?
 notAClause = zero
+
+-- An extended lambda written with layout syntax rather than braces.
+extendedWhere : ℕ → ℕ
+extendedWhere = λ where
+  n → ?

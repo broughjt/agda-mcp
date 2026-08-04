@@ -1437,6 +1437,26 @@ makeCaseTests warm =
         makeCaseReportClauses report
           @?= ["withWhere zero = ?", "withWhere (suc n) = ?"]
         extent @?= "withWhere n = ?"
+    , testCase "only a clause carrying a where block reports the collapse" $ do
+        (withWhereReport, doubleReport) <-
+          withMakeCaseFixture warm $ \_ goals -> do
+            withWhereReport <-
+              makeCase
+                MakeCase.Request
+                  { MakeCase.requestGoalId = goalId (goals !! 3)
+                  , MakeCase.requestSplit = MakeCase.SplitVariables ("n" :| [])
+                  }
+                >>= liftIO . expectMakeCaseOk "split at goal 3"
+            doubleReport <-
+              makeCase
+                MakeCase.Request
+                  { MakeCase.requestGoalId = goalId (goals !! 0)
+                  , MakeCase.requestSplit = MakeCase.SplitVariables ("n" :| [])
+                  }
+                >>= liftIO . expectMakeCaseOk "split at goal 0"
+            pure (withWhereReport, doubleReport)
+        makeCaseReportCollapsesWhere withWhereReport @?= True
+        makeCaseReportCollapsesWhere doubleReport @?= False
     , testCase "no variables introduces the function's arguments" $ do
         (report, extent) <-
           withMakeCaseFixture warm $ \source goals -> do
@@ -1487,6 +1507,20 @@ makeCaseTests warm =
                   , MakeCase.requestSplit = MakeCase.SplitVariables ("n" :| [])
                   }
                 >>= liftIO . expectMakeCaseOk "split at goal 7"
+            pure (report, spanText source (makeCaseReportSpan report))
+        makeCaseReportVariant report @?= MakeCaseExtendedLambda
+        makeCaseReportClauses report @?= ["zero → ?", "(suc n) → ?"]
+        extent @?= "n → ?"
+    , testCase "an extended lambda in layout syntax reports the same as one in braces" $ do
+        (report, extent) <-
+          withMakeCaseFixture warm $ \source goals -> do
+            report <-
+              makeCase
+                MakeCase.Request
+                  { MakeCase.requestGoalId = goalId (goals !! 9)
+                  , MakeCase.requestSplit = MakeCase.SplitVariables ("n" :| [])
+                  }
+                >>= liftIO . expectMakeCaseOk "split at goal 9"
             pure (report, spanText source (makeCaseReportSpan report))
         makeCaseReportVariant report @?= MakeCaseExtendedLambda
         makeCaseReportClauses report @?= ["zero → ?", "(suc n) → ?"]
