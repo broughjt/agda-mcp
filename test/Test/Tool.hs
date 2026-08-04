@@ -5,6 +5,7 @@ module Test.Tool (tests) where
 import Test.Tasty (TestTree, testGroup, withResource)
 
 import Test.Harness (warmInteractionState)
+import Test.Tool.CaseSplit qualified as CaseSplit
 import Test.Tool.Check qualified as Check
 import Test.Tool.Give qualified as Give
 import Test.Tool.Goal qualified as Goal
@@ -22,5 +23,6 @@ tests =
       , Goal.tests warm
       , Check.tests warm
       , Give.tests warm
+      , CaseSplit.tests warm
       , Scenario.tests warm
       ]

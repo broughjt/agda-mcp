@@ -10,6 +10,7 @@ module Test.Corpus (
   normalizeError,
   unreachableClauseWarnings,
   typeError,
+  caseSplitError,
   warningThenError,
   safeFlagPostulate,
   unsolvedConstraints,
@@ -109,6 +110,24 @@ typeError =
         Just
           ( fixtureFile "TypeError.agda"
           , Span (Position 76 6 9) (Position 77 6 10)
+          )
+    , errorWarnings = []
+    }
+
+-- MakeCase.agda, splitting `double n = ?` on a name that is not bound.
+caseSplitError :: Error
+caseSplitError =
+  Error
+    { errorMessage =
+        message
+          [ "/fixture/MakeCase.agda:9.12-13: error: [Interaction.CaseSplitError]"
+          , "Unbound variable nope"
+          , "when checking that the expression ? has type ℕ"
+          ]
+    , errorPathSpan =
+        Just
+          ( fixtureFile "MakeCase.agda"
+          , Span (Position 217 9 12) (Position 218 9 13)
           )
     , errorWarnings = []
     }

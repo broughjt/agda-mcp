@@ -1549,16 +1549,19 @@ makeCaseTests warm =
           ("Cannot split here" `Text.isInfixOf` errorMessage e)
     , testCase "an unbound variable name is rejected" $ do
         e <-
-          withMakeCaseFixture warm $ \_ goals ->
-            makeCase
-              MakeCase.Request
-                { MakeCase.requestGoalId = goalId (goals !! 0)
-                , MakeCase.requestSplit = MakeCase.SplitVariables ("nope" :| [])
-                }
-              >>= liftIO . expectMakeCaseFailure "an unbound variable"
-        assertBool
-          ("expected an \"Unbound variable\" message, got " <> show (errorMessage e))
-          ("Unbound variable nope" `Text.isInfixOf` errorMessage e)
+          withFixtureSession warm "test/fixtures/MakeCase.agda" $ \path -> do
+            report <-
+              load Load.Request {Load.requestPath = path, Load.requestArguments = []}
+                >>= liftIO . expectLoadOk "load"
+            e <-
+              makeCase
+                MakeCase.Request
+                  { MakeCase.requestGoalId = goalId (metasReportGoals report !! 0)
+                  , MakeCase.requestSplit = MakeCase.SplitVariables ("nope" :| [])
+                  }
+                >>= liftIO . expectMakeCaseFailure "an unbound variable"
+            pure $ Corpus.normalizeError path e
+        e @?= Corpus.caseSplitError
     , -- `checkClauseIsClean` (MakeCase.hs:463-466) refuses to split a clause
       -- that holds a solved interaction point, since the split would discard
       -- what was given.
