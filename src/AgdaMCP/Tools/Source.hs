@@ -22,6 +22,8 @@ import Control.Exception (
   try,
  )
 import Control.Monad (unless)
+import Data.Bifunctor (first)
+import Data.Foldable (traverse_)
 import Data.List (sortOn)
 import Data.Ord (Down (..))
 import Data.Text (Text)
@@ -31,7 +33,6 @@ import Data.Text.Lazy qualified as Text.Lazy
 import System.AtomicWrite.Writer.ByteString.Binary (atomicWriteFile)
 
 import AgdaMCP.Interaction (Hash, Position (..), Span (..), spanText)
-import Data.Bifunctor (first)
 
 data Source = Source
   { sourceText :: Text
@@ -80,7 +81,7 @@ spliceEdits :: Text -> [(Span, Text)] -> Either SpliceViolation Text
 spliceEdits source edits = do
   let descending = sortOn (Down . positionOffset . spanStart . fst) edits
   checkDisjoint (map fst descending)
-  mapM_ (validate . fst) descending
+  traverse_ (validate . fst) descending
   pure $ foldl' apply source descending
  where
   checkDisjoint :: [Span] -> Either SpliceViolation ()
