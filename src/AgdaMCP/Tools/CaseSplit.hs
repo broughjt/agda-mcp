@@ -14,9 +14,13 @@ module AgdaMCP.Tools.CaseSplit (
 ) where
 
 import Agda.Syntax.Common (InteractionId (..))
+import Control.Exception (throwIO)
+import Control.Monad.IO.Class (liftIO)
 import Data.Aeson (FromJSON (..), object, withObject, (.:), (.=))
 import Data.Aeson.Types qualified as Aeson
+import Data.Char (isSpace)
 import Data.Foldable (toList)
+import Data.List.NonEmpty (nonEmpty)
 import Data.Map qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -26,16 +30,43 @@ import MCP.Server (
   toolHandler,
  )
 
-import AgdaMCP.Interaction (Error, Span)
-import AgdaMCP.Interaction.MakeCase (MakeCaseVariant)
+import AgdaMCP.Interaction (Error (..), Position (..), Span (..))
+import AgdaMCP.Interaction.MakeCase (
+  MakeCaseError (..),
+  MakeCaseReport (..),
+  MakeCaseVariant,
+  Split (..),
+ )
+import AgdaMCP.Interaction.MakeCase qualified as Interaction.MakeCase
 import AgdaMCP.Tools.Load qualified as Load
-import AgdaMCP.Tools.LoadId (LoadId, LoadIdRefusal)
+import AgdaMCP.Tools.LoadId (
+  CurrentLoad (..),
+  LoadId,
+  LoadIdRefusal,
+  renderLoadIdRefusal,
+ )
 import AgdaMCP.Tools.MCP (
   goalIdSchema,
   loadIdSchema,
   textToolHandle,
  )
-import AgdaMCP.Tools.State (ToolM)
+import AgdaMCP.Tools.Render (
+  blocks,
+  indent,
+  renderFileChanged,
+  renderSourceUnreadable,
+  renderWarning,
+  renderWriteFailed,
+  section,
+ )
+import AgdaMCP.Tools.Source (
+  SourceRefusal (..),
+  SourceUnwritable (..),
+  checkClauseExtent,
+  commitEdits,
+  readChecked,
+ )
+import AgdaMCP.Tools.State (ToolM, liftInteraction)
 
 caseSplitTool :: ToolHandler
 caseSplitTool =
@@ -100,12 +131,8 @@ data Response
 
 data Outcome
   = OutcomeApplied Edit
-  | -- No interaction point with that id in the current load.
-    OutcomeUnknownGoal
-  | {- The split itself failed due to a mistake of the caller. For example, the
-    goal was not in a clause, a named variable was unbound or not splittable, or
-    the clause held a give since the last load. -}
-    OutcomeFailed Error
+  | OutcomeUnknownGoal
+  | OutcomeFailed Error
   | OutcomeFileChanged
   | OutcomeSourceUnreadable Text
   | OutcomeWriteFailed Text
@@ -113,43 +140,91 @@ data Outcome
 
 data Edit = Edit
   { editSpan :: Span
-  {- ^ The clause extent that was replaced, from the start of the left-hand
-  side to the end of the right-hand side. A `where` block is outside it, since
-  Agda does not regenerate one.
-  -}
   , editVariant :: MakeCaseVariant
   , editLayout :: ClauseLayout
   , editClauses :: [Text]
-  -- ^ As produced by Agda before `layoutClauses` joined them.
   , editCollapsesWhere :: Bool
-  {- ^ The split clause carried a `where` block, which now belongs to the last
-  generated clause alone.
-  -}
   }
   deriving (Eq, Show)
 
--- How the replacement clauses were joined. See `clauseLayout`.
 data ClauseLayout = OnePerLine | Inline
   deriving (Eq, Show)
 
 -- Business logic
 
 caseSplit :: Request -> ToolM Response
-caseSplit = error "un"
+caseSplit (Request loadId goalId variables) =
+  either ResponseRefused (uncurry $ ResponseCompleted goalId)
+    <$> Load.withEditableLoad loadId attempt
+ where
+  attempt :: CurrentLoad -> ToolM Outcome
+  attempt current = do
+    source <- liftIO $ readChecked path $ currentLoadSourceHash current
+    case source of
+      Left (RefusalUnreadable message) -> pure $ OutcomeSourceUnreadable message
+      Left RefusalChanged -> pure OutcomeFileChanged
+      Right original -> runSplit original
+   where
+    path = currentLoadPath current
 
-{- | Which layout the clauses replacing this extent must use.
+    runSplit :: Text -> ToolM Outcome
+    runSplit original = do
+      response <-
+        liftInteraction $
+          Interaction.MakeCase.makeCase
+            Interaction.MakeCase.Request
+              { Interaction.MakeCase.requestGoalId = goalId
+              , Interaction.MakeCase.requestSplit =
+                  maybe IntroduceArgumentsOrSplitResult SplitVariables $
+                    nonEmpty variables
+              }
+      case response of
+        Left MakeCaseUnknownId {} -> pure OutcomeUnknownGoal
+        Left (MakeCaseFailed e) -> pure $ OutcomeFailed e
+        Right report -> commit original report
+
+    commit :: Text -> MakeCaseReport -> ToolM Outcome
+    commit original report = do
+      either (liftIO . throwIO) pure $ checkClauseExtent original span'
+      written <- liftIO $ commitEdits path original [(span', replacement)]
+      pure $ case written of
+        Left unwritable ->
+          OutcomeWriteFailed $ sourceUnwritableMessage unwritable
+        Right () -> OutcomeApplied edit
+     where
+      span' = makeCaseReportSpan report
+      clauses = makeCaseReportClauses report
+      layout = clauseLayout original span'
+      replacement = layoutClauses layout clauses
+      edit =
+        Edit
+          { editSpan = span'
+          , editVariant = makeCaseReportVariant report
+          , editLayout = layout
+          , editClauses = clauses
+          , editCollapsesWhere = makeCaseReportCollapsesWhere report
+          }
+
+{- | Which layout the clauses replacing this span should use.
 
 Emacs decides by scanning backwards from the hole for a `;` or an opening brace
-(`agda2-make-case-action-extendlam`, agda2-mode.el:930-953). We have the extent,
+(`agda2-make-case-action-extendlam`, agda2-mode.el:930-953). We have the span,
 so the same question is just whether it starts at its line's first
 non-whitespace column. That covers ordinary function clauses, `λ where` and
 `λ { }` alike, so `MakeCaseVariant` does not drive layout.
 -}
 clauseLayout :: Text -> Span -> ClauseLayout
-clauseLayout = error "un"
+clauseLayout source extent
+  | Text.all isSpace linePrefix = OnePerLine
+  | otherwise = Inline
+ where
+  linePrefix =
+    Text.takeWhileEnd (/= '\n') $
+      Text.take (positionOffset $ spanStart extent) source
 
 layoutClauses :: ClauseLayout -> [Text] -> Text
-layoutClauses = error "un"
+layoutClauses OnePerLine = Text.intercalate "\n"
+layoutClauses Inline = Text.intercalate " ; "
 
 -- Request parsing
 
@@ -200,4 +275,53 @@ validateVariable name
 -- Response rendering
 
 renderResponse :: Response -> Either Text Text
-renderResponse = error "un"
+renderResponse (ResponseRefused refusal) = Left $ renderLoadIdRefusal refusal
+renderResponse (ResponseCompleted goalId outcome reload) =
+  Right $ blocks [renderOutcome goalId outcome, Load.renderResponse reload]
+
+renderOutcome :: InteractionId -> Outcome -> Text
+renderOutcome goalId (OutcomeApplied edit) =
+  blocks $
+    section
+      ( "Replaced the clause at "
+          <> renderGoalId goalId
+          <> " with "
+          <> countClauses (length $ editClauses edit)
+          <> ":"
+      )
+      [indent $ layoutClauses (editLayout edit) (editClauses edit)]
+      <> [whereCollapsed | editCollapsesWhere edit]
+renderOutcome goalId OutcomeUnknownGoal =
+  renderRefusal
+    goalId
+    ( indent
+        "There is no such goal in the current load. Check the goal IDs in the \
+        \most recent load result."
+    )
+    []
+renderOutcome goalId (OutcomeFailed e) =
+  renderRefusal
+    goalId
+    (indent $ errorMessage e)
+    (map renderWarning $ errorWarnings e)
+renderOutcome _ OutcomeFileChanged = renderFileChanged
+renderOutcome _ (OutcomeSourceUnreadable message) = renderSourceUnreadable message
+renderOutcome _ (OutcomeWriteFailed message) = renderWriteFailed message
+
+renderRefusal :: InteractionId -> Text -> [Text] -> Text
+renderRefusal goalId reason warnings =
+  blocks $ [header, reason] <> section "Warnings:" warnings
+ where
+  header = "Cannot split " <> renderGoalId goalId <> ". No edits were written."
+
+whereCollapsed :: Text
+whereCollapsed =
+  "Warning: the `where` block below this clause now belongs to the last clause \
+  \only. The earlier clauses cannot see its bindings."
+
+countClauses :: Int -> Text
+countClauses 1 = "1 clause"
+countClauses n = Text.pack (show n) <> " clauses"
+
+renderGoalId :: InteractionId -> Text
+renderGoalId goalId = "?" <> Text.pack (show $ interactionId goalId)

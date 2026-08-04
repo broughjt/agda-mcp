@@ -74,10 +74,6 @@ data Split
     as a visible pattern (the `toShow`/`toSplit` partition,
     MakeCase.hs:381-382), so this constructor covers both case splitting and
     revealing a hidden arguments.
-
-    TODO: Make sure to validate at the tool layer that `SplitVariables` inputs
-    don't contain a input like ["."] because that will go to the ExpandEllipsis
-    case. Then remove this TODO
     -}
     SplitVariables (NonEmpty Text)
   | {- | Introduces a new arguments if possible, stopping if any are visible and

@@ -257,19 +257,12 @@ distributivity warm =
             Give.OutcomeApplied [baseEdit, stepEdit] -> do
               Give.editGoalId baseEdit @?= 0
               Give.editText baseEdit @?= "refl"
-              Give.editKind baseEdit @?= Give.EditKindComputed
+              Give.editKind baseEdit @?= Give.EditKindVerbatim
               Give.editGoalId stepEdit @?= 1
-              Give.editText stepEdit @?= elaboratedStep
-              Give.editKind stepEdit @?= Give.EditKindComputed
+              Give.editText stepEdit @?= step
+              Give.editKind stepEdit @?= Give.EditKindVerbatim
             other -> assertFailure $ "unexpected outcome: " <> show other
-          proofShouldBe
-            path
-            [ signature
-            , baseClause <> "refl"
-            , stepClause <> "trans (cong (x +_) (*-distribʳ-+ x y z))"
-            , Text.replicate (Text.length stepClause) " "
-                <> "(sym (+-assoc x (y * x) (z * x)))"
-            ]
+          proofShouldBe path [signature, baseClause <> "refl", stepClause <> step]
           Load.loadReportId report @?= LoadId 5
           Load.loadReportPath report @?= path
           Load.loadReportGoals report @?= []

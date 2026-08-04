@@ -249,8 +249,9 @@ renderResponseTests =
                 , "  withWhere zero = ?"
                 , "  withWhere (suc n) = ?"
                 , ""
-                , "The `where` block below this clause now belongs to the last \
-                  \clause only; the earlier clauses cannot see its bindings."
+                , "Warning: the `where` block below this clause now belongs to \
+                  \the last clause only. The earlier clauses cannot see its \
+                  \bindings."
                 , ""
                 ]
                   <> reloadLines
@@ -371,8 +372,9 @@ renderResponseTests =
                 , "  *-distribʳ-+ x zero z = ?"
                 , "  *-distribʳ-+ x (suc y) z = ?"
                 , ""
-                , "The `where` block below this clause now belongs to the last \
-                  \clause only; the earlier clauses cannot see its bindings."
+                , "Warning: the `where` block below this clause now belongs to \
+                  \the last clause only. The earlier clauses cannot see its \
+                  \bindings."
                 , ""
                 , "Load failed:"
                 , ""
