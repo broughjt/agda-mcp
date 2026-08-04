@@ -6,17 +6,21 @@ import Test.Tasty (TestTree, testGroup, withResource)
 
 import Test.Harness (warmInteractionState)
 import Test.Tool.Check qualified as Check
+import Test.Tool.Give qualified as Give
 import Test.Tool.Goal qualified as Goal
 import Test.Tool.Load qualified as Load
 import Test.Tool.Scenario qualified as Scenario
+import Test.Tool.Source qualified as Source
 
 tests :: TestTree
 tests =
   withResource warmInteractionState (const $ pure ()) $ \warm ->
     testGroup
       "Tool"
-      [ Load.tests
+      [ Source.tests
+      , Load.tests
       , Goal.tests warm
       , Check.tests warm
+      , Give.tests
       , Scenario.tests warm
       ]

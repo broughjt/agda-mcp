@@ -49,6 +49,7 @@ library
     AgdaMCP.Tools.LoadId
     AgdaMCP.Tools.MCP
     AgdaMCP.Tools.Render
+    AgdaMCP.Tools.Source
     AgdaMCP.Tools.State
     AgdaMCP.Tools.Load
     AgdaMCP.Tools.Give
@@ -80,10 +81,12 @@ test-suite agda-mcp-test
     Test.Model
     Test.Tool
     Test.Tool.Check
+    Test.Tool.Give
     Test.Tool.Goal
     Test.Tool.Harness
     Test.Tool.Load
     Test.Tool.Scenario
+    Test.Tool.Source
   build-depends:
       Agda == 2.8.*,
       aeson,
