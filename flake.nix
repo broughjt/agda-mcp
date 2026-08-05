@@ -28,13 +28,34 @@
         # The test suite resolves the pinned standard library through
         # AGDA_MCP_STDLIB, so the check phase needs it exactly as the dev shell
         # does. Without it every case fails on a missing library.
-        package = pkgs.haskell.lib.overrideCabal (haskellPackages.callCabal2nix packageName ./. { }) (
+        unwrapped = pkgs.haskell.lib.overrideCabal (haskellPackages.callCabal2nix packageName ./. { }) (
           drv: {
             preCheck = (drv.preCheck or "") + ''
               export AGDA_MCP_STDLIB=${standardLibrary}
             '';
           }
         );
+        # Mirrors `agda.withPackages` by cooking up a libraries file listing the
+        # selected libraries and then passing `--library-file` in a wrapper.
+        withPackages =
+          selection:
+          let
+            selected = if builtins.isList selection then selection else selection pkgs.agdaPackages;
+            libraries = pkgs.writeText "libraries" (
+              pkgs.lib.concatMapStringsSep "\n" (library: "${library}/${library.libraryFile}") selected
+            );
+          in
+          pkgs.runCommand "${packageName}-with-packages"
+            {
+              nativeBuildInputs = [ pkgs.makeWrapper ];
+              meta.mainProgram = packageName;
+            }
+            ''
+              mkdir -p $out/bin
+              makeWrapper ${unwrapped}/bin/${packageName} $out/bin/${packageName} \
+                --add-flags "--library-file=${libraries}"
+            '';
+        package = unwrapped // { inherit unwrapped withPackages; };
       in
       {
         packages = {
@@ -42,7 +63,7 @@
           ${packageName} = package;
         };
 
-        checks.${packageName} = package;
+        checks.${packageName} = unwrapped;
 
         apps.default = {
           type = "app";
@@ -51,7 +72,7 @@
         };
 
         devShells.default = haskellPackages.shellFor {
-          packages = _: [ package ];
+          packages = _: [ unwrapped ];
 
           AGDA_MCP_STDLIB = standardLibrary;
 

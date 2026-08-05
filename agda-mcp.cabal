@@ -88,7 +88,6 @@ test-suite agda-mcp-test
     Test.Tool.Goal
     Test.Tool.Harness
     Test.Tool.Load
-    Test.Tool.Options
     Test.Tool.Scenario
     Test.Tool.Source
   build-depends:
