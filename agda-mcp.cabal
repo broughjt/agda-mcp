@@ -48,6 +48,7 @@ library
     AgdaMCP.Tools
     AgdaMCP.Tools.LoadId
     AgdaMCP.Tools.MCP
+    AgdaMCP.Tools.Options
     AgdaMCP.Tools.Render
     AgdaMCP.Tools.Source
     AgdaMCP.Tools.State
@@ -65,6 +66,7 @@ library
       containers,
       mcp,
       mtl,
+      optparse-applicative,
       text
   default-language: GHC2021
   ghc-options:
@@ -86,6 +88,7 @@ test-suite agda-mcp-test
     Test.Tool.Goal
     Test.Tool.Harness
     Test.Tool.Load
+    Test.Tool.Options
     Test.Tool.Scenario
     Test.Tool.Source
   build-depends:
@@ -117,6 +120,7 @@ executable agda-mcp
       agda-mcp,
       base >= 4.18 && < 5,
       mcp,
+      text,
   default-language: GHC2021
   ghc-options:
       -Wall

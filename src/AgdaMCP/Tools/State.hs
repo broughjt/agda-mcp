@@ -9,7 +9,7 @@ module AgdaMCP.Tools.State (
   runToolM,
 ) where
 
-import Agda.Interaction.Options (defaultOptions)
+import Agda.Interaction.Options (CommandLineOptions)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (StateT (..), get, put)
 import MCP.Server (
@@ -38,11 +38,10 @@ data ToolState = ToolState
 
 type ToolM = StateT ToolState IO
 
--- TODO: Take Agda command-line configuration
-newToolState :: IO ToolState
-newToolState =
+newToolState :: CommandLineOptions -> IO ToolState
+newToolState options =
   flip ToolState LoadGeneration {loadsIssued = 0, currentLoad = Nothing}
-    <$> newInteractionState defaultOptions
+    <$> newInteractionState options
 
 -- Run an interaction-layer action on the session inside `ToolState`, writing
 -- the successor session back.

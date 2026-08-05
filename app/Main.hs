@@ -1,6 +1,9 @@
 module Main (main) where
 
+import Data.Text.IO qualified as Text.IO
 import MCP.Server (initMCPServerState, serveStdio)
+import System.Environment (getArgs)
+import System.Exit (exitFailure, exitSuccess)
 import System.IO (BufferMode (..), hSetBuffering, stderr, stdin, stdout)
 
 import AgdaMCP (
@@ -10,6 +13,7 @@ import AgdaMCP (
   instructions,
   newToolState,
  )
+import AgdaMCP.Tools.Options (Outcome (Helped, Parsed, Rejected), parseOptions)
 
 -- Here, I will attempt to give an account of how frontends interaction with Agda, and then describe which parts we use, replicate, and drop. All file:line citations are Agda v2.8.0.
 --
@@ -142,8 +146,17 @@ import AgdaMCP (
 
 main :: IO ()
 main = do
-  toolState <- newToolState
   hSetBuffering stderr LineBuffering
+  arguments <- getArgs
+  options <- case parseOptions arguments of
+    Parsed options -> pure options
+    Helped text -> do
+      Text.IO.putStrLn text
+      exitSuccess
+    Rejected problem -> do
+      Text.IO.hPutStrLn stderr problem
+      exitFailure
+  toolState <- newToolState options
   serveStdio stdin stdout $
     initMCPServerState
       toolState
