@@ -57,8 +57,8 @@ parseArgumentsTests =
                 ]
           )
           @?= Left
-            "Error in $['load_id']: expected a load_id from a load result, \
-            \such as \"L17\", but got \"17\""
+            "Error in $['load_id']: expected a load_id from the most recent \
+            \result, such as \"L17\", but got \"17\""
     , testCase "a call without a goal is refused" $
         parseRequest (Just $ Map.fromList [("load_id", Aeson.String "L1")])
           @?= Left "Error in $: key \"goal\" not found"
@@ -132,14 +132,14 @@ renderResponseTests =
         renderResponse (ResponseRefused $ StaleLoadId $ LoadId 2)
           @?= Left
             "The supplied load ID is from an earlier load. The current load ID \
-            \is L2. Each load makes fresh goal ID assignments, so use the load \
-            \ID and goal IDs from the most recent load result. If you no longer \
-            \have that result, load the file again."
+            \is L2. Each load makes fresh goal ID assignments, so use the most \
+            \recently issued load ID and goal IDs. If you no longer have them, \
+            \load the file again."
     , testCase "an unknown goal id points back at the load result" $
         renderResponse (ResponseUnknownGoal 5)
           @?= Left
             "No goal ?5 in the current load. Check the goal IDs in the most \
-            \recent load result."
+            \recent result."
     , testCase "a failed query reports Agda's error" $
         renderResponse (ResponseFailed Corpus.typeError)
           @?= Right

@@ -61,14 +61,7 @@ loadTool :: ToolHandler
 loadTool =
   toolHandler
     "load"
-    ( Just
-        "Load and typecheck an Agda source file. Reports open goals (each with \
-        \the local context at the goal), unsolved hidden metavariables, \
-        \non-fatal errors, and warnings on success, or the Agda error if \
-        \checking fails. Relative paths are resolved against the server \
-        \process's working directory; prefer an absolute path when that \
-        \directory may be ambiguous."
-    )
+    (Just loadDescription)
     ( InputSchema
         "object"
         ( Just $
@@ -77,13 +70,7 @@ loadTool =
                 ( "path"
                 , object
                     [ "type" .= ("string" :: Text)
-                    , "description"
-                        .= ( "Path to an Agda source file (.agda, but also \
-                             \literate formats such as .lagda.md, .lagda.tex, \
-                             \.lagda.typ, etc). Relative paths are resolved \
-                             \against the server process's working directory." ::
-                               Text
-                           )
+                    , "description" .= pathDescription
                     ]
                 )
               ]
@@ -91,6 +78,14 @@ loadTool =
         (Just ["path"])
     )
     (textToolHandle load $ Right . renderResponse)
+ where
+  loadDescription :: Text
+  loadDescription =
+    "Load and type-check an Agda source file. On success, reports open goals (each with their local context), unsolved hidden metavariables, warnings, and non-fatal errors. On failure, reports the error message and associated warnings. Agda keeps only one file loaded at a time: each load replaces the one before it and makes fresh goal ID assignments. A successful load returns a load ID for the state it produced. Other tools require that load ID to confirm the request refers to that state, and refuse an earlier one rather than misread it."
+
+  pathDescription :: Text
+  pathDescription =
+    "Path to an Agda source file (.agda, but also literate formats such as .lagda.md, .lagda.tex, .lagda.typ, etc). Relative paths are resolved against the server process's working directory, so prefer an absolute path when that directory may be ambiguous."
 
 data Request = Request {loadRequestPath :: FilePath}
   deriving (Eq, Show)

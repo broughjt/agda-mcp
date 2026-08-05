@@ -51,23 +51,7 @@ checkTool :: ToolHandler
 checkTool =
   toolHandler
     "check"
-    ( Just
-        "Try an expression at an open goal without modifying anything — the \
-        \dry run for `give`. Reports the goal (type, context, boundary, \
-        \constraints), the expression's inferred type (Have), and the \
-        \expression's elaboration checked against the goal (Elaborates to). \
-        \Infer and check are independent and answer different questions: \
-        \inference never consults the goal type, so an expression can infer a \
-        \type happily and still fail to check against the goal — which is \
-        \exactly the diagnostic. Both are reported whichever way they land. \
-        \The expression is parsed and checked in the goal's scope, so its \
-        \errors carry positions relative to the expression, not the file. \
-        \Types are rendered at the requested `normalization`, `simplified` by \
-        \default; `simplified` does not unfold definitions — ask for \
-        \`normalized` when you want them unfolded. Goal IDs are only \
-        \meaningful against the load that issued them, so pass that load's \
-        \`load_id`. To just inspect the goal, use `goal`."
-    )
+    (Just checkDescription)
     ( InputSchema
         "object"
         ( Just $
@@ -79,11 +63,7 @@ checkTool =
                 ( "expression"
                 , object
                     [ "type" .= ("string" :: Text)
-                    , "description"
-                        .= ( "The Agda expression to infer the type of and to \
-                             \check against the goal" ::
-                               Text
-                           )
+                    , "description" .= expressionDescription
                     ]
                 )
               ]
@@ -91,6 +71,14 @@ checkTool =
         (Just ["load_id", "goal", "expression"])
     )
     (textToolHandle check renderResponse)
+ where
+  checkDescription :: Text
+  checkDescription =
+    "Infer the type of an expression and check its elaboration against the type of the goal. Nothing is modified, so use this as a dry run before give. The response reports the goal's type, context, boundary, and constraints, then the inference under \"Have:\" and the elaboration under \"Elaborates to:\". These two queries are independent and answer different questions. Inference does not consult the goal type, so inference can succeed while checking fails. Both are reported whichever way they land, and a failure in either is a normal result rather than a tool error. The expression is parsed and checked in the goal's scope, so its errors carry positions relative to the expression, not the file. Types are rendered at the requested normalization. To just inspect the goal, use goal instead."
+
+  expressionDescription :: Text
+  expressionDescription =
+    "The Agda expression to infer the type of and to check against the goal."
 
 data Request = Request
   { checkRequestLoadId :: LoadId
@@ -200,8 +188,7 @@ renderResponse (ResponseUnknownGoal unknownId) =
   Left $
     "No goal ?"
       <> Text.pack (show $ interactionId unknownId)
-      <> " in the current load. Check the goal IDs in the most recent load \
-         \result."
+      <> " in the current load. Check the goal IDs in the most recent result."
 renderResponse (ResponseFailed e) =
   Right $
     blocks $

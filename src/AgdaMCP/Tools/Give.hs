@@ -72,22 +72,7 @@ giveTool :: ToolHandler
 giveTool =
   toolHandler
     "give"
-    ( Just
-        "Fill open goals in the currently loaded Agda file by writing \
-        \expressions into them. Takes a `load_id` and a non-empty list of \
-        \`gives`, each a goal interaction ID, an expression, and an optional \
-        \`action`: `give` (default) checks the expression against the goal and \
-        \writes it, `refine` writes a partial term and leaves new goals \
-        \behind. The batch is all-or-nothing and checked in order: if one item \
-        \is rejected, the rest are skipped and no edits are written. Before \
-        \writing, the server checks that the file on disk still matches the \
-        \source Agda checked; if it changed, everything is refused. Every \
-        \outcome is followed by a reload that issues a fresh `load_id` and \
-        \renumbers goals, so use the goal IDs from the result below rather \
-        \than the ones you sent. What gets written is Agda's own elaborated \
-        \expression, which may differ from your text — the result shows what \
-        \went in. Files are written back as UTF-8 with LF line endings."
-    )
+    (Just giveDescription)
     ( InputSchema
         "object"
         ( Just $
@@ -98,11 +83,7 @@ giveTool =
                 , object
                     [ "type" .= ("array" :: Text)
                     , "minItems" .= (1 :: Int)
-                    , "description"
-                        .= ( "An all-or-nothing batch of goals to fill, applied \
-                             \in order. Each goal may appear at most once." ::
-                               Text
-                           )
+                    , "description" .= givesDescription
                     , "items"
                         .= object
                           [ "type" .= ("object" :: Text)
@@ -112,26 +93,14 @@ giveTool =
                                 , "expression"
                                     .= object
                                       [ "type" .= ("string" :: Text)
-                                      , "description"
-                                          .= ( "The Agda expression to write \
-                                               \into the goal." ::
-                                                 Text
-                                             )
+                                      , "description" .= expressionDescription
                                       ]
                                 , "action"
                                     .= object
                                       [ "type" .= ("string" :: Text)
                                       , "enum" .= (Map.keys actions :: [Text])
                                       , "default" .= ("give" :: Text)
-                                      , "description"
-                                          .= ( "`give` checks the expression \
-                                               \against the goal and fills it; \
-                                               \`refine` writes a partial term, \
-                                               \leaving new goals for the parts \
-                                               \you left out. Defaults to \
-                                               \`give`." ::
-                                                 Text
-                                             )
+                                      , "description" .= actionDescription
                                       ]
                                 ]
                           , "required" .= (["goal", "expression"] :: [Text])
@@ -143,6 +112,21 @@ giveTool =
         (Just ["load_id", "gives"])
     )
     (textToolHandle give renderResponse)
+ where
+  giveDescription :: Text
+  giveDescription =
+    "Fill open goals in the currently loaded Agda file by writing expressions into them. The batch is all-or-nothing and executed in order. If one item is rejected, the rest are skipped and no edits are written. Before writing, the server checks that the file on disk still matches the source Agda checked, and refuses everything if it changed. Except when the load ID is refused, every outcome is followed by a reload that issues a new load ID and fresh goal ID assignments, so the goal IDs in this request are no longer valid afterwards. What is written may be Agda's rendering of the expression rather than the submitted text, so the response shows what went in. Files are written back as UTF-8 with LF line endings."
+
+  givesDescription :: Text
+  givesDescription =
+    "The batch of goals to fill. Each goal may appear at most once."
+
+  expressionDescription :: Text
+  expressionDescription = "The Agda expression to write into the goal."
+
+  actionDescription :: Text
+  actionDescription =
+    "`give` checks the expression against the goal and writes it, while `refine` partially fills the goal and leaves new subgoals in its place. Defaults to `give`."
 
 data Request = Request
   { giveRequestLoadId :: LoadId
@@ -416,7 +400,7 @@ renderRefusal refusal =
     RefusedUnknownGoal ->
       ( indent
           "There is no such goal in the current load. Check the goal IDs in \
-          \the most recent load result."
+          \the most recent result."
       , []
       )
     RefusedError e ->

@@ -56,18 +56,7 @@ goalTool :: ToolHandler
 goalTool =
   toolHandler
     "goal"
-    ( Just
-        "Inspect one open goal in the currently loaded Agda file without \
-        \modifying anything. Reports the goal's type, the local context at \
-        \the goal (innermost binding first), its cubical boundary, and any \
-        \unsolved constraints mentioning it. Types are rendered at the \
-        \requested `normalization`, `simplified` by default — note \
-        \`simplified` does not unfold definitions; ask for `normalized` when \
-        \you want them unfolded. Goal IDs are only meaningful against the \
-        \load that issued them: pass the `load_id` from that load's result; \
-        \an ID from an earlier load is refused. To try an expression at a \
-        \goal, use `check` instead."
-    )
+    (Just goalDescription)
     ( InputSchema
         "object"
         ( Just $
@@ -80,6 +69,10 @@ goalTool =
         (Just ["load_id", "goal"])
     )
     (textToolHandle goal renderResponse)
+ where
+  goalDescription :: Text
+  goalDescription =
+    "Inspect an open goal in the currently loaded Agda file without modifying anything. Reports the goal's type, its local context, its cubical boundary when the goal has one, and any unsolved constraints mentioning the goal. Types are rendered at the requested normalization. To try an expression at a goal, use `check` instead."
 
 data Request = Request
   { goalRequestLoadId :: LoadId
@@ -139,8 +132,7 @@ renderResponse (ResponseUnknownGoal unknownId) =
   Left $
     "No goal ?"
       <> Text.pack (show $ interactionId unknownId)
-      <> " in the current load. Check the goal IDs in the most recent load \
-         \result."
+      <> " in the current load. Check the goal IDs in the most recent result."
 renderResponse (ResponseFailed e) =
   Right $
     blocks $

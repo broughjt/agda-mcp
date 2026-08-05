@@ -90,14 +90,17 @@ renderSourceUnreadable :: Text -> Text
 renderSourceUnreadable message =
   blocks
     [ "Could not read the file to check it still matches the source Agda \
-      \checked, so no edits were written."
+      \checked, so no edits were written. It has been reloaded below, and \
+      \goal IDs from the earlier load are no longer valid."
     , indent message
     ]
 
 renderWriteFailed :: Text -> Text
 renderWriteFailed message =
   blocks
-    [ "Could not write the file. It was not modified."
+    [ "Could not write the file, so it was not modified. It has been \
+      \reloaded below, and goal IDs from the earlier load are no longer \
+      \valid."
     , indent message
     ]
 

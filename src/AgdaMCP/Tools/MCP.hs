@@ -12,7 +12,7 @@ module AgdaMCP.Tools.MCP (
 ) where
 
 import Agda.Interaction.Base (Rewrite (..))
-import Data.Aeson (FromJSON (..), Value)
+import Data.Aeson (FromJSON (..), Value, (.=))
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Aeson.Types qualified as Aeson
 import Data.Bifunctor (first)
@@ -105,37 +105,32 @@ renderNormalization Normalised = "normalized"
 loadIdSchema :: Value
 loadIdSchema =
   Aeson.object
-    [ "type" Aeson..= ("string" :: Text)
-    , "description"
-        Aeson..= ( "The `load_id` from the load result that issued this goal \
-                   \ID. Goal IDs are renumbered by every load, so an ID from an \
-                   \earlier load is refused rather than misread." ::
-                     Text
-                 )
+    [ "type" .= ("string" :: Text)
+    , "description" .= description
     ]
+ where
+  description :: Text
+  description =
+    "The load ID from the load result that issued this goal ID. Each load makes fresh goal ID assignments, so use the most recently issued load ID and goal IDs. If you no longer have that result, load the file again."
 
 goalIdSchema :: Value
 goalIdSchema =
   Aeson.object
-    [ "type" Aeson..= ("integer" :: Text)
-    , "description"
-        Aeson..= ( "The target goal's interaction ID: the N of `?N` in that \
-                   \load's result." ::
-                     Text
-                 )
+    [ "type" .= ("integer" :: Text)
+    , "description" .= description
     ]
+ where
+  description :: Text
+  description = "The target goal's interaction ID (the N in `?N`)."
 
 normalizationSchema :: Value
 normalizationSchema =
   Aeson.object
-    [ "type" Aeson..= ("string" :: Text)
-    , "enum" Aeson..= (Map.keys normalizations :: [Text])
-    , "description"
-        Aeson..= ( "How much to normalize the reported types. Defaults to \
-                   \`simplified`, which is what Agda's own goal display shows \
-                   \but does not unfold definitions; `normalized` unfolds \
-                   \definitions all the way; `asis` reports types exactly as \
-                   \written." ::
-                     Text
-                 )
+    [ "type" .= ("string" :: Text)
+    , "enum" .= (Map.keys normalizations :: [Text])
+    , "description" .= description
     ]
+ where
+  description :: Text
+  description =
+    "How much to normalize reported types. Defaults to `simplified`, which is what Agda's interactive goal display shows, but which does not unfold definitions. `normalized` unfolds definitions all the way, while `asis` reports types exactly as written."

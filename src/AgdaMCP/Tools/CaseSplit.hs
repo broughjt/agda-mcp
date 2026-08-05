@@ -72,22 +72,7 @@ caseSplitTool :: ToolHandler
 caseSplitTool =
   toolHandler
     "case_split"
-    ( Just
-        "Case split an open goal in the currently loaded Agda file, replacing \
-        \the clause the goal sits in with one clause per constructor. Pass the \
-        \pattern variables to split on; an empty list instead introduces the \
-        \clause's remaining arguments, or splits on the result if they are \
-        \already introduced. A variable that is not currently in scope is \
-        \revealed as a visible pattern rather than split on. The replacement is \
-        \written to the file and the file is reloaded, so goal IDs are \
-        \renumbered: use the goals in the result. Goal IDs are only meaningful \
-        \against the load that issued them, so pass the `load_id` from that \
-        \load result; an ID from an earlier load is refused. Unlike `give`, a \
-        \split can produce a file that no longer typechecks — if the clause \
-        \carried a `where` block, the block ends up attached to the last \
-        \generated clause only, and the result says so. In that case the file \
-        \has still been modified, and the reload below will report the error."
-    )
+    (Just caseSplitDescription)
     ( InputSchema
         "object"
         ( Just $
@@ -99,13 +84,7 @@ caseSplitTool =
                 , object
                     [ "type" .= ("array" :: Text)
                     , "items" .= object ["type" .= ("string" :: Text)]
-                    , "description"
-                        .= ( "The pattern variables to split on, by name. An \
-                             \empty list introduces the clause's remaining \
-                             \arguments instead, or splits on the result if \
-                             \they are already introduced." ::
-                               Text
-                           )
+                    , "description" .= variableDescription
                     ]
                 )
               ]
@@ -113,6 +92,14 @@ caseSplitTool =
         (Just ["load_id", "goal", "variables"])
     )
     (textToolHandle caseSplit renderResponse)
+ where
+  caseSplitDescription :: Text
+  caseSplitDescription =
+    "Split an open goal into cases, replacing the clause containing the goal with one clause per case. Pass the pattern variables to split on, or the empty list to introduce the clause's remaining arguments. A variable not currently in scope is revealed as a visible pattern rather than split on. The replacement is written to the file, and a reload follows, which issues a new load ID and fresh goal ID assignments, so the goal IDs in this request are no longer valid afterwards."
+
+  variableDescription :: Text
+  variableDescription =
+    "The pattern variables to split on, by name. An empty list instead introduces the clause's remaining arguments."
 
 data Request = Request
   { caseSplitRequestLoadId :: LoadId
@@ -296,7 +283,7 @@ renderOutcome goalId OutcomeUnknownGoal =
     goalId
     ( indent
         "There is no such goal in the current load. Check the goal IDs in the \
-        \most recent load result."
+        \most recent result."
     )
     []
 renderOutcome goalId (OutcomeFailed e) =
@@ -316,8 +303,11 @@ renderRefusal goalId reason warnings =
 
 whereCollapsed :: Text
 whereCollapsed =
-  "Warning: the `where` block below this clause now belongs to the last clause \
-  \only. The earlier clauses cannot see its bindings."
+  "Warning: the `where` block that followed the clause you split now belongs \
+  \to the last of the new clauses alone, so the earlier clauses cannot see its \
+  \bindings. If they use those bindings, the reload below reports the errors. \
+  \Lift the bindings to the enclosing module or give each clause its own \
+  \`where` block."
 
 countClauses :: Int -> Text
 countClauses 1 = "1 clause"

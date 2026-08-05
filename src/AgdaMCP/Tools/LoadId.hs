@@ -37,7 +37,8 @@ instance FromJSON LoadId where
             pure $ LoadId n
       _ ->
         fail $
-          "expected a load_id from a load result, such as \"L17\", but got "
+          "expected a load_id from the most recent result, such as \"L17\", \
+          \but got "
             <> show text
 
 -- Loading replaces Agda's active interaction state and reuses small
@@ -93,6 +94,6 @@ renderLoadIdRefusal NoCurrentLoad =
 renderLoadIdRefusal (StaleLoadId current) =
   "The supplied load ID is from an earlier load. The current load ID is "
     <> renderLoadId current
-    <> ". Each load makes fresh goal ID assignments, so use the load ID and \
-       \goal IDs from the most recent load result. If you no longer have that \
-       \result, load the file again."
+    <> ". Each load makes fresh goal ID assignments, so use the most recently \
+       \issued load ID and goal IDs. If you no longer have them, load the file \
+       \again."

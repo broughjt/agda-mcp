@@ -204,9 +204,9 @@ renderResponseTests =
         renderResponse (ResponseRefused $ StaleLoadId $ LoadId 2)
           @?= Left
             "The supplied load ID is from an earlier load. The current load ID \
-            \is L2. Each load makes fresh goal ID assignments, so use the load \
-            \ID and goal IDs from the most recent load result. If you no longer \
-            \have that result, load the file again."
+            \is L2. Each load makes fresh goal ID assignments, so use the most \
+            \recently issued load ID and goal IDs. If you no longer have them, \
+            \load the file again."
     , testCase "one applied edit reports the text that went in" $
         completed (OutcomeApplied [edit 0 "refl"])
           @?= Right
@@ -295,7 +295,7 @@ renderResponseTests =
                 [ "Rejected at ?7 (item 1 of 2). No edits were written."
                 , ""
                 , "  There is no such goal in the current load. Check the goal \
-                  \IDs in the most recent load result."
+                  \IDs in the most recent result."
                 , ""
                 ]
                   <> reloadLines
@@ -343,7 +343,8 @@ renderResponseTests =
           @?= Right
             ( rendered $
                 [ "Could not read the file to check it still matches the source \
-                  \Agda checked, so no edits were written."
+                  \Agda checked, so no edits were written. It has been reloaded \
+                  \below, and goal IDs from the earlier load are no longer valid."
                 , ""
                 , "  Example.agda: openFile: does not exist"
                 , ""
@@ -354,7 +355,9 @@ renderResponseTests =
         completed (OutcomeWriteFailed "Example.agda: openFile: permission denied")
           @?= Right
             ( rendered $
-                [ "Could not write the file. It was not modified."
+                [ "Could not write the file, so it was not modified. It has been \
+                  \reloaded below, and goal IDs from the earlier load are no \
+                  \longer valid."
                 , ""
                 , "  Example.agda: openFile: permission denied"
                 , ""
