@@ -144,11 +144,8 @@ data Action
   deriving (Eq, Show)
 
 data Response
-  = -- The load id was refused.
-    ResponseRefused LoadIdRefusal
-  | -- The outcome of the batch of actions, together with the result of a reload
-    -- executed afterwards.
-    ResponseCompleted Outcome Load.Response
+  = ResponseRefused LoadIdRefusal
+  | ResponseCompleted Outcome Load.Response
   deriving (Eq, Show)
 
 data Outcome
@@ -178,7 +175,7 @@ data Refusal = Refusal
   }
   deriving (Eq, Show)
 
--- Where in the batch the refusal happened. The index is zero-based.
+-- | Where in the batch the refusal happened. The index is zero-based.
 data BatchPosition = BatchPosition {batchIndex :: Int, batchLength :: Int}
   deriving (Eq, Show)
 
@@ -288,15 +285,15 @@ actions =
     , ("refine", ActionRefine)
     ]
 
--- The batch is all-or-nothing and applied in order, so an empty batch has
--- nothing to do and a repeated goal id would ask us to fill a hole that the
--- earlier item already solved.
 parseItems :: Aeson.Value -> Aeson.Parser [Item]
 parseItems = Aeson.withArray "gives" $ \values -> do
   items <-
     traverse
       (\(index, value) -> parseItem value Aeson.<?> Aeson.Index index)
       (zip [0 ..] $ toList values)
+  -- The batch is all-or-nothing and applied in order, so an empty batch has
+  -- nothing to do and a repeated goal id would ask us to fill a hole that the
+  -- earlier item already solved.
   if null items
     then fail "expected at least one goal to fill, but got none"
     else case repeated (map fst items) of

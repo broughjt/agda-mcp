@@ -263,7 +263,8 @@ renderHiddenMetavariable metavariable =
       <> " : "
       <> renderShape (hiddenMetavariableShape metavariable)
 
--- Like warnings, the structural location beside the message is not rendered:
--- the message embeds its own location.
 renderNonFatalError :: NonFatalError -> Text
-renderNonFatalError (NonFatalError (_, message)) = indent message
+renderNonFatalError (NonFatalError (_, message)) =
+  -- Like warnings, the structural location beside the message is not rendered:
+  -- the message embeds its own location.
+  indent message

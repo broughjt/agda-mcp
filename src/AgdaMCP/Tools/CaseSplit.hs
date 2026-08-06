@@ -194,11 +194,11 @@ caseSplit (Request loadId goalId variables) =
 
 {- | Which layout the clauses replacing this span should use.
 
-Emacs decides by scanning backwards from the hole for a `;` or an opening brace
+Emacs decides by scanning backwards from the hole for a @;@ or an opening brace
 (`agda2-make-case-action-extendlam`, agda2-mode.el:930-953). We have the span,
 so the same question is just whether it starts at its line's first
-non-whitespace column. That covers ordinary function clauses, `λ where` and
-`λ { }` alike, so `MakeCaseVariant` does not drive layout.
+non-whitespace column. That covers ordinary function clauses, @λ where@ and
+@λ { }@ alike, so @MakeCaseVariant@ does not drive layout.
 -}
 clauseLayout :: Text -> Span -> ClauseLayout
 clauseLayout source span'
@@ -231,8 +231,8 @@ parseVariables = Aeson.withArray "variables" $ \values ->
 parseVariable :: Aeson.Value -> Aeson.Parser Text
 parseVariable = Aeson.withText "variable" validateVariable
 
-{- | Reject names that would select a different split than the one asked for.
-The wrapper re-encodes the list as the string Agda splits with `words`, so `"."`
+{- | Reject names that would select a different `Split` than the one asked for.
+The wrapper re-encodes the list as the string Agda splits with `words`, so @"."@
 would reach the ellipsis branch this tool does not expose, and a name carrying
 whitespace would silently become a different number of variables.
 -}

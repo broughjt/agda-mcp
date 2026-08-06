@@ -93,7 +93,6 @@ data Response
 
 goal :: Request -> ToolM Response
 goal request = do
-  -- Validation is pure over the load generation and runs before any command.
   generation <- gets toolLoadGeneration
   case requireCurrentLoad generation (goalRequestLoadId request) of
     Left refusal -> pure $ ResponseRefused refusal
