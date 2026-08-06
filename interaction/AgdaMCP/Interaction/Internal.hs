@@ -37,46 +37,35 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (StateT (..))
 import Data.IORef (IORef, newIORef, writeIORef)
 
--- TODO: Update documentation here:
---
--- It turns out that all you need to run Agda commands is `TCState` and
--- `CommandState`. Once you have that, you can run Agda commands in `CommandM`
--- without needing channels, locks, or threading (which is what I was doing
--- before I understood this).
+{- | The state which comprises an Agda session (`TCState` and `CommandState`),
+together with an added mutable reference to facilitate the give family of
+command wrappers.
 
--- TODO: and here
-
--- An Agda session consists of the type-checker state and the interaction-level
--- command state, held as a value between tool calls. Tool executions run in
--- `CommandM` (`StateT CommandState TCM`).
---
--- The `GiveSlot` is an added piece of mutable to facilitate the give family of
--- command wrappers. See AgdaMCP.Interaction.Give.
+The constructor is deliberately hidden to ensure that callers cannot manipulate
+Agda state outside of calling the command wrappers exposed here
+(e.g. `AgdaMCP.Interaction.Load.load`, `AgdaMCP.Interaction.Give.give`,
+`AgdaMCP.Interaction.MakeCase.makeCase`, etc.).
+-}
 data InteractionState = InteractionState TCState CommandState GiveSlot
 
--- See `captureGiveAction`.
+-- See @captureGiveAction@.
 type GiveSlot = IORef (Maybe (InteractionId, GiveResult))
 
--- TODO: Document this design decision in Main.hs explanation or add one to this module
---
--- Tools can snapshot and restore whole session state, and they can call command
--- wrappers which manipulate it, but they can never inspect or build `Session`s
--- themselves.
 type InteractionM = StateT InteractionState IO
 
 newInteractionState :: CommandLineOptions -> IO InteractionState
 newInteractionState options = do
   -- The queue is inert--nothing ever uses it. We just need to pass it because
-  -- `CommandState` has a `commandQueue` field which needs to be
+  -- @CommandState@ has a @commandQueue@ field which needs to be
   -- initialized. Normally, Agda runs in a separate thread and receives commands
   -- over a channel, but we deliberately avoid that here.
   queue <- CommandQueue <$> newTChanIO <*> newTVarIO Nothing
   slot <- newIORef Nothing
   tcState <- initStateIO
-  -- Install the capturing output callback (see `captureGiveAction`).
+  -- Install the capturing output callback (see @captureGiveAction@).
   ((), tcState') <-
     runTCM initEnv tcState $ setInteractionOutputCallback $ captureGiveAction slot
-  -- Clear `optAbsoluteIncludePaths` the same way that `repl` does
+  -- Clear @optAbsoluteIncludePaths@ the same way that @repl@ does
   -- (AgdaTop.hs:44-46). As far as I understand, clearing this causes library
   -- resolution to run for new loads and prevents the use of stale absolute
   -- paths.
@@ -86,39 +75,33 @@ newInteractionState options = do
           }
   pure $ InteractionState tcState' commandState slot
 
-{- | This capturing callback is a deliberate hack. The goal of the interaction
-layer is to avoid needing to intercept and parse `Resp_` streams, and to avoid
-needing to render in the context of the type-checking monad. However, `give_gen`
-is a complicated and delicate looking helper whose logic I don't wish to
-duplicate, and its result is not written to `TCState` in any form, so we can't
-recover the needed information by querying that state after the call. Rather
-than reimplement `give_gen'` myself I have chosen to use the response output
-callback in this one instance.
--}
-captureGiveAction :: GiveSlot -> Response -> TCM ()
-captureGiveAction slot response = case response of
-  Resp_GiveAction pointId giveResult -> liftIO $ writeIORef slot $ Just (pointId, giveResult)
-  _ -> pure ()
-
--- TODO: Document again, this is stale now:
+-- Deliberate hack.
 --
--- Run a `CommandM` action against the session held in `ToolM`, producing the
--- next session state. The trick we're pulling is that `TCM` is actually not a
--- state monad, but instead uses an `IORef TCState`. The `runTCM` form creates
--- a new `IORef` in each call so that we can treat the state as a value
--- outside that scope.
+-- One goal of the interaction layer is to avoid needing to intercept and parse
+-- @Resp_@ streams. However, @give_gen@ is a complicated and delicate looking
+-- helper whose logic I don't wish to duplicate, and its output is not written
+-- to @TCState@ in any form, so we can't recover the needed information by
+-- querying that state after the call. Rather than reimplement @give_gen'@
+-- myself I have chosen to use the response output callback in this one
+-- instance.
+captureGiveAction :: GiveSlot -> Response -> TCM ()
+captureGiveAction slot (Resp_GiveAction pointId giveResult) =
+  liftIO $ writeIORef slot $ Just (pointId, giveResult)
+captureGiveAction _ _ = pure ()
+
 runCommandM :: CommandM a -> InteractionM a
-runCommandM action = StateT $ \(InteractionState tcState commandState slot) -> do
-  ((result, commandState'), tcState') <-
-    runTCM initEnv tcState $ runStateT action commandState
-  pure (result, InteractionState tcState' commandState' slot)
+runCommandM action =
+  -- The tricky part is that @TCM@ is actually not a state monad, but instead
+  -- uses an @IORef TCState@. The @runTCM@ form creates a new @IORef@ in each
+  -- call so that we can treat the state as a value outside that scope.
+  StateT $ \(InteractionState tcState commandState slot) -> do
+    ((result, commandState'), tcState') <-
+      runTCM initEnv tcState $ runStateT action commandState
+    pure (result, InteractionState tcState' commandState' slot)
 
-{- | Catch a 'TCErr'.
-
-`PatternErr` is exempt, since it is used for an Agda-internal backtracking
-control flow mechanism. One of these escaping to us would be a bug in Agda
-code, which we should treat as a bug in our code and die loudly.
--}
+-- @PatternErr@ is exempt, since it is used for an Agda-internal backtracking
+-- control flow mechanism. One of these escaping would be a bug in Agda code,
+-- which we should treat as a bug in our code and die loudly.
 catchTCErr :: CommandM a -> (TCErr -> CommandM a) -> CommandM a
 catchTCErr action handler = action `catchError` handler'
  where

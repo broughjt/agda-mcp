@@ -26,18 +26,19 @@ import AgdaMCP.Interaction.Internal (
  )
 import AgdaMCP.Interaction.Model (GiveError (..), Span)
 
--- Elaborate-give always sets the force parameter to false, so we do not include
--- that in the request. It does carry a normalization mode for the elaborated
--- term.
+{- | Elaborate-give always sets the force parameter to false, so we do not
+include that in the request.
+-}
 data Request = Request
   { requestNormalization :: Rewrite
   , requestGoalId :: InteractionId
   , requestExpression :: Text
   }
 
--- The result is always Agda's own elaboration of the expression, never the
--- caller's text (see `expectComputed`), so this is a `Text` rather than
--- `GiveAction`. The `Span` is the hole it was elaborated for.
+{- | The result is always Agda's own elaboration of the expression, never the
+caller's text (see `expectComputed`), so this is a `Text` rather than
+`GiveAction`. The `Span` is the hole it was elaborated for.
+-}
 type Response = Either GiveError (Span, Text)
 
 elaborateGive :: Request -> InteractionM Response

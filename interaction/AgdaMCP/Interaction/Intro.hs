@@ -35,16 +35,15 @@ import AgdaMCP.Interaction.Model (
   Span,
  )
 
--- Intro takes no user expression, since `introTactic` proposes the candidate(s)
--- (InteractionTop.hs:653-660).
+{- | Intro takes no user expression, since @introTactic@ proposes the
+candidate(s) (InteractionTop.hs:653-660).
+-}
 data Request = Request
   { requestPatternLambda :: Bool
   , requestGoalId :: InteractionId
   }
 
--- `Left` collects every reason no action was produced--a bad ID, a `TCErr`, or
--- `introTactic` finding no/several candidates. `Right` is the hole and the
--- introduction form Agda chose.
+-- | Success is the hole and the introduction form Agda chose.
 type Response = Either IntroError (Span, Text)
 
 intro :: Request -> InteractionM Response
@@ -60,9 +59,9 @@ introInternal slot (Request patternLambda goalId) =
 introInHole ::
   GiveSlot -> Bool -> InteractionId -> Range -> Span -> CommandM Response
 introInHole slot patternLambda goalId range holeSpan =
-  -- `interpret Cmd_intro` (InteractionTop.hs:653-660). `introTactic` runs
-  -- outside `withInteractionId` and the give runs inside it. Mirror the split
-  -- exactly.
+  -- Follows @interpret Cmd_intro@ (InteractionTop.hs:653-660). @introTactic@
+  -- runs outside @withInteractionId@ and the give runs inside it. Mirror the
+  -- split exactly.
   ( do
       candidates <- lift $ introTactic patternLambda goalId
       liftCommandMT (withInteractionId goalId) $ case candidates of

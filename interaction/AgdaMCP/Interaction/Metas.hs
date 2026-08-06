@@ -55,21 +55,12 @@ import AgdaMCP.Interaction.Model (
   Span (..),
  )
 
--- `Cmd_metas` takes the degree of normalization to render goal types at.
+-- | @Cmd_metas@ takes the degree of normalization to render goal types at.
 data Request = Request {requestNormalization :: Rewrite}
   deriving (Eq, Show)
 
 type Response = Either Error MetasReport
 
--- The body of `interpret (Cmd_metas norm)` (InteractionTop.hs:508-510) is a
--- `getGoals'` query plus a `getWarningsAndNonFatalErrors` query, handed to
--- `display_info` as `Info_AllGoalsWarnings`. We do the two queries and render
--- the payload ourselves. See `extractMetas`.
---
--- We avoid the implicit load performed by `runInteraction`, leaving that to the
--- tool layer. It's also worth noting that we don't collect interaction point
--- data, since `updateInteractionPointsAfter Cmd_metas{}` evaluates to false
--- (InteractionTop.hs:430).
 metas :: Request -> InteractionM Response
 metas = runCommandM . metasInternal
 
@@ -78,28 +69,28 @@ metasInternal (Request normalization) =
   (Right <$> lift (extractMetas normalization))
     `catchTCErr` (fmap Left . lift . extractError)
 
--- TODO:
-
-{- | The `Cmd_metas` payload: the goal inventory Agda would display in
-`*All Goals*`.
-
-Exported for the load wrapper, which composes it at this tier rather than
-through `metasInternal` so that a `TCErr` raised while extracting stays
-uncaught. `cmd_load'` runs `interpret (Cmd_metas AsIs)` as its continuation
-(InteractionTop.hs:480), so composing it is what makes our load faithful.
--}
 extractMetas :: Rewrite -> TCM MetasReport
 extractMetas normalization = do
-  -- `typesOfVisibleMetas` uses `getInteractionIdsAndMetas`, which obtains the
+  -- The body of @interpret (Cmd_metas norm)@ (InteractionTop.hs:508-510) is a
+  -- @getGoals'@ query plus a @getWarningsAndNonFatalErrors@ query, handed to
+  -- @display_info@ as @Info_AllGoalsWarnings@. We do the two queries and then
+  -- render the payload. See @extractMetas@.
+  --
+  -- We avoid the implicit load performed by @runInteraction@, leaving that to
+  -- the tool layer. It's also worth noting that we don't collect interaction
+  -- point data, since @updateInteractionPointsAfter Cmd_metas{}@ evaluates to
+  -- false (InteractionTop.hs:430).
+
+  -- @typesOfVisibleMetas@ uses @getInteractionIdsAndMetas@, which obtains the
   -- goals in creation order. We sort by position instead, which is what
-  -- `sortInteractionPoints` does for `theCurrentFile`'s interaction points
+  -- @sortInteractionPoints@ does for @theCurrentFile`@s interaction points
   -- (InteractionTop.hs:1046).
   goals <-
     sortOn (positionOffset . spanStart . goalSpan)
       <$> (typesOfVisibleMetas normalization >>= traverse extractGoal)
-  -- Note: `interpret Cmd_metas` uses `(max Simplified norm)` for the hidden
-  -- metavariable normalization, and `AsIs <= Simplified` by the `deriving`
-  -- instance of `Ord` for `Rewrite`.
+  -- Note: @interpret Cmd_metas@ uses @(max Simplified norm)@ for the hidden
+  -- metavariable normalization, and @AsIs <= Simplified@ by the @deriving@
+  -- instance of @Ord@ for @Rewrite@.
   hiddenMetavariables <-
     ( typesOfHiddenMetas (max Simplified normalization)
         >>= traverse extractHiddenMetavariable
@@ -107,7 +98,7 @@ extractMetas normalization = do
   WarningsAndNonFatalErrors warnings nonFatalErrors <-
     getWarningsAndNonFatalErrors
   -- Both frontends run the warnings and non-fatal error sets through
-  -- `filterTCWarnings` before rendering them. Emacs uses `prettyTCWarnings'`
+  -- @filterTCWarnings@ before rendering them. Emacs uses @prettyTCWarnings'@
   -- (Pretty/Warning.hs:770), while the JSON frontend explicitly
   -- (JSONTop.hs:305-311).
   warnings' <- filterTCWarnings warnings >>= traverse extractWarning
@@ -115,22 +106,21 @@ extractMetas normalization = do
     filterTCWarnings nonFatalErrors >>= traverse extractNonFatalError
   pure $ MetasReport goals hiddenMetavariables warnings' nonFatalErrors'
 
--- Goals and hidden metavariables use only two of `OutputConstraint`'s
--- constructors. The goals response list is built exclusively by `typeOfMetaMI`
--- (BasicOps.hs:889-921), which does cases on `Judgement`'s two
--- constructors. `HasType` becomes `OfType` and `IsSort` becomes `JustSort`. The
--- remaining `OutputConstraint` constructors are used when reifying constraints
--- (`Cmd_constraints`, the `Cmd_goal_type_context*` family of commands), never
+-- Goals and hidden metavariables use only two of @OutputConstraint`@s
+-- constructors. The goals response list is built exclusively by @typeOfMetaMI@
+-- (BasicOps.hs:889-921), which does cases on @Judgement`@s two
+-- constructors. `HasType` becomes @OfType@ and @IsSort@ becomes @JustSort@. The
+-- remaining @OutputConstraint@ constructors are used when reifying constraints
+-- (@Cmd_constraints@, the @Cmd_goal_type_context*@ family of commands), never
 -- for goals.
-
 extractGoal :: OutputConstraint Expr InteractionId -> TCM Goal
 extractGoal constraint = do
-  -- The relevant Agda code for goal extraction is `showGoals`
-  -- (Interaction/BasicOps.hs:830-843) for the Emacs frontend and `encodeTCM`
+  -- The relevant Agda code for goal extraction is @showGoals@
+  -- (Interaction/BasicOps.hs:830-843) for the Emacs frontend and @encodeTCM@
   -- for the JSON frontend (JSONTop.hs:305-310).
   (goalId, goalShape) <- extractVisibleMetavariable constraint
-  -- We claim that after a load, `getInteractionRange` won't fail and that the
-  -- range won't be `NoRange`. If this is wrong, our mental model of Agda needs
+  -- We claim that after a load, @getInteractionRange@ won't fail and that the
+  -- range won't be @NoRange@. If this is wrong, our mental model of Agda needs
   -- to be updated.
   goalSpan <-
     getInteractionRange goalId
@@ -150,18 +140,18 @@ extractGoal constraint = do
 extractVisibleMetavariable ::
   OutputConstraint Expr InteractionId -> TCM (InteractionId, GoalShape)
 extractVisibleMetavariable (OfType pointId ty) =
-  -- Both frontends render under `withInteractionId` with the constraint's id,
-  -- although they both pass through `OutputForm` which seems pointless. Anyway,
+  -- Both frontends render under @withInteractionId@ with the constraint's id,
+  -- although they both pass through @OutputForm@ which seems pointless. Anyway,
   -- the Emacs frontend renders the whole constraint as one string, and we want
-  -- to render to a `Goal`, which has id, span, and type as separate fields. The
-  -- JSON frontend does this too, but instead of the `prettyTCM` call it uses,
-  -- we render the type with `prettyATop`.
+  -- to render to a @Goal@, which has id, span, and type as separate fields. The
+  -- JSON frontend does this too, but instead of the @prettyTCM@ call it uses,
+  -- we render the type with @prettyATop@.
   --
-  -- `prettyTCM` on an abstract expression is `abstractToConcrete_`, which
+  -- @prettyTCM@ on an abstract expression is @abstractToConcrete_@, which
   -- parenthesizes according to the precedence of the ambient scope. The
-  -- difference is observable: for `apply {!!}` with goal type `Nat -> Nat`, the
-  -- JSON frontend prints `(Nat -> Nat)` (with parentheses), while `prettyATop`
-  -- prints `Nat -> Nat` (without parentheses), matching the Emacs display.
+  -- difference is observable: for @apply {!!}@ with goal type @Nat -> Nat@, the
+  -- JSON frontend prints @(Nat -> Nat)@ (with parentheses), while @prettyATop@
+  -- prints @Nat -> Nat@ (without parentheses), matching the Emacs display.
   (pointId,)
     <$> ( GoalOfType . Text.pack . render
             <$> withInteractionId pointId (prettyATop ty)
@@ -182,7 +172,7 @@ extractHiddenMetavariable constraint =
   case constraint of
     OfType metavariable ty ->
       -- The same reasoning from the visible metavariable case in
-      -- `extractVisibleMetavariable` applies here
+      -- @extractVisibleMetavariable@ applies here
       (withMetaId (nmid metavariable) $ prettyATop ty)
         >>= toHiddenMetavariable metavariable . GoalOfType . Text.pack . render
     JustSort metavariable ->
@@ -200,7 +190,7 @@ extractHiddenMetavariable constraint =
   toHiddenMetavariable metavariable shape = do
     name <-
       Text.pack . render
-        -- The same as `showA'` in `showGoals` (Interaction/BasicOps.hs:838-843)
+        -- The same as @showA'@ in @showGoals@ (Interaction/BasicOps.hs:838-843)
         <$> (withMetaId (nmid metavariable) $ prettyATop metavariable)
     maybeSpan <- rangeSpan <$> getMetaRange (nmid metavariable)
     pure $ HiddenMetavariable name maybeSpan shape

@@ -144,6 +144,12 @@ import AgdaMCP.Tools.Options (Outcome (Helped, Parsed, Rejected), parseOptions)
 -- TODO: State that our goal is to stay faithful to the Emacs frontend, and only depart from it when we're making an agda-mcp specific *improvement*, or when something is really hard and not worth fixing.
 -- TODO: We are careful to obtain this data in the same manner as the two frontends extraction and rendering helpers, citing the relevant source and
 
+-- TODO:
+-- It turns out that all you need to run Agda commands is `TCState` and
+-- `CommandState`. Once you have that, you can run Agda commands in `CommandM`
+-- without needing channels, locks, or threading (which is what I was doing
+-- before I understood this).
+
 main :: IO ()
 main = do
   hSetBuffering stderr LineBuffering

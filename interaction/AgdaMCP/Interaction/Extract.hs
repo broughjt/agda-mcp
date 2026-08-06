@@ -78,7 +78,6 @@ extractError e =
       >>= filterTCWarnings
       >>= traverse extractWarning
 
--- Helper for classifying missing interaction IDs.
 classifyInteractionError ::
   (InteractionId -> e) -> (Error -> e) -> TCErr -> TCM e
 classifyInteractionError unknownId failed e = case e of

@@ -49,9 +49,6 @@ data Request = Request
   }
   deriving (Eq, Show)
 
--- `Left` is a bad id or a `TCErr`, while `Right` is the goal's context, ordered
--- with local variables outermost first then let bindings, following
--- `contextOfMeta`.
 type Response = Either GoalError [ContextEntry]
 
 context :: Request -> InteractionM Response
@@ -59,18 +56,19 @@ context = runCommandM . contextInternal
 
 contextInternal :: Request -> CommandM Response
 contextInternal (Request normalization goalId) =
-  -- The meat of `interpret Cmd_context` (InteractionTop.hs:706-707) is
-  -- `getResponseContext`. We run the query under `liftLocalState`, the idea
-  -- being that display commands should not modify `TCState` (apparently
-  -- reification can allocate metas, etc.). The Emacs renderer runs under
-  -- `localTCState` for the same reason (EmacsTop.hs:212). A non-existent id is
-  -- classified by `classifyInteractionError`; any other `TCErr` becomes
-  -- `GoalFailed`.
+  -- The meat of @interpret Cmd_context@ (InteractionTop.hs:706-707) is
+  -- @getResponseContext@. We run the query under @liftLocalState@, the idea
+  -- being that display commands should not modify @TCState@ (apparently
+  -- reification can allocate metavariables, etc.). The Emacs renderer runs
+  -- under @localTCState@ for the same reason (EmacsTop.hs:212). A non-existent
+  -- id is classified by @classifyInteractionError@; any other @TCErr@ becomes
+  -- @GoalFailed@.
   (Right <$> liftLocalState (extractContext normalization goalId))
     `catchTCErr` (fmap Left . lift . classifyInteractionError GoalUnknownId GoalFailed)
 
--- The extraction mirrors `prettyResponseContext` (EmacsTop.hs:324-373). Also
--- see the comment above `ContextEntry`.
+{- | Extraction mirroring @prettyResponseContext@ (EmacsTop.hs:324-373). Also
+see the comment above @ContextEntry@.
+-}
 extractContext :: Rewrite -> InteractionId -> TCM [ContextEntry]
 extractContext normalization goalId = withInteractionId goalId $ do
   entries <- getResponseContext normalization goalId
@@ -97,19 +95,19 @@ extractContextEntry
         , contextEntryReifiedInScope = reifiedInScope == InScope
         , contextEntryType = Text.pack $ render typeDoc
         , contextEntryLetValue = Text.pack . render <$> letValueDoc
-        , -- Exactly what `prettyResponseContext` does it:
+        , -- Exactly as @prettyResponseContext@ does it
           contextEntryIsInstance = isInstance info
         , contextEntryCohesion = cohesion
         , contextEntryPolarity = polarity
-        , -- Exactly what `prettyResponseContext` does it:
+        , -- Exactly as @prettyResponseContext@ does it
           contextEntryErased =
             not $ getQuantity info `moreQuantity` getQuantity goalModality
         , contextEntryRelevance = relevance
         }
    where
-    -- Emacs renders cohesion with `prettyShow`. The default `Continuous`
-    -- `prettyShow`s as empty (Syntax/Common.hs:1881-1884), which we detect with
-    -- `null` and extract as `Nothing`.
+    -- Emacs renders cohesion with @prettyShow@. The default @Continuous@
+    -- @prettyShow@'s as empty (Syntax/Common.hs:1881-1884), which we detect
+    -- with @null@ and extract as @Nothing@.
     cohesion :: Maybe Text.Text
     cohesion =
       let c = prettyShow $ getCohesion info
@@ -117,7 +115,7 @@ extractContextEntry
 
     polarity :: Maybe Text.Text
     polarity =
-      -- Exactly as `prettyResposneContext` does it
+      -- Exactly as @prettyResponseContext@ does it
       let p = modPolarityAnn $ getModalPolarity info
        in if p == MixedPolarity
             then Nothing
@@ -125,6 +123,8 @@ extractContextEntry
 
     relevance :: Maybe Text.Text
     relevance =
-      -- Exactly as `prettyResposneContext` does it
+      -- Exactly as @prettyResponseContext@ does it
       let r = getRelevance goalModality `inverseComposeRelevance` getRelevance info
-       in if isRelevant r then Nothing else Just $ Text.pack $ verbalize r
+       in if isRelevant r
+            then Nothing
+            else Just $ Text.pack $ verbalize r

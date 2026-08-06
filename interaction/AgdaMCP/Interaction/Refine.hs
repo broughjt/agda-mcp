@@ -26,8 +26,9 @@ import AgdaMCP.Interaction.Internal (
  )
 import AgdaMCP.Interaction.Model (GiveError (..))
 
--- Refine always sets the force parameter to false, so we do not include it
--- here.
+{- | Refine always sets the force parameter to false, so we do not include it
+here.
+-}
 data Request = Request
   { requestGoalId :: InteractionId
   , requestExpression :: Text

@@ -71,7 +71,7 @@ data Split
     (MakeCase.hs:375-436).
 
     A name that is not currently in scope is not split on but brought into scope
-    as a visible pattern (the `toShow`/`toSplit` partition,
+    as a visible pattern (the @toShow@/@toSplit@ partition,
     MakeCase.hs:381-382), so this constructor covers both case splitting and
     revealing a hidden arguments.
     -}
@@ -82,7 +82,7 @@ data Split
     Agda first inserts remaining arguments, and if any of them is "visible" it
     stops there and returns the clause with the new arguments rather than
     splitting (issues #1516/#2654, :332-342). Actual result splitting occurs if
-    the argument is record-typed and `--copatterns` is on (it is by default,
+    the argument is record-typed and @--copatterns@ is on (it is by default,
     Options/Types.hs:129).
     -}
     IntroduceArgumentsOrSplitResult
@@ -103,7 +103,7 @@ data MakeCaseReport = MakeCaseReport
   -- ^ How the clauses below are meant to be laid out.
   , makeCaseReportClauses :: [Text]
   {- ^ The replacement clauses, one per element. Each is rendered in
-  `OneLineMode` (`decorate`, InteractionTop.hs:795-796), so no element ever
+  @OneLineMode@ (@decorate@, InteractionTop.hs:795-796), so no element ever
   contains a newline however long it is.
   -}
   , makeCaseReportSpan :: Span
@@ -113,63 +113,65 @@ data MakeCaseReport = MakeCaseReport
 
   For example, for this clause:
 
-  ```
+  @
   double :: ℕ → ℕ
   double n = ?
-  ```
+  @
 
   the span covers exactly:
 
-  ```
+  @
   double n = ?
-  ```
+  @
 
-  After splitting on `n`, the span is replaced with:
+  After splitting on @n@, the span is replaced with:
 
+  @
   double zero = ?
   double (suc n) = ?
+  @
 
-  The `Resp_MakeCase` constructor does not carry a span, so the Emacs frontend
+  The @Resp_MakeCase@ constructor does not carry a span, so the Emacs frontend
   guesses one. It deletes from the current line's indentation to the end of the
-  line (`agda2-make-case-action`, agda2-mode.el:916-928) or matches backwards
-  from the hole for an extended lambda (`agda2-make-case-action-extendlam`,
+  line (@agda2-make-case-action@, agda2-mode.el:916-928) or matches backwards
+  from the hole for an extended lambda (@agda2-make-case-action-extendlam@,
   agda2-mode.el:930-953). We diverge from Emacs here by obtaining the needed
   span from the interaction point state.
 
-  Note that the `where` block is deliberately excluded, even though `getRange`
-  of a whole `Clause'` would include it (Abstract.hs:738-739). The replacement
-  clauses are built by `makeAbstractClause` (MakeCase.hs:525-528), which reuses
-  the split clause's right-hand side but passes `A.noWhereDecls`.
+  Note that the @where@ block is deliberately excluded, even though @getRange@
+  of a whole @Clause'@ would include it (Abstract.hs:738-739). The replacement
+  clauses are built by @makeAbstractClause@ (MakeCase.hs:525-528), which reuses
+  the split clause's right-hand side but passes @A.noWhereDecls@.
   -}
   , makeCaseReportCollapsesWhere :: Bool
-  {- ^ True exactly when replacing `makeCaseReportSpan` leaves a `where` block
+  {- ^ True exactly when replacing @makeCaseReportSpan@ leaves a @where@ block
   attached to the last generated clause alone.
 
-  The split clause carried a `where` block, which the span above deliberately
-  excludes. Layout binds a `where` block to the clause it follows, so after the
+  The split clause carried a @where@ block, which the span above deliberately
+  excludes. Layout binds a @where@ block to the clause it follows, so after the
   replacement the block belongs to the last generated clause and the earlier
-  ones can no longer see its bindings. Splitting on `n` in:
+  ones can no longer see its bindings. Splitting on @n@ in:
 
-  ```
+  @
   withWhere : ℕ → ℕ
   withWhere n = ? + helper
     where
       helper : ℕ
       helper = zero
-  ```
+  @
 
   produces:
 
-  ```
+  @
   withWhere : ℕ → ℕ
   withWhere zero = ? + helper
   withWhere (suc n) = ? + helper
     where
       helper : ℕ
       helper = zero
-  ```
+  @
 
-  in which `helper` is out of scope in the first clause, though it was in scope
+  in which @helper@ is out of scope in the first clause, though it was in scope
   for the clause that was split. The right-hand side is reused whole for every
   generated clause, so the caller wrote nothing wrong and yet the file no longer
   typechecks. Emacs behaves identically, so this is reported rather than fixed.
@@ -177,28 +179,26 @@ data MakeCaseReport = MakeCaseReport
   }
   deriving (Eq, Show)
 
--- Mirrors Agda's `MakeCaseVariant`. We reproduce this because Agda's has no
--- `Eq`/`Show` instances (same with `GiveAction`).
+{- | Mirrors Agda's @MakeCaseVariant@. We reproduce this because Agda's has no
+`Eq`/`Show` instances (same with @GiveAction@).
+-}
 data MakeCaseVariant
-  = -- An ordinary function definition, whose clauses are written one per line.
+  = -- | An ordinary function definition, whose clauses are written one per line.
     MakeCaseFunction
-  | -- A pattern-matching lambda, whose clauses are written inside `λ { ... }`
-    -- separated by `;`.
+  | {- | A pattern-matching lambda, whose clauses are written inside @λ { ... }@
+    separated by @;@.
+    -}
     MakeCaseExtendedLambda
   deriving (Eq, Show)
 
--- Exactly the same as `makeCaseVariant` (InteractionTop.hs:798-800).
+-- | Exactly the same as @makeCaseVariant@ (InteractionTop.hs:798-800).
 toMakeCaseVariant :: CaseContext -> MakeCaseVariant
 toMakeCaseVariant Nothing = MakeCaseFunction
 toMakeCaseVariant Just {} = MakeCaseExtendedLambda
 
--- How a make-case command can fail.
 data MakeCaseError
-  = -- A non-existent interaction id (`withInteractionId`'s lookup failed at the
-    -- top of `makeCase`, MakeCase.hs:250).
-    MakeCaseUnknownId InteractionId
-  | -- Any other `TCErr`.
-    MakeCaseFailed Error
+  = MakeCaseUnknownId InteractionId
+  | MakeCaseFailed Error
   deriving (Eq, Show)
 
 makeCase :: Request -> InteractionM Response
@@ -207,15 +207,15 @@ makeCase = runCommandM . makeCaseInternal
 makeCaseInternal :: Request -> CommandM Response
 makeCaseInternal (Request goalId split) =
   ( do
-      -- Copied from `interpret (Cmd_make_case ii rng s)`
-      -- (InteractionTop.hs:759-780) with the `putResponse` replaced by a
+      -- Copied from @interpret (Cmd_make_case ii rng s)@
+      -- (InteractionTop.hs:759-780) with the @putResponse@ replaced by a
       -- return.
 
-      -- Emacs does not pass the range to `makeCase` in the common case, when
+      -- Emacs does not pass the range to @makeCase@ in the common case, when
       -- the variable to split on is obtained by reading from the minibuffer. We
       -- always pass it anyway, since the only place it is used is
-      -- `parseVariables`, which updates the metavariable's range
-      -- (`updateMetaVarRange`, MakeCase.hs:76).
+      -- @parseVariables@, which updates the metavariable's range
+      -- (@updateMetaVarRange@, MakeCase.hs:76).
       range <- lift $ getInteractionRange goalId
       (name, caseContext, clauses) <-
         lift $ MakeCase.makeCase goalId range (splitInput split)
@@ -247,14 +247,14 @@ splitInput IntroduceArgumentsOrSplitResult = ""
 splitInput ExpandEllipsis = "."
 
 {- | The span the replacement clauses are meant to replace, and whether the
-clause being replaced carries a `where` block (see
+clause being replaced carries a @where@ block (see
 `makeCaseReportCollapsesWhere`).
 -}
 extractClauseSpan :: InteractionId -> TCM (Span, Bool)
 extractClauseSpan goalId = do
   -- Both of the failure modes here are bugs, since we execute this after
-  -- `makeCase` has succeeded. A goal that is not in a clause fails inside
-  -- `makeCase` with a `CaseSplitError` ("Cannot split here, as we are not in a
+  -- @makeCase@ has succeeded. A goal that is not in a clause fails inside
+  -- @makeCase@ with a @CaseSplitError@ ("Cannot split here, as we are not in a
   -- function declaration", MakeCase.hs:256-257).
   point <- lookupInteractionPoint goalId
   case ipClause point of
@@ -268,9 +268,9 @@ extractClauseSpan goalId = do
         (rangeSpan range)
 
 data MakeCaseBug
-  = -- The goal turned out not to sit in a clause after a split succeeded.
+  = -- | The goal turned out not to sit in a clause after a split succeeded.
     MakeCaseNoClause InteractionId
-  | -- The split clause has no source range, so we cannot say what to replace.
+  | -- | The split clause has no source range, so we cannot say what to replace.
     MakeCaseClauseNoRange InteractionId Text
   deriving (Show)
 

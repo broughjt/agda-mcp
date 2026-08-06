@@ -36,10 +36,7 @@ data Request = Request
   }
   deriving (Eq, Show)
 
--- `Left` is a bad id or a `TCErr` (every way the expression can be at
--- fault--for example, parse error, unbound name, ill-typed against the goal),
--- while `Right` pairs the goal report with the elaborated ("Elaborates to:")
--- term.
+-- | Success pairs the goal report with the elaborated ("Elaborates to:") term.
 type Response = Either GoalError (GoalReport, Text)
 
 goalCheck :: Request -> InteractionM Response
@@ -48,8 +45,8 @@ goalCheck = runCommandM . goalCheckInternal
 goalCheckInternal :: Request -> CommandM Response
 goalCheckInternal (Request normalization goalId expression) =
   ( do
-      -- `interpret Cmd_goal_type_context_check` (InteractionTop.hs:740-748).
-      -- Parses the expression, checks it against the goal type (queried `AsIs`,
+      -- @interpret Cmd_goal_type_context_check@ (InteractionTop.hs:740-748).
+      -- Parses the expression, checks it against the goal type (queried @AsIs@,
       -- deliberately), and normalizes/reifies the elaborated term.
       elaborated <-
         liftLocalState $ withInteractionId goalId $ do
@@ -57,12 +54,12 @@ goalCheckInternal (Request normalization goalId expression) =
           goalType <- typeOfMeta AsIs goalId
           term <- case goalType of
             OfType _ ty -> checkExpr expression' =<< isType_ ty
-            -- Agda asserts `__IMPOSSIBLE__`s here (:746). A term cannot be
+            -- Agda asserts @__IMPOSSIBLE__@s here (:746). A term cannot be
             -- checked against a sort-shaped goal. Otherwise our mental model of
-            -- Agda is wrong, so we die loudly and signal a bug.
+            -- Agda is wrong, so we die loudly, signaling a bug.
             _ -> liftIO $ throwIO $ CannotCheckAgainstNonType goalId
           reify =<< normalForm normalization term
-      -- Render matching EmacsTop's `auxDoc` (:238-240).
+      -- Render matching EmacsTop's @auxDoc@ (:238-240).
       have <- liftLocalState $ Text.pack . render <$> prettyATop (elaborated :: Expr)
       report <- liftLocalState $ extractGoalReport normalization goalId
       pure $ Right (report, have)
