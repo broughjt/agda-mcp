@@ -31,7 +31,6 @@ import MCP.Server (
 
 import AgdaMCP.Tools.State (ToolM, runToolM)
 
--- The renderer's `Left` is agent misuse, while `Right` is a normal result.
 textToolHandle ::
   (FromJSON p) =>
   (p -> ToolM q) ->
@@ -52,9 +51,10 @@ textToolHandle handle renderResponse =
 
 -- Request parsing helpers
 
--- Tool arguments arrive from the MCP layer as a map of top-level fields.
--- Rebuild the JSON object and decode it with the request type's `FromJSON`
--- instance.
+{- | Tool arguments arrive from the MCP layer as a map of top-level fields.
+Rebuild the JSON object and decode it with the request type's `FromJSON`
+instance.
+-}
 parseArguments :: (FromJSON a) => Maybe (Map Text Value) -> Either Text a
 parseArguments =
   first Text.pack
@@ -74,10 +74,13 @@ parseNormalization =
       pure
       . flip Map.lookup normalizations
 
--- The requested normalization, defaulting the way Agda's own Emacs mode
--- defaults the goal-display commands: `Cmd_goal_type_context` and friends are
--- declared with `agda2-maybe-normalised` (agda2-mode.el:1228-1235), whose
--- no-prefix-argument level is `Simplified`.
+{- | Parse the requested normalization, defaulting to `Simplified`.
+
+Agda's Emacs mode defaults to simplify for goal-display commands. Commands
+like @Cmd_goal_type_context@ and friends are declared with
+@agda2-maybe-normalised@ (agda2-mode.el:1228-1235), whose no-prefix-argument
+level is `Simplified`.
+-}
 parseNormalizationField :: Aeson.Object -> Aeson.Parser Rewrite
 parseNormalizationField o =
   fromMaybe Simplified

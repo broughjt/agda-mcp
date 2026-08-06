@@ -52,7 +52,7 @@ newtype SourceUnreadable = SourceUnreadable {sourceUnreadableMessage :: Text}
 newtype SourceUnwritable = SourceUnwritable {sourceUnwritableMessage :: Text}
   deriving (Eq, Show)
 
--- Read source text and compute a hash the same way Agda does.
+-- | Read source text and compute a hash the same way Agda does.
 readSource :: FilePath -> IO (Either SourceUnreadable Source)
 readSource path =
   (Right <$> readSourceFile)

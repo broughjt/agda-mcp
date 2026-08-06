@@ -29,8 +29,9 @@ import AgdaMCP.Tools.LoadId (LoadGeneration (..))
 type instance MCPHandlerState = ToolState
 type instance MCPHandlerUser = ()
 
--- Tool state, consisting of interaction-layer state, held opaquely, and state
--- for tracking load generations.
+{- | Tool state, consisting of interaction-layer state, held opaquely, and state
+for tracking load generations.
+-}
 data ToolState = ToolState
   { toolInteractionState :: InteractionState
   , toolLoadGeneration :: LoadGeneration
@@ -43,14 +44,15 @@ newToolState options =
   flip ToolState LoadGeneration {loadsIssued = 0, currentLoad = Nothing}
     <$> newInteractionState options
 
--- Run an interaction-layer action on the session inside `ToolState`, writing
--- the successor session back.
+{- | Run an interaction-layer action on the session inside @ToolState@, writing
+the successor session back.
+-}
 liftInteraction :: InteractionM a -> ToolM a
 liftInteraction action = StateT $ \state -> do
   (result, interactionState) <- runStateT action $ toolInteractionState state
   pure (result, state {toolInteractionState = interactionState})
 
--- Run a `ToolM` action against the state stored in the MCP server state,
+-- Run a @ToolM@ action against the state stored in the MCP server state,
 -- storing the successor state back. The transports layer will never run two
 -- handlers concurrently (stdio is a serial loop, while HTTP runs each handler
 -- inside an `modifyMVar` over the whole server state), so the get/run/put
