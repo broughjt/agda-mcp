@@ -19,7 +19,7 @@ import AgdaMCP.Tools.Options (Outcome (Helped, Parsed, Rejected), parseOptions)
 --
 -- The main entry point is the `repl` function (Interaction/AgdaTop.hs), which operates similarly to JSON-RPC over stdin/stdout. Each request is a constructor of the `Interaction` sum type (Interaction/Base.hs), wrapped in an `IOTCM` value also carrying a file path and highlighting settings. The client is expected to render requests in Haskell `Show` syntax (`repl` calls `parseIOTCM`, which literally calls `reads`, Base.hs:372-379). During its initialization, `repl` installs a response callback via `setInteractionOutputCallback`. The Emacs frontend sets this to a `lispifyResponse` function which serializes to S-expressions, piped to an IO action to print lines. Similarly, the JSON frontend uses a `jsonifyResponse` function.
 --
--- The RPC is not unary--responses come back streaming. The rationale is that the backend can, for example, provide incremental highlighting information as loading makes progress. For example, consider the following exchange. First, the client sends a load request
+-- The RPC is not unary--responses come back streaming. The rationale is that the backend can, for example, provide incremental highlighting information when type-checking or other processes are long running. For example, consider the following exchange. First, the client sends a load request
 --
 -- IOTCM "/path/to/source/Data/Sigma/Properties/Equivalence.lagda.typ" None Direct (Cmd_load "/path/to/source/Data/Sigma/Properties/Equivalence.lagda.typ" [])
 --
