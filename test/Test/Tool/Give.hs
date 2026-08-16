@@ -56,7 +56,7 @@ parseArgumentsTests =
   testGroup
     "parseArguments"
     [ testCase "a call without any gives is refused" $
-        parseRequest (Just $ Map.fromList [("load_id", Aeson.String "L1")])
+        parseRequest (Map.fromList [("load_id", Aeson.String "L1")])
           @?= Left "Error in $: key \"gives\" not found"
     , testCase "gives must be an array" $
         parseRequest
@@ -160,20 +160,19 @@ parseArgumentsTests =
             )
     ]
  where
-  parseRequest :: Maybe (Map.Map Text Aeson.Value) -> Either Text Request
+  parseRequest :: Map.Map Text Aeson.Value -> Either Text Request
   parseRequest = parseArguments
 
-  arguments :: [Aeson.Value] -> Maybe (Map.Map Text Aeson.Value)
+  arguments :: [Aeson.Value] -> Map.Map Text Aeson.Value
   arguments gives =
     argumentsValue (Aeson.toJSON gives)
 
-  argumentsValue :: Aeson.Value -> Maybe (Map.Map Text Aeson.Value)
+  argumentsValue :: Aeson.Value -> Map.Map Text Aeson.Value
   argumentsValue gives =
-    Just $
-      Map.fromList
-        [ ("load_id", Aeson.String "L1")
-        , ("gives", gives)
-        ]
+    Map.fromList
+      [ ("load_id", Aeson.String "L1")
+      , ("gives", gives)
+      ]
 
   item :: Int -> Text -> Maybe Text -> Aeson.Value
   item goalId expression action =

@@ -46,67 +46,62 @@ parseArgumentsTests =
   testGroup
     "parseArguments"
     [ testCase "a call with no arguments at all is missing its load_id" $
-        parseRequest Nothing
+        parseRequest Map.empty
           @?= Left "Error in $: key \"load_id\" not found"
     , testCase "a load_id that does not start with L is refused" $
         parseRequest
-          ( Just $
-              Map.fromList
-                [ ("load_id", Aeson.String "17")
-                , ("goal", Aeson.Number 0)
-                ]
+          ( Map.fromList
+              [ ("load_id", Aeson.String "17")
+              , ("goal", Aeson.Number 0)
+              ]
           )
           @?= Left
             "Error in $['load_id']: expected a load_id from the most recent \
             \result, such as \"L17\", but got \"17\""
     , testCase "a call without a goal is refused" $
-        parseRequest (Just $ Map.fromList [("load_id", Aeson.String "L1")])
+        parseRequest (Map.fromList [("load_id", Aeson.String "L1")])
           @?= Left "Error in $: key \"goal\" not found"
     , testCase "a goal that is not an integer is refused" $
         parseRequest
-          ( Just $
-              Map.fromList
-                [ ("load_id", Aeson.String "L1")
-                , ("goal", Aeson.String "?0")
-                ]
+          ( Map.fromList
+              [ ("load_id", Aeson.String "L1")
+              , ("goal", Aeson.String "?0")
+              ]
           )
           @?= Left
             "Error in $.goal: parsing Int failed, expected Number, \
             \but encountered String"
     , testCase "an unknown normalization is refused" $
         parseRequest
-          ( Just $
-              Map.fromList
-                [ ("load_id", Aeson.String "L1")
-                , ("goal", Aeson.Number 0)
-                , ("normalization", Aeson.String "very")
-                ]
+          ( Map.fromList
+              [ ("load_id", Aeson.String "L1")
+              , ("goal", Aeson.Number 0)
+              , ("normalization", Aeson.String "very")
+              ]
           )
           @?= Left
             "Error in $.normalization: expected one of asis, headnormal, \
             \instantiated, normalized, simplified"
     , testCase "normalization defaults to simplified" $
         parseRequest
-          ( Just $
-              Map.fromList
-                [ ("load_id", Aeson.String "L3")
-                , ("goal", Aeson.Number 0)
-                ]
+          ( Map.fromList
+              [ ("load_id", Aeson.String "L3")
+              , ("goal", Aeson.Number 0)
+              ]
           )
           @?= Right (Request (LoadId 3) 0 Simplified)
     , testCase "all three arguments parse" $
         parseRequest
-          ( Just $
-              Map.fromList
-                [ ("load_id", Aeson.String "L3")
-                , ("goal", Aeson.Number 2)
-                , ("normalization", Aeson.String "normalized")
-                ]
+          ( Map.fromList
+              [ ("load_id", Aeson.String "L3")
+              , ("goal", Aeson.Number 2)
+              , ("normalization", Aeson.String "normalized")
+              ]
           )
           @?= Right (Request (LoadId 3) 2 Normalised)
     ]
  where
-  parseRequest :: Maybe (Map.Map Text Aeson.Value) -> Either Text Request
+  parseRequest :: Map.Map Text Aeson.Value -> Either Text Request
   parseRequest = parseArguments
 
 renderNormalizationTests :: TestTree

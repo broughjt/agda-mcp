@@ -15,14 +15,17 @@ import Agda.Syntax.Common (InteractionId (..))
 import Control.Exception (Exception, throwIO)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (gets, modify)
-import Data.Aeson (FromJSON (..), object, withObject, (.:), (.=))
-import Data.Map qualified as Map
+import Data.Aeson (FromJSON (..), withObject, (.:))
 import Data.Text (Text)
 import Data.Text qualified as Text
 import MCP.Server (
-  InputSchema (..),
-  ToolHandler,
-  toolHandler,
+  SchemaType (..),
+  ToolAnnotations (..),
+  ToolDefinition (..),
+  defaultToolAnnotations,
+  describedSchema,
+  mkToolDefinition,
+  schema,
  )
 
 import AgdaMCP.Interaction (
@@ -45,7 +48,7 @@ import AgdaMCP.Tools.LoadId (
   renderLoadId,
   requireCurrentLoad,
  )
-import AgdaMCP.Tools.MCP (textToolHandle)
+import AgdaMCP.Tools.MCP (Tool (..), textToolHandle)
 import AgdaMCP.Tools.Render (
   blocks,
   indent,
@@ -57,28 +60,28 @@ import AgdaMCP.Tools.Render (
  )
 import AgdaMCP.Tools.State (ToolM, ToolState (..), liftInteraction)
 
-loadTool :: ToolHandler
+loadTool :: Tool
 loadTool =
-  toolHandler
-    "load"
-    (Just loadDescription)
-    ( InputSchema
-        "object"
-        ( Just $
-            Map.fromList
-              [
-                ( "path"
-                , object
-                    [ "type" .= ("string" :: Text)
-                    , "description" .= pathDescription
-                    ]
-                )
-              ]
+  Tool
+    { toolDefinition =
+        ( mkToolDefinition "load" loadDescription $
+            schema $
+              SchemaObject
+                [("path", describedSchema pathDescription $ SchemaString Nothing)]
+                ["path"]
         )
-        (Just ["path"])
-    )
-    (textToolHandle load $ Right . renderResponse)
+          { toolDefinitionAnnotations = Just loadAnnotations
+          }
+    , toolRun = textToolHandle load $ Right . renderResponse
+    }
  where
+  loadAnnotations :: ToolAnnotations
+  loadAnnotations =
+    defaultToolAnnotations
+      { toolReadOnlyHint = Just True
+      , toolOpenWorldHint = Just False
+      }
+
   loadDescription :: Text
   loadDescription =
     "Load and type-check an Agda source file. On success, reports open goals (each with their local context), unsolved hidden metavariables, warnings, and non-fatal errors. On failure, reports the error message and associated warnings. Agda keeps only one file loaded at a time: each load replaces the one before it and makes fresh goal ID assignments. A successful load returns a load ID for the state it produced. Other tools require that load ID to confirm the request refers to that state, and refuse an earlier one rather than misread it."

@@ -14,15 +14,18 @@ import Agda.Syntax.Common (InteractionId (..))
 import Control.Exception (Exception, throwIO)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (gets)
-import Data.Aeson (FromJSON (..), object, withObject, (.:), (.=))
+import Data.Aeson (FromJSON (..), withObject, (.:))
 import Data.Aeson.Types qualified as Aeson
-import Data.Map qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as Text
 import MCP.Server (
-  InputSchema (..),
-  ToolHandler,
-  toolHandler,
+  SchemaType (..),
+  ToolAnnotations (..),
+  ToolDefinition (..),
+  defaultToolAnnotations,
+  describedSchema,
+  mkToolDefinition,
+  schema,
  )
 
 import AgdaMCP.Interaction (Error (..), GoalError (..), GoalReport)
@@ -38,6 +41,7 @@ import AgdaMCP.Tools.LoadId (
   requireCurrentLoad,
  )
 import AgdaMCP.Tools.MCP (
+  Tool (..),
   goalIdSchema,
   loadIdSchema,
   normalizationSchema,
@@ -47,31 +51,36 @@ import AgdaMCP.Tools.MCP (
 import AgdaMCP.Tools.Render (blocks, indent, renderWarning, section)
 import AgdaMCP.Tools.State (ToolM, ToolState (..), liftInteraction)
 
-checkTool :: ToolHandler
+checkTool :: Tool
 checkTool =
-  toolHandler
-    "check"
-    (Just checkDescription)
-    ( InputSchema
-        "object"
-        ( Just $
-            Map.fromList
-              [ ("load_id", loadIdSchema)
-              , ("goal", goalIdSchema)
-              , ("normalization", normalizationSchema)
-              ,
-                ( "expression"
-                , object
-                    [ "type" .= ("string" :: Text)
-                    , "description" .= expressionDescription
-                    ]
-                )
-              ]
+  Tool
+    { toolDefinition =
+        ( mkToolDefinition "check" checkDescription $
+            schema $
+              SchemaObject
+                [ ("load_id", loadIdSchema)
+                , ("goal", goalIdSchema)
+                , ("normalization", normalizationSchema)
+                ,
+                  ( "expression"
+                  , describedSchema expressionDescription $ SchemaString Nothing
+                  )
+                ]
+                ["load_id", "goal", "expression"]
         )
-        (Just ["load_id", "goal", "expression"])
-    )
-    (textToolHandle check renderResponse)
+          { toolDefinitionAnnotations = Just checkAnnotations
+          }
+    , toolRun = textToolHandle check renderResponse
+    }
  where
+  checkAnnotations :: ToolAnnotations
+  checkAnnotations =
+    defaultToolAnnotations
+      { toolReadOnlyHint = Just True
+      , toolIdempotentHint = Just True
+      , toolOpenWorldHint = Just False
+      }
+
   checkDescription :: Text
   checkDescription =
     "Infer the type of an expression and check its elaboration against the type of the goal. Nothing is modified, so use this as a dry run before give. The response reports the goal's type, context, boundary, and constraints, then the inference under \"Have:\" and the elaboration under \"Elaborates to:\". These two queries are independent and answer different questions. Inference does not consult the goal type, so inference can succeed while checking fails. Both are reported whichever way they land, and a failure in either is a normal result rather than a tool error. The expression is parsed and checked in the goal's scope, so its errors carry positions relative to the expression, not the file. Types are rendered at the requested normalization. To just inspect the goal, use goal instead."

@@ -12,15 +12,26 @@
       system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        mcpSrc = pkgs.fetchFromGitHub {
-          owner = "dpella";
-          repo = "mcp";
-          rev = "151286f7c457d806c57801ba2bb2d2e614ee8e55";
-          hash = "sha256-RGUh1FiLX4hLwzMR2U/LLInYLzqVMAwgOZy2CD6vwns=";
+        # nixpkgs ships mcp-server 0.1, but we need the 0.2 API.
+        mcpServerSrc = pkgs.fetchFromGitHub {
+          owner = "drshade";
+          repo = "haskell-mcp-server";
+          rev = "32e51481d408135b567e6c2b7c645e030ce7403a";
+          hash = "sha256-H3QMz45Fmf4BAJUgFdUzv8ByTJD9polzXLaVYYwAB/M=";
         };
         haskellPackages = pkgs.haskellPackages.override {
           overrides = self: _: {
-            mcp = self.callCabal2nix "mcp" (mcpSrc + "/mcp-server") { };
+            mcp-server = self.callCabal2nix "mcp-server" mcpServerSrc { };
+            # mcp-server's HTTP transport uses `hOrigin`, which nixpkgs'
+            # http-types 0.12.4 predates. We do not serve HTTP, but the module
+            # is still part of the library and has to compile.
+            http-types = pkgs.haskell.lib.dontCheck (
+              self.callHackageDirect {
+                pkg = "http-types";
+                ver = "0.12.6";
+                sha256 = "sha256-bGrVUTZnP1NFVwR0apgNLolKPW3cJdVW4jSBSlV7srg=";
+              } { }
+            );
           };
         };
         standardLibrary = pkgs.agdaPackages.standard-library;

@@ -16,18 +16,21 @@ module AgdaMCP.Tools.CaseSplit (
 import Agda.Syntax.Common (InteractionId (..))
 import Control.Exception (throwIO)
 import Control.Monad.IO.Class (liftIO)
-import Data.Aeson (FromJSON (..), object, withObject, (.:), (.=))
+import Data.Aeson (FromJSON (..), withObject, (.:))
 import Data.Aeson.Types qualified as Aeson
 import Data.Char (isSpace)
 import Data.Foldable (toList)
 import Data.List.NonEmpty (nonEmpty)
-import Data.Map qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as Text
 import MCP.Server (
-  InputSchema (..),
-  ToolHandler,
-  toolHandler,
+  SchemaType (..),
+  ToolAnnotations (..),
+  ToolDefinition (..),
+  defaultToolAnnotations,
+  describedSchema,
+  mkToolDefinition,
+  schema,
  )
 
 import AgdaMCP.Interaction (Error (..), Position (..), Span (..))
@@ -46,6 +49,7 @@ import AgdaMCP.Tools.LoadId (
   renderLoadIdRefusal,
  )
 import AgdaMCP.Tools.MCP (
+  Tool (..),
   goalIdSchema,
   loadIdSchema,
   textToolHandle,
@@ -68,31 +72,37 @@ import AgdaMCP.Tools.Source (
  )
 import AgdaMCP.Tools.State (ToolM, liftInteraction)
 
-caseSplitTool :: ToolHandler
+caseSplitTool :: Tool
 caseSplitTool =
-  toolHandler
-    "case_split"
-    (Just caseSplitDescription)
-    ( InputSchema
-        "object"
-        ( Just $
-            Map.fromList
-              [ ("load_id", loadIdSchema)
-              , ("goal", goalIdSchema)
-              ,
-                ( "variables"
-                , object
-                    [ "type" .= ("array" :: Text)
-                    , "items" .= object ["type" .= ("string" :: Text)]
-                    , "description" .= variableDescription
-                    ]
-                )
-              ]
+  Tool
+    { toolDefinition =
+        ( mkToolDefinition "case_split" caseSplitDescription $
+            schema $
+              SchemaObject
+                [ ("load_id", loadIdSchema)
+                , ("goal", goalIdSchema)
+                ,
+                  ( "variables"
+                  , describedSchema variableDescription $
+                      SchemaArray (schema $ SchemaString Nothing)
+                  )
+                ]
+                ["load_id", "goal", "variables"]
         )
-        (Just ["load_id", "goal", "variables"])
-    )
-    (textToolHandle caseSplit renderResponse)
+          { toolDefinitionAnnotations = Just caseSplitAnnotations
+          }
+    , toolRun = textToolHandle caseSplit renderResponse
+    }
  where
+  caseSplitAnnotations :: ToolAnnotations
+  caseSplitAnnotations =
+    defaultToolAnnotations
+      { toolReadOnlyHint = Just False
+      , toolDestructiveHint = Just True
+      , toolIdempotentHint = Just False
+      , toolOpenWorldHint = Just False
+      }
+
   caseSplitDescription :: Text
   caseSplitDescription =
     "Split an open goal into cases, replacing the clause containing the goal with one clause per case. Pass the pattern variables to split on, or the empty list to introduce the clause's remaining arguments. A variable not currently in scope is revealed as a visible pattern rather than split on. The replacement is written to the file, and a reload follows, which issues a new load ID and fresh goal ID assignments, so the goal IDs in this request are no longer valid afterwards."

@@ -64,9 +64,8 @@ parseArgumentsTests =
     "parseArguments"
     [ testCase "variables must be supplied, since silence would introduce" $
         parseRequest
-          ( Just $
-              Map.fromList
-                [("load_id", Aeson.String "L1"), ("goal", Aeson.Number 0)]
+          ( Map.fromList
+              [("load_id", Aeson.String "L1"), ("goal", Aeson.Number 0)]
           )
           @?= Left "Error in $: key \"variables\" not found"
     , testCase "variables must be an array" $
@@ -117,20 +116,19 @@ parseArgumentsTests =
           @?= Right (Request (LoadId 1) 0 [])
     ]
  where
-  parseRequest :: Maybe (Map.Map Text Aeson.Value) -> Either Text Request
+  parseRequest :: Map.Map Text Aeson.Value -> Either Text Request
   parseRequest = parseArguments
 
-  arguments :: [Text] -> Maybe (Map.Map Text Aeson.Value)
+  arguments :: [Text] -> Map.Map Text Aeson.Value
   arguments = argumentsValue . Aeson.toJSON
 
-  argumentsValue :: Aeson.Value -> Maybe (Map.Map Text Aeson.Value)
+  argumentsValue :: Aeson.Value -> Map.Map Text Aeson.Value
   argumentsValue variables =
-    Just $
-      Map.fromList
-        [ ("load_id", Aeson.String "L1")
-        , ("goal", Aeson.Number 0)
-        , ("variables", variables)
-        ]
+    Map.fromList
+      [ ("load_id", Aeson.String "L1")
+      , ("goal", Aeson.Number 0)
+      , ("variables", variables)
+      ]
 
 clauseLayoutTests :: TestTree
 clauseLayoutTests =

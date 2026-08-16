@@ -1,18 +1,13 @@
 module Main (main) where
 
+import Control.Concurrent.MVar (newMVar)
 import Data.Text.IO qualified as Text.IO
-import MCP.Server (initMCPServerState, serveStdio)
+import MCP.Server (runMcpServerStdio)
 import System.Environment (getArgs)
 import System.Exit (exitFailure, exitSuccess)
-import System.IO (BufferMode (..), hSetBuffering, stderr, stdin, stdout)
+import System.IO (BufferMode (..), hSetBuffering, stderr)
 
-import AgdaMCP (
-  capabilities,
-  handlers,
-  implementation,
-  instructions,
-  newToolState,
- )
+import AgdaMCP (handlers, newToolState, serverInfo)
 import AgdaMCP.Tools.Options (Outcome (Helped, Parsed, Rejected), parseOptions)
 
 main :: IO ()
@@ -27,13 +22,5 @@ main = do
     Rejected problem -> do
       Text.IO.hPutStrLn stderr problem
       exitFailure
-  toolState <- newToolState options
-  serveStdio stdin stdout $
-    initMCPServerState
-      toolState
-      Nothing
-      Nothing
-      capabilities
-      implementation
-      (Just instructions)
-      handlers
+  stateVariable <- newMVar =<< newToolState options
+  runMcpServerStdio serverInfo $ handlers stateVariable

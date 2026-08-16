@@ -17,14 +17,22 @@ module AgdaMCP.Tools.Give (
   renderResponse,
 ) where
 
-import MCP.Server (InputSchema (..), ToolHandler, toolHandler)
+import MCP.Server (
+  SchemaType (..),
+  ToolAnnotations (..),
+  ToolDefinition (..),
+  defaultToolAnnotations,
+  describedSchema,
+  mkToolDefinition,
+  schema,
+ )
 
 import Agda.Interaction.Base (UseForce (..))
 import Agda.Syntax.Common (InteractionId (..))
 import Control.Exception (throwIO)
 import Control.Monad.Except (ExceptT (..), runExceptT)
 import Control.Monad.IO.Class (liftIO)
-import Data.Aeson (FromJSON (..), object, (.:), (.=))
+import Data.Aeson (FromJSON (..), (.:))
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Aeson.Types qualified as Aeson
 import Data.Foldable (toList, traverse_)
@@ -49,7 +57,12 @@ import AgdaMCP.Tools.LoadId (
   LoadIdRefusal,
   renderLoadIdRefusal,
  )
-import AgdaMCP.Tools.MCP (goalIdSchema, loadIdSchema, textToolHandle)
+import AgdaMCP.Tools.MCP (
+  Tool (..),
+  goalIdSchema,
+  loadIdSchema,
+  textToolHandle,
+ )
 import AgdaMCP.Tools.Render (
   blocks,
   indent,
@@ -68,51 +81,54 @@ import AgdaMCP.Tools.Source (
  )
 import AgdaMCP.Tools.State (ToolM, liftInteraction)
 
-giveTool :: ToolHandler
+-- The `minItems` and `default` keywords this schema used to carry are not
+-- expressible in the library's schema type. The action default is stated in
+-- its description, and an empty batch is still refused by `parseItems`.
+giveTool :: Tool
 giveTool =
-  toolHandler
-    "give"
-    (Just giveDescription)
-    ( InputSchema
-        "object"
-        ( Just $
-            Map.fromList
-              [ ("load_id", loadIdSchema)
-              ,
-                ( "gives"
-                , object
-                    [ "type" .= ("array" :: Text)
-                    , "minItems" .= (1 :: Int)
-                    , "description" .= givesDescription
-                    , "items"
-                        .= object
-                          [ "type" .= ("object" :: Text)
-                          , "properties"
-                              .= object
-                                [ "goal" .= goalIdSchema
-                                , "expression"
-                                    .= object
-                                      [ "type" .= ("string" :: Text)
-                                      , "description" .= expressionDescription
-                                      ]
-                                , "action"
-                                    .= object
-                                      [ "type" .= ("string" :: Text)
-                                      , "enum" .= (Map.keys actions :: [Text])
-                                      , "default" .= ("give" :: Text)
-                                      , "description" .= actionDescription
-                                      ]
-                                ]
-                          , "required" .= (["goal", "expression"] :: [Text])
-                          ]
-                    ]
-                )
-              ]
+  Tool
+    { toolDefinition =
+        ( mkToolDefinition "give" giveDescription $
+            schema $
+              SchemaObject
+                [ ("load_id", loadIdSchema)
+                ,
+                  ( "gives"
+                  , describedSchema givesDescription $
+                      SchemaArray $
+                        schema $
+                          SchemaObject
+                            [ ("goal", goalIdSchema)
+                            ,
+                              ( "expression"
+                              , describedSchema expressionDescription $
+                                  SchemaString Nothing
+                              )
+                            ,
+                              ( "action"
+                              , describedSchema actionDescription $
+                                  SchemaString (Just $ Map.keys actions)
+                              )
+                            ]
+                            ["goal", "expression"]
+                  )
+                ]
+                ["load_id", "gives"]
         )
-        (Just ["load_id", "gives"])
-    )
-    (textToolHandle give renderResponse)
+          { toolDefinitionAnnotations = Just giveAnnotations
+          }
+    , toolRun = textToolHandle give renderResponse
+    }
  where
+  giveAnnotations :: ToolAnnotations
+  giveAnnotations =
+    defaultToolAnnotations
+      { toolReadOnlyHint = Just False
+      , toolDestructiveHint = Just True
+      , toolIdempotentHint = Just False
+      , toolOpenWorldHint = Just False
+      }
+
   giveDescription :: Text
   giveDescription =
     "Fill open goals in the currently loaded Agda file by writing expressions into them. The batch is all-or-nothing and executed in order. If one item is rejected, the rest are skipped and no edits are written. Before writing, the server checks that the file on disk still matches the source Agda checked, and refuses everything if it changed. Except when the load ID is refused, every outcome is followed by a reload that issues a new load ID and fresh goal ID assignments, so the goal IDs in this request are no longer valid afterwards. What is written may be Agda's rendering of the expression rather than the submitted text, so the response shows what went in. Files are written back as UTF-8 with LF line endings."

@@ -13,13 +13,15 @@ import Agda.Interaction.Base (Rewrite)
 import Agda.Syntax.Common (InteractionId (..))
 import Control.Monad.State (gets)
 import Data.Aeson (FromJSON (..), withObject, (.:))
-import Data.Map qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as Text
 import MCP.Server (
-  InputSchema (..),
-  ToolHandler,
-  toolHandler,
+  SchemaType (..),
+  ToolAnnotations (..),
+  ToolDefinition (..),
+  defaultToolAnnotations,
+  mkToolDefinition,
+  schema,
  )
 
 import AgdaMCP.Interaction (
@@ -35,6 +37,7 @@ import AgdaMCP.Tools.LoadId (
   requireCurrentLoad,
  )
 import AgdaMCP.Tools.MCP (
+  Tool (..),
   goalIdSchema,
   loadIdSchema,
   normalizationSchema,
@@ -52,24 +55,32 @@ import AgdaMCP.Tools.Render (
  )
 import AgdaMCP.Tools.State (ToolM, ToolState (..), liftInteraction)
 
-goalTool :: ToolHandler
+goalTool :: Tool
 goalTool =
-  toolHandler
-    "goal"
-    (Just goalDescription)
-    ( InputSchema
-        "object"
-        ( Just $
-            Map.fromList
-              [ ("load_id", loadIdSchema)
-              , ("goal", goalIdSchema)
-              , ("normalization", normalizationSchema)
-              ]
+  Tool
+    { toolDefinition =
+        ( mkToolDefinition "goal" goalDescription $
+            schema $
+              SchemaObject
+                [ ("load_id", loadIdSchema)
+                , ("goal", goalIdSchema)
+                , ("normalization", normalizationSchema)
+                ]
+                ["load_id", "goal"]
         )
-        (Just ["load_id", "goal"])
-    )
-    (textToolHandle goal renderResponse)
+          { toolDefinitionAnnotations = Just goalAnnotations
+          }
+    , toolRun = textToolHandle goal renderResponse
+    }
  where
+  goalAnnotations :: ToolAnnotations
+  goalAnnotations =
+    defaultToolAnnotations
+      { toolReadOnlyHint = Just True
+      , toolIdempotentHint = Just True
+      , toolOpenWorldHint = Just False
+      }
+
   goalDescription :: Text
   goalDescription =
     "Inspect an open goal in the currently loaded Agda file without modifying anything. Reports the goal's type, its local context, its cubical boundary when the goal has one, and any unsolved constraints mentioning the goal. Types are rendered at the requested normalization. To try an expression at a goal, use `check` instead."

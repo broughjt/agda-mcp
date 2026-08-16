@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module AgdaMCP.Tools.MCP (
+  Tool (..),
   textToolHandle,
   parseArguments,
   parseNormalizationField,
@@ -12,7 +13,8 @@ module AgdaMCP.Tools.MCP (
 ) where
 
 import Agda.Interaction.Base (Rewrite (..))
-import Data.Aeson (FromJSON (..), Value, (.=))
+import Control.Concurrent.MVar (MVar)
+import Data.Aeson (FromJSON (..), Value)
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Aeson.Types qualified as Aeson
 import Data.Bifunctor (first)
@@ -22,29 +24,49 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import MCP.Server (
-  CallToolResult,
-  MCPServerT,
-  ProcessResult (..),
-  toolTextError,
-  toolTextResult,
+  Content (..),
+  Error,
+  Schema,
+  SchemaType (..),
+  ToolDefinition,
+  ToolResult,
+  describedSchema,
+  toolError,
+  toolResult,
  )
 
-import AgdaMCP.Tools.State (ToolM, runToolM)
+import AgdaMCP.Tools.State (ToolM, ToolState, runToolM)
 
+{- | A tool definition together with the handler that runs it. The library
+pairs the two only through the call handler's name dispatch, so we carry them
+side by side and let `AgdaMCP.handlers` do the lookup.
+-}
+data Tool = Tool
+  { toolDefinition :: ToolDefinition
+  , toolRun :: MVar ToolState -> Map Text Value -> IO (Either Error ToolResult)
+  }
+
+{- | Build a tool handler that decodes its arguments, runs the tool, and reports
+the rendered response as text.
+
+Arguments that fail to decode are reported as a tool result with `isError`
+set rather than as a JSON-RPC error, so the model sees the problem and can
+correct it.
+-}
 textToolHandle ::
   (FromJSON p) =>
   (p -> ToolM q) ->
   (q -> Either Text Text) ->
-  (Maybe (Map Text Value) -> MCPServerT (ProcessResult CallToolResult))
-textToolHandle handle renderResponse =
+  (MVar ToolState -> Map Text Value -> IO (Either Error ToolResult))
+textToolHandle handle renderResponse stateVar =
   either
-    (pure . ProcessSuccess . toolTextError)
+    (pure . Right . toolError)
     ( fmap
-        ( ProcessSuccess
-            . either toolTextError (toolTextResult . (: []))
+        ( Right
+            . either toolError (toolResult . (: []) . ContentText)
             . renderResponse
         )
-        . runToolM
+        . runToolM stateVar
         . handle
     )
     . parseArguments
@@ -55,13 +77,12 @@ textToolHandle handle renderResponse =
 Rebuild the JSON object and decode it with the request type's `FromJSON`
 instance.
 -}
-parseArguments :: (FromJSON a) => Maybe (Map Text Value) -> Either Text a
+parseArguments :: (FromJSON a) => Map Text Value -> Either Text a
 parseArguments =
   first Text.pack
     . Aeson.parseEither Aeson.parseJSON
     . Aeson.Object
     . KeyMap.fromMapText
-    . fromMaybe Map.empty
 
 parseNormalization :: Value -> Aeson.Parser Rewrite
 parseNormalization =
@@ -105,34 +126,22 @@ renderNormalization Normalised = "normalized"
 
 -- Schema elements shared by multiple tools
 
-loadIdSchema :: Value
-loadIdSchema =
-  Aeson.object
-    [ "type" .= ("string" :: Text)
-    , "description" .= description
-    ]
+loadIdSchema :: Schema
+loadIdSchema = describedSchema description $ SchemaString Nothing
  where
   description :: Text
   description =
     "The load ID from the load result that issued this goal ID. Each load makes fresh goal ID assignments, so use the most recently issued load ID and goal IDs. If you no longer have that result, load the file again."
 
-goalIdSchema :: Value
-goalIdSchema =
-  Aeson.object
-    [ "type" .= ("integer" :: Text)
-    , "description" .= description
-    ]
+goalIdSchema :: Schema
+goalIdSchema = describedSchema description SchemaInteger
  where
   description :: Text
   description = "The target goal's interaction ID (the N in `?N`)."
 
-normalizationSchema :: Value
+normalizationSchema :: Schema
 normalizationSchema =
-  Aeson.object
-    [ "type" .= ("string" :: Text)
-    , "enum" .= (Map.keys normalizations :: [Text])
-    , "description" .= description
-    ]
+  describedSchema description $ SchemaString (Just $ Map.keys normalizations)
  where
   description :: Text
   description =

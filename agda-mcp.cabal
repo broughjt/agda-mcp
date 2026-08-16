@@ -64,7 +64,7 @@ library
       atomic-write,
       base >= 4.18 && < 5,
       containers,
-      mcp,
+      mcp-server >= 0.2 && < 0.3,
       mtl,
       optparse-applicative,
       text
@@ -118,7 +118,7 @@ executable agda-mcp
   build-depends:
       agda-mcp,
       base >= 4.18 && < 5,
-      mcp,
+      mcp-server >= 0.2 && < 0.3,
       text,
   default-language: GHC2021
   ghc-options:
@@ -129,3 +129,4 @@ executable agda-mcp
       -Wmissing-home-modules
       -Wpartial-fields
       -Wredundant-constraints
+      -threaded

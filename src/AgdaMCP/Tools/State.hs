@@ -1,6 +1,3 @@
-{-# LANGUAGE TypeFamilies #-}
-{-# OPTIONS_GHC -Wno-orphans #-}
-
 module AgdaMCP.Tools.State (
   ToolState (..),
   ToolM,
@@ -10,14 +7,8 @@ module AgdaMCP.Tools.State (
 ) where
 
 import Agda.Interaction.Options (CommandLineOptions)
-import Control.Monad.IO.Class (liftIO)
-import Control.Monad.State (StateT (..), get, put)
-import MCP.Server (
-  MCPHandlerState,
-  MCPHandlerUser,
-  MCPServerState (..),
-  MCPServerT,
- )
+import Control.Concurrent.MVar (MVar, modifyMVar)
+import Control.Monad.State (StateT (..))
 
 import AgdaMCP.Interaction (
   InteractionM,
@@ -25,9 +16,7 @@ import AgdaMCP.Interaction (
   newInteractionState,
  )
 import AgdaMCP.Tools.LoadId (LoadGeneration (..))
-
-type instance MCPHandlerState = ToolState
-type instance MCPHandlerUser = ()
+import Data.Tuple (swap)
 
 {- | Tool state, consisting of interaction-layer state, held opaquely, and state
 for tracking load generations.
@@ -52,18 +41,14 @@ liftInteraction action = StateT $ \state -> do
   (result, interactionState) <- runStateT action $ toolInteractionState state
   pure (result, state {toolInteractionState = interactionState})
 
--- Run a @ToolM@ action against the state stored in the MCP server state,
--- storing the successor state back. The transports layer will never run two
--- handlers concurrently (stdio is a serial loop, while HTTP runs each handler
--- inside an `modifyMVar` over the whole server state), so the get/run/put
--- sequence is atomic.
+-- Run a @ToolM@ action against the state held in the @MVar@, storing the
+-- successor state back. The transport runs each request in its own task, so
+-- the @MVar@ is what serializes tool calls.
 --
--- A bug exception thrown mid-action skips the put and propagates out of the
--- handler, killing the process. We deliberately catch it nowhere, so a tool
--- call that dies discards its whole state change.
-runToolM :: ToolM a -> MCPServerT a
-runToolM action = do
-  state <- get
-  (result, toolState) <- liftIO $ runStateT action (mcp_handler_state state)
-  put state {mcp_handler_state = toolState}
-  pure result
+-- Exceptions thrown mid-action, such as a bug exception or a cancellation
+-- exception, will skip the put and propagate out of the tool handler, leaving
+-- the pre-call state in place. We deliberately catch it nowhere, so a tool call
+-- that dies discards its whole state change.
+runToolM :: MVar ToolState -> ToolM a -> IO a
+runToolM stateVariable action =
+  modifyMVar stateVariable $ fmap swap . runStateT action

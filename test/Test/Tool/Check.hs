@@ -48,11 +48,10 @@ parseArgumentsTests =
     "parseArguments"
     [ testCase "a call without an expression is refused" $
         parseRequest
-          ( Just $
-              Map.fromList
-                [ ("load_id", Aeson.String "L1")
-                , ("goal", Aeson.Number 0)
-                ]
+          ( Map.fromList
+              [ ("load_id", Aeson.String "L1")
+              , ("goal", Aeson.Number 0)
+              ]
           )
           @?= Left "Error in $: key \"expression\" not found"
     , testCase "a blank expression is refused" $
@@ -70,26 +69,24 @@ parseArgumentsTests =
           @?= Right (Request (LoadId 1) 0 Simplified "suc zero")
     , testCase "all four arguments parse" $
         parseRequest
-          ( Just $
-              Map.fromList
-                [ ("load_id", Aeson.String "L3")
-                , ("goal", Aeson.Number 2)
-                , ("normalization", Aeson.String "normalized")
-                , ("expression", Aeson.String "suc zero")
-                ]
+          ( Map.fromList
+              [ ("load_id", Aeson.String "L3")
+              , ("goal", Aeson.Number 2)
+              , ("normalization", Aeson.String "normalized")
+              , ("expression", Aeson.String "suc zero")
+              ]
           )
           @?= Right (Request (LoadId 3) 2 Normalised "suc zero")
     ]
  where
-  parseRequest :: Maybe (Map.Map Text Aeson.Value) -> Either Text Request
+  parseRequest :: Map.Map Text Aeson.Value -> Either Text Request
   parseRequest = parseArguments
   arguments expression =
-    Just $
-      Map.fromList
-        [ ("load_id", Aeson.String "L1")
-        , ("goal", Aeson.Number 0)
-        , ("expression", Aeson.String expression)
-        ]
+    Map.fromList
+      [ ("load_id", Aeson.String "L1")
+      , ("goal", Aeson.Number 0)
+      , ("expression", Aeson.String expression)
+      ]
 
 renderResponseTests :: TestTree
 renderResponseTests =
