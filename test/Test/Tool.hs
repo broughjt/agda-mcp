@@ -9,6 +9,7 @@ import Test.Tool.CaseSplit qualified as CaseSplit
 import Test.Tool.Check qualified as Check
 import Test.Tool.Give qualified as Give
 import Test.Tool.Goal qualified as Goal
+import Test.Tool.Infer qualified as Infer
 import Test.Tool.Interruption qualified as Interruption
 import Test.Tool.Load qualified as Load
 import Test.Tool.Scenario qualified as Scenario
@@ -22,6 +23,7 @@ tests =
       [ Source.tests
       , Load.tests
       , Goal.tests warm
+      , Infer.tests warm
       , Check.tests warm
       , Give.tests warm
       , CaseSplit.tests warm

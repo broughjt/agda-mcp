@@ -56,6 +56,7 @@ library
     AgdaMCP.Tools.Give
     AgdaMCP.Tools.Goal
     AgdaMCP.Tools.Check
+    AgdaMCP.Tools.Infer
     AgdaMCP.Tools.CaseSplit
   build-depends:
       Agda == 2.8.*,
@@ -87,6 +88,7 @@ test-suite agda-mcp-test
     Test.Tool.Give
     Test.Tool.Goal
     Test.Tool.Harness
+    Test.Tool.Infer
     Test.Tool.Interruption
     Test.Tool.Load
     Test.Tool.Scenario

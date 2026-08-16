@@ -25,6 +25,7 @@ import AgdaMCP.Tools.CaseSplit qualified as CaseSplit
 import AgdaMCP.Tools.Check qualified as Check
 import AgdaMCP.Tools.Give qualified as Give
 import AgdaMCP.Tools.Goal qualified as Goal
+import AgdaMCP.Tools.Infer qualified as Infer
 import AgdaMCP.Tools.Load (LoadRefusal (..))
 import AgdaMCP.Tools.Load qualified as Load
 import AgdaMCP.Tools.LoadId (LoadId (..), LoadIdRefusal (..))
@@ -193,7 +194,7 @@ distributivity warm =
           onlyGoals report
 
       do
-        report <-
+        response <-
           Check.check
             Check.Request
               { Check.checkRequestLoadId = LoadId 4
@@ -201,32 +202,42 @@ distributivity warm =
               , Check.checkRequestNormalization = Simplified
               , Check.checkRequestExpression = wrongStep
               }
-            >>= liftIO . expectCheckOk "check the rejected expression"
-        liftIO $ do
-          goalReportShape (Check.checkReportGoal report)
-            @?= GoalOfType "x + (y + z) * x ≡ x + y * x + z * x"
-          fmap haveType (Check.checkReportHave report)
-            @?= Right "x + (y + z) * x ≡ x + (y * x + z * x)"
-          case Check.checkReportChecks report of
-            -- TODO: Revisit this behavior during implementation
-            -- Check parses at `noRange`, so its positions are the
-            -- expression's own rather than the file's.
-            Left e ->
-              errorShouldBe
-                path
-                e
-                [ "1.1-32: error: [UnequalTerms]"
-                , "x != x + y * x of type ℕ"
-                , "when checking that the inferred type of an application"
-                , "  x + (y + z) * x ≡ x + _y_15"
-                , "matches the expected type"
-                , "  (suc y + z) * x ≡ suc y * x + z * x"
-                ]
-            Right elaborated ->
-              assertFailure $ "expected a failure: " <> show elaborated
+        liftIO $ case response of
+          -- TODO: Revisit this behavior during implementation
+          -- Check parses at `noRange`, so its positions are the
+          -- expression's own rather than the file's.
+          Check.ResponseFailed goalId e -> do
+            goalId @?= 1
+            errorShouldBe
+              path
+              e
+              [ "1.1-32: error: [UnequalTerms]"
+              , "x != x + y * x of type ℕ"
+              , "when checking that the inferred type of an application"
+              , "  x + (y + z) * x ≡ x + _y_15"
+              , "matches the expected type"
+              , "  (suc y + z) * x ≡ suc y * x + z * x"
+              ]
+          other ->
+            assertFailure $
+              "expected the rejected expression to fail: " <> show other
 
       do
         report <-
+          Infer.infer
+            Infer.Request
+              { Infer.inferRequestLoadId = LoadId 4
+              , Infer.inferRequestGoalId = 1
+              , Infer.inferRequestNormalization = Simplified
+              , Infer.inferRequestExpression = wrongStep
+              }
+            >>= liftIO . expectInferOk "infer the rejected expression"
+        liftIO $
+          haveType (Infer.inferReportHave report)
+            @?= "x + (y + z) * x ≡ x + (y * x + z * x)"
+
+      do
+        response <-
           Check.check
             Check.Request
               { Check.checkRequestLoadId = LoadId 4
@@ -234,14 +245,7 @@ distributivity warm =
               , Check.checkRequestNormalization = Simplified
               , Check.checkRequestExpression = step
               }
-            >>= liftIO . expectCheckOk "check the reassociated expression"
-        liftIO $ do
-          goalReportShape (Check.checkReportGoal report)
-            @?= GoalOfType "x + (y + z) * x ≡ x + y * x + z * x"
-          Check.checkReportExpression report @?= step
-          fmap haveType (Check.checkReportHave report)
-            @?= Right "x + (y + z) * x ≡ x + y * x + z * x"
-          Check.checkReportChecks report @?= Right elaboratedStep
+        liftIO $ response @?= Check.ResponseOk 1 elaboratedStep
 
       do
         (applied, report) <-
@@ -350,9 +354,9 @@ expectGoalOk _ (Goal.ResponseOk _ _ report) = pure report
 expectGoalOk label other =
   assertFailure $ label <> ": expected ResponseOk, got " <> show other
 
-expectCheckOk :: String -> Check.Response -> IO Check.CheckReport
-expectCheckOk _ (Check.ResponseOk _ _ report) = pure report
-expectCheckOk label other =
+expectInferOk :: String -> Infer.Response -> IO Infer.InferReport
+expectInferOk _ (Infer.ResponseOk _ report) = pure report
+expectInferOk label other =
   assertFailure $ label <> ": expected ResponseOk, got " <> show other
 
 expectSplitApplied ::

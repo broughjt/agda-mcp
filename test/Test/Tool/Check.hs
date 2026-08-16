@@ -3,29 +3,21 @@
 module Test.Tool.Check (tests) where
 
 import Agda.Interaction.Base (Rewrite (..))
+import Agda.Syntax.Common (InteractionId)
 import Agda.TypeChecking.Monad (TCState)
 import Control.Monad.IO.Class (liftIO)
 import Data.Aeson qualified as Aeson
-import Data.Bifunctor (first)
 import Data.Map qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.IO qualified as Text.IO
 import System.Directory (removeFile)
-import Test.Corpus qualified as Corpus
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Test.Tool.Harness (withFixtureToolSession)
 
-import AgdaMCP.Interaction (
-  Error (..),
-  GoalReport (..),
-  GoalShape (..),
-  Warning (..),
- )
-import AgdaMCP.Interaction.GoalInfer (Have (..))
+import AgdaMCP.Interaction (Error (..), Warning (..))
 import AgdaMCP.Tools.Check (
-  CheckReport (..),
   Request (..),
   Response (..),
   renderResponse,
@@ -120,244 +112,77 @@ renderResponseTests =
           @?= Left
             "No goal ?5 in the current load. Check the goal IDs in the most \
             \recent result."
-    , testCase "a failed query reports Agda's error" $
-        renderResponse (ResponseFailed Corpus.typeError)
+    , testCase "an expression that fits states the verdict and elaborates it" $
+        renderResponse (ResponseOk 0 "1")
           @?= Right
             ( rendered
-                [ "Check failed:"
-                , ""
-                , "  /fixture/TypeError.agda:6.9-10: error: [UnequalTerms]"
-                , "  Set !=< ℕ"
-                , "  when checking that the expression ℕ has type ℕ"
-                ]
-            )
-    , testCase "an expression that fits reports the goal, Have, and elaboration" $
-        renderResponse (ResponseOk 0 Simplified fittingReport)
-          @?= Right
-            ( rendered
-                [ "?0 (simplified)"
-                , "  ⊢ ℕ"
-                , ""
-                , "Have:"
-                , "  suc zero"
-                , "    : ℕ"
+                [ "The expression checks at ?0."
                 , ""
                 , "Elaborates to:"
                 , "  1"
                 ]
             )
-    , testCase "the header carries the queried goal id and normalization" $
-        renderResponse (ResponseOk 3 Normalised fittingReport)
+    , testCase "the verdict carries the queried goal id" $
+        renderResponse (ResponseOk 3 "1")
           @?= Right
             ( rendered
-                [ "?3 (normalized)"
-                , "  ⊢ ℕ"
-                , ""
-                , "Have:"
-                , "  suc zero"
-                , "    : ℕ"
+                [ "The expression checks at ?3."
                 , ""
                 , "Elaborates to:"
                 , "  1"
                 ]
             )
-    , testCase "a multi-line expression is echoed verbatim" $
-        renderResponse
-          ( ResponseOk
-              0
-              Simplified
-              fittingReport
-                { checkReportExpression = "λ x\n  → x"
-                , checkReportHave = Right (Have "A" [])
-                }
-          )
+    , testCase "a multi-line elaboration keeps Agda's own indentation" $
+        renderResponse (ResponseOk 0 "λ x\n  → x")
           @?= Right
             ( rendered
-                [ "?0 (simplified)"
-                , "  ⊢ ℕ"
+                [ "The expression checks at ?0."
                 , ""
-                , "Have:"
+                , "Elaborates to:"
                 , "  λ x"
                 , "    → x"
-                , "    : A"
-                , ""
-                , "Elaborates to:"
-                , "  1"
                 ]
             )
-    , testCase "a multi-line inferred type keeps Agda's own indentation" $
-        renderResponse
-          ( ResponseOk
-              0
-              Simplified
-              fittingReport {checkReportHave = Right (Have "A\n  → B" [])}
-          )
+    , testCase "an expression that does not fit reports the error, not an elaboration" $
+        renderResponse (ResponseFailed 0 (plainError ttCheckError))
           @?= Right
             ( rendered
-                [ "?0 (simplified)"
-                , "  ⊢ ℕ"
+                [ "The expression does not check at ?0:"
                 , ""
-                , "Have:"
-                , "  suc zero"
-                , "    : A"
-                , "      → B"
-                , ""
-                , "Elaborates to:"
-                , "  1"
-                ]
-            )
-    , testCase "the expression's boundary faces follow in the Have section" $
-        renderResponse
-          ( ResponseOk
-              0
-              Simplified
-              fittingReport
-                { checkReportHave =
-                    Right (Have "ℕ" ["i = i0 ⊢ x", "i = i1 ⊢ y"])
-                }
-          )
-          @?= Right
-            ( rendered
-                [ "?0 (simplified)"
-                , "  ⊢ ℕ"
-                , ""
-                , "Have:"
-                , "  suc zero"
-                , "    : ℕ"
-                , ""
-                , "  i = i0 ⊢ x"
-                , ""
-                , "  i = i1 ⊢ y"
-                , ""
-                , "Elaborates to:"
-                , "  1"
-                ]
-            )
-    , testCase "an expression that fails to infer reports the error in place" $
-        renderResponse
-          ( ResponseOk
-              0
-              Simplified
-              fittingReport
-                { checkReportHave = Left (plainError "it does not infer")
-                }
-          )
-          @?= Right
-            ( rendered
-                [ "?0 (simplified)"
-                , "  ⊢ ℕ"
-                , ""
-                , "Have:"
-                , "  it does not infer"
-                , ""
-                , "Elaborates to:"
-                , "  1"
-                ]
-            )
-    , testCase
-        "an expression that infers but fails to check reports both as they landed"
-        $ renderResponse
-          ( ResponseOk
-              0
-              Simplified
-              fittingReport
-                { checkReportExpression = "tt"
-                , checkReportHave = Right (Have "⊤" [])
-                , checkReportChecks = Left (plainError ttCheckError)
-                }
-          )
-          @?= Right
-            ( rendered
-                [ "?0 (simplified)"
-                , "  ⊢ ℕ"
-                , ""
-                , "Have:"
-                , "  tt"
-                , "    : ⊤"
-                , ""
-                , "Elaborates to:"
                 , "  1.1-3: error: [UnequalTerms]"
                 , "  ⊤ !=< ℕ"
                 , "  when checking that the expression tt has type ℕ"
                 ]
             )
-    , testCase "a parse error appears in both sections" $
-        renderResponse
-          ( ResponseOk
-              0
-              Simplified
-              fittingReport
-                { checkReportExpression = "suc ("
-                , checkReportHave = Left (plainError parseError)
-                , checkReportChecks = Left (plainError parseError)
-                }
-          )
+    , testCase "the failure headline carries the queried goal id" $
+        renderResponse (ResponseFailed 3 (plainError parseError))
           @?= Right
             ( rendered
-                [ "?0 (simplified)"
-                , "  ⊢ ℕ"
+                [ "The expression does not check at ?3:"
                 , ""
-                , "Have:"
-                , "  1.5: error: [ParseError]"
-                , "  <EOF><ERROR> ..."
-                , ""
-                , "Elaborates to:"
                 , "  1.5: error: [ParseError]"
                 , "  <EOF><ERROR> ..."
                 ]
             )
-    , testCase "an embedded error's warnings follow as further items" $
+    , testCase "a failure's warnings follow under their own heading" $
         renderResponse
-          ( ResponseOk
+          ( ResponseFailed
               0
-              Simplified
-              fittingReport
-                { checkReportHave =
-                    Left
-                      (plainError "it does not infer")
-                        { errorWarnings =
-                            [Warning (Nothing, "a warning raised on the way")]
-                        }
+              (plainError ttCheckError)
+                { errorWarnings =
+                    [Warning (Nothing, "a warning raised on the way")]
                 }
           )
           @?= Right
             ( rendered
-                [ "?0 (simplified)"
-                , "  ⊢ ℕ"
+                [ "The expression does not check at ?0:"
                 , ""
-                , "Have:"
-                , "  it does not infer"
+                , "  1.1-3: error: [UnequalTerms]"
+                , "  ⊤ !=< ℕ"
+                , "  when checking that the expression tt has type ℕ"
                 , ""
+                , "Warnings:"
                 , "  a warning raised on the way"
-                , ""
-                , "Elaborates to:"
-                , "  1"
-                ]
-            )
-    , testCase "goal constraints sit between the goal block and Have" $
-        renderResponse
-          ( ResponseOk
-              0
-              Simplified
-              fittingReport
-                { checkReportGoal =
-                    emptyReport {goalReportConstraints = ["a constraint"]}
-                }
-          )
-          @?= Right
-            ( rendered
-                [ "?0 (simplified)"
-                , "  ⊢ ℕ"
-                , ""
-                , "Constraints:"
-                , "  a constraint"
-                , ""
-                , "Have:"
-                , "  suc zero"
-                , "    : ℕ"
-                , ""
-                , "Elaborates to:"
-                , "  1"
                 ]
             )
     ]
@@ -371,83 +196,67 @@ sessionTests warm =
           _ <-
             Load.load Load.Request {Load.loadRequestPath = path}
               >>= liftIO . expectLoadOk "load"
-          response <-
-            Check.check
-              Request
-                { checkRequestLoadId = LoadId 1
-                , checkRequestGoalId = 5
-                , checkRequestNormalization = Simplified
-                , checkRequestExpression = "suc ("
-                }
+          response <- Check.check (checkRequest (LoadId 1) 5 "suc (")
           liftIO $ response @?= ResponseUnknownGoal 5
-    , testCase "a parse error lands in both fields with expression-relative positions" $
+    , testCase "a parse error is a failure carrying expression-relative positions" $
         withFixtureToolSession warm "test/fixtures/InferCheck.agda" $ \path -> do
           _ <-
             Load.load Load.Request {Load.loadRequestPath = path}
               >>= liftIO . expectLoadOk "load"
-          report <-
-            Check.check
-              Request
-                { checkRequestLoadId = LoadId 1
-                , checkRequestGoalId = 0
-                , checkRequestNormalization = Simplified
-                , checkRequestExpression = "suc ("
-                }
-              >>= liftIO . expectCheckOk "the unparseable expression"
-          liftIO $ do
-            goalReportShape (checkReportGoal report) @?= GoalOfType "ℕ"
-            checkReportExpression report @?= "suc ("
-            first errorMessage (checkReportHave report) @?= Left parseError
-            first errorMessage (checkReportChecks report) @?= Left parseError
+          response <- Check.check (checkRequest (LoadId 1) 0 "suc (")
+          liftIO $ case response of
+            ResponseFailed goalId e -> do
+              goalId @?= 0
+              errorMessage e @?= parseError
+            other ->
+              assertFailure $
+                "expected the unparseable expression to fail, got " <> show other
+    , testCase "an expression that only infers is reported as a failure" $
+        withFixtureToolSession warm "test/fixtures/InferCheck.agda" $ \path -> do
+          _ <-
+            Load.load Load.Request {Load.loadRequestPath = path}
+              >>= liftIO . expectLoadOk "load"
+          response <- Check.check (checkRequest (LoadId 1) 0 "tt")
+          liftIO $ case response of
+            ResponseFailed goalId e -> do
+              goalId @?= 0
+              errorMessage e @?= ttCheckError
+            other ->
+              assertFailure $
+                "expected the ill-typed expression to fail, got " <> show other
+    , testCase "checking does not verify a cubical goal's boundary" $
+        withFixtureToolSession warm "test/fixtures/CubicalBoundary.agda" $ \path -> do
+          _ <-
+            Load.load Load.Request {Load.loadRequestPath = path}
+              >>= liftIO . expectLoadOk "load"
+          response <- Check.check (checkRequest (LoadId 1) 0 "p i")
+          liftIO $ response @?= ResponseOk 0 "p i"
     , testCase "a file edited behind the session is refused until reloaded" $
         withFixtureToolSession warm "test/fixtures/InferCheck.agda" $ \path -> do
           _ <-
             Load.load Load.Request {Load.loadRequestPath = path}
               >>= liftIO . expectLoadOk "the first load"
           liftIO $ Text.IO.appendFile path "\n-- edited in another window\n"
-          refused <- Check.check (checkRequest $ LoadId 1)
+          refused <- Check.check (checkRequest (LoadId 1) 0 "zero")
           liftIO $ refused @?= ResponseRefused (RefusedSource RefusalChanged)
           reloaded <-
             Load.load Load.Request {Load.loadRequestPath = path}
               >>= liftIO . expectLoadOk "the reload"
           liftIO $ Load.loadReportId reloaded @?= LoadId 2
-          answered <- Check.check (checkRequest $ LoadId 2)
-          liftIO $ case answered of
-            ResponseOk {} -> pure ()
-            other ->
-              assertFailure $
-                "expected the reloaded check to answer, got " <> show other
+          answered <- Check.check (checkRequest (LoadId 2) 0 "zero")
+          liftIO $ answered @?= ResponseOk 0 "zero"
     , testCase "a file that has gone missing is refused" $
         withFixtureToolSession warm "test/fixtures/InferCheck.agda" $ \path -> do
           _ <-
             Load.load Load.Request {Load.loadRequestPath = path}
               >>= liftIO . expectLoadOk "load"
           liftIO $ removeFile path
-          refused <- Check.check (checkRequest $ LoadId 1)
+          refused <- Check.check (checkRequest (LoadId 1) 0 "zero")
           liftIO $ case refused of
             ResponseRefused (RefusedSource (RefusalUnreadable _)) -> pure ()
             other ->
               assertFailure $
                 "expected the missing file to be refused, got " <> show other
-    , testCase "infer and check disagree by design" $
-        withFixtureToolSession warm "test/fixtures/InferCheck.agda" $ \path -> do
-          _ <-
-            Load.load Load.Request {Load.loadRequestPath = path}
-              >>= liftIO . expectLoadOk "load"
-          report <-
-            Check.check
-              Request
-                { checkRequestLoadId = LoadId 1
-                , checkRequestGoalId = 0
-                , checkRequestNormalization = Simplified
-                , checkRequestExpression = "tt"
-                }
-              >>= liftIO . expectCheckOk "the expression that infers only"
-          liftIO $ do
-            goalReportShape (checkReportGoal report) @?= GoalOfType "ℕ"
-            checkReportHave report @?= Right (Have "⊤" [])
-            first errorMessage (checkReportChecks report)
-              @?= Left ttCheckError
     ]
 
 -- Helpers
@@ -455,31 +264,13 @@ sessionTests warm =
 rendered :: [Text] -> Text
 rendered = Text.intercalate "\n"
 
-checkRequest :: LoadId -> Request
-checkRequest loadId =
+checkRequest :: LoadId -> InteractionId -> Text -> Request
+checkRequest loadId goalId expression =
   Request
     { checkRequestLoadId = loadId
-    , checkRequestGoalId = 0
+    , checkRequestGoalId = goalId
     , checkRequestNormalization = Simplified
-    , checkRequestExpression = "zero"
-    }
-
-emptyReport :: GoalReport
-emptyReport =
-  GoalReport
-    { goalReportShape = GoalOfType "ℕ"
-    , goalReportBoundary = []
-    , goalReportContext = []
-    , goalReportConstraints = []
-    }
-
-fittingReport :: CheckReport
-fittingReport =
-  CheckReport
-    { checkReportGoal = emptyReport
-    , checkReportExpression = "suc zero"
-    , checkReportHave = Right (Have "ℕ" [])
-    , checkReportChecks = Right "1"
+    , checkRequestExpression = expression
     }
 
 plainError :: Text -> Error
@@ -506,9 +297,4 @@ ttCheckError =
 expectLoadOk :: String -> Load.Response -> IO Load.LoadReport
 expectLoadOk _ (Load.ResponseOk report) = pure report
 expectLoadOk label other =
-  assertFailure $ label <> ": expected ResponseOk, got " <> show other
-
-expectCheckOk :: String -> Check.Response -> IO CheckReport
-expectCheckOk _ (ResponseOk _ _ report) = pure report
-expectCheckOk label other =
   assertFailure $ label <> ": expected ResponseOk, got " <> show other

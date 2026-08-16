@@ -4,15 +4,12 @@ module AgdaMCP.Tools.Check (
   checkTool,
   Request (..),
   Response (..),
-  CheckReport (..),
   check,
   renderResponse,
 ) where
 
 import Agda.Interaction.Base (Rewrite)
 import Agda.Syntax.Common (InteractionId (..))
-import Control.Exception (Exception, throwIO)
-import Control.Monad.IO.Class (liftIO)
 import Data.Aeson (FromJSON (..), withObject, (.:))
 import Data.Aeson.Types qualified as Aeson
 import Data.Text (Text)
@@ -27,17 +24,8 @@ import MCP.Server (
   schema,
  )
 
-import AgdaMCP.Interaction (Error (..), GoalError (..), GoalReport)
-import AgdaMCP.Interaction.Goal qualified as Interaction.Goal
-import AgdaMCP.Interaction.GoalCheck qualified as Interaction.GoalCheck
-import AgdaMCP.Interaction.GoalInfer (Have (..))
-import AgdaMCP.Interaction.GoalInfer qualified as Interaction.GoalInfer
-import AgdaMCP.Tools.Goal (renderGoalReport)
-import AgdaMCP.Tools.Load (
-  LoadRefusal,
-  renderLoadRefusal,
-  requireCheckedLoad,
- )
+import AgdaMCP.Interaction (Error)
+import AgdaMCP.Tools.Load (LoadRefusal)
 import AgdaMCP.Tools.LoadId (LoadId)
 import AgdaMCP.Tools.MCP (
   Tool (..),
@@ -49,8 +37,7 @@ import AgdaMCP.Tools.MCP (
   textToolHandle,
   timeoutSchema,
  )
-import AgdaMCP.Tools.Render (blocks, indent, renderWarning, section)
-import AgdaMCP.Tools.State (ToolM, liftInteraction)
+import AgdaMCP.Tools.State (ToolM)
 
 checkTool :: Tool
 checkTool =
@@ -103,74 +90,14 @@ data Request = Request
 data Response
   = ResponseRefused LoadRefusal
   | ResponseUnknownGoal InteractionId
-  | ResponseFailed Error
-  | ResponseOk InteractionId Rewrite CheckReport
-  deriving (Eq, Show)
-
-data CheckReport = CheckReport
-  { checkReportGoal :: GoalReport
-  , checkReportExpression :: Text
-  , checkReportHave :: Either Error Have
-  , checkReportChecks :: Either Error Text
-  }
+  | ResponseFailed InteractionId Error
+  | ResponseOk InteractionId Text
   deriving (Eq, Show)
 
 -- Business logic
 
 check :: Request -> ToolM Response
-check (Request loadId goalId normalization expression) =
-  requireCheckedLoad loadId >>= either (pure . ResponseRefused) (const query)
- where
-  query :: ToolM Response
-  query = do
-    goalResponse <-
-      liftInteraction $
-        Interaction.Goal.goal
-          Interaction.Goal.Request
-            { Interaction.Goal.requestNormalization = normalization
-            , Interaction.Goal.requestGoalId = goalId
-            }
-    case goalResponse of
-      Left (GoalUnknownId unknownId) -> pure $ ResponseUnknownGoal unknownId
-      Left (GoalFailed e) -> pure $ ResponseFailed e
-      Right report -> do
-        haveResponse <-
-          liftInteraction $
-            Interaction.GoalInfer.goalInfer
-              Interaction.GoalInfer.Request
-                { Interaction.GoalInfer.requestNormalization = normalization
-                , Interaction.GoalInfer.requestGoalId = goalId
-                , Interaction.GoalInfer.requestExpression = expression
-                }
-        checksResponse <-
-          liftInteraction $
-            Interaction.GoalCheck.goalCheck
-              Interaction.GoalCheck.Request
-                { Interaction.GoalCheck.requestNormalization = normalization
-                , Interaction.GoalCheck.requestGoalId = goalId
-                , Interaction.GoalCheck.requestExpression = expression
-                }
-        have <- embedded haveResponse
-        checks <- embedded checksResponse
-        pure $
-          ResponseOk goalId normalization $
-            CheckReport
-              { checkReportGoal = report
-              , checkReportExpression = expression
-              , checkReportHave = have
-              , checkReportChecks = checks
-              }
-
-  embedded :: Either GoalError (GoalReport, a) -> ToolM (Either Error a)
-  embedded (Left (GoalUnknownId unknownId)) =
-    liftIO $ throwIO $ UnknownGoalAfterResolution unknownId
-  embedded (Left (GoalFailed e)) = pure $ Left e
-  embedded (Right (_, x)) = pure $ Right x
-
-newtype CheckToolBug = UnknownGoalAfterResolution InteractionId
-  deriving (Show)
-
-instance Exception CheckToolBug
+check _ = error "not implemented"
 
 -- Request parsing
 
@@ -194,31 +121,5 @@ parseExpression = Aeson.withText "expression" $ \text ->
 -- Response rendering
 
 renderResponse :: Response -> Either Text Text
-renderResponse (ResponseRefused refusal) = Left $ renderLoadRefusal refusal
-renderResponse (ResponseUnknownGoal unknownId) =
-  Left $
-    "No goal ?"
-      <> Text.pack (show $ interactionId unknownId)
-      <> " in the current load. Check the goal IDs in the most recent result."
-renderResponse (ResponseFailed e) =
-  Right $
-    blocks $
-      ["Check failed:", indent $ errorMessage e]
-        <> section "Warnings:" (map renderWarning $ errorWarnings e)
-renderResponse (ResponseOk goalId rewrite report) =
-  Right $
-    blocks $
-      [renderGoalReport rewrite goalId $ checkReportGoal report]
-        <> section "Have:" (either embeddedError haveItems $ checkReportHave report)
-        <> section
-          "Elaborates to:"
-          (either embeddedError (pure . indent) $ checkReportChecks report)
- where
-  haveItems (Have inferredType faces) =
-    ( indent (checkReportExpression report)
-        <> "\n"
-        <> indent (indent $ ": " <> inferredType)
-    )
-      : map indent faces
-  embeddedError e =
-    indent (errorMessage e) : map renderWarning (errorWarnings e)
+renderResponse _ =
+  error "not implemented"
