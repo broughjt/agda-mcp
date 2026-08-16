@@ -1,6 +1,7 @@
 module Test.Tool.Harness (
   withFixtureToolSession,
   withFixtureToolSessions,
+  withFixtureToolState,
 ) where
 
 import Agda.TypeChecking.Monad (TCState)
@@ -22,15 +23,18 @@ withFixtureToolSession warm source k =
 withFixtureToolSessions ::
   IO TCState -> [FilePath] -> ([FilePath] -> ToolM a) -> IO a
 withFixtureToolSessions warm sources k =
+  withFixtureToolState warm sources $ \paths toolState ->
+    fst <$> runStateT (k paths) toolState
+
+withFixtureToolState ::
+  IO TCState -> [FilePath] -> ([FilePath] -> ToolState -> IO a) -> IO a
+withFixtureToolState warm sources k =
   withStagedFiles sources $ \directory options -> do
     interactionState <- warmedSession warm options
-    let toolState =
-          ToolState
-            { toolInteractionState = interactionState
-            , toolLoadGeneration =
-                LoadGeneration {loadsIssued = 0, currentLoad = Nothing}
-            }
-    fst
-      <$> runStateT
-        (k $ map ((directory </>) . takeFileName) sources)
-        toolState
+    k
+      (map ((directory </>) . takeFileName) sources)
+      ToolState
+        { toolInteractionState = interactionState
+        , toolLoadGeneration =
+            LoadGeneration {loadsIssued = 0, currentLoad = Nothing}
+        }

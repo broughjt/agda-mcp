@@ -9,6 +9,8 @@ import Data.Aeson qualified as Aeson
 import Data.Map qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Text.IO qualified as Text.IO
+import System.Directory (removeFile)
 import Test.Corpus qualified as Corpus
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
@@ -26,9 +28,11 @@ import AgdaMCP.Tools.Goal (
   renderResponse,
  )
 import AgdaMCP.Tools.Goal qualified as Goal
+import AgdaMCP.Tools.Load (LoadRefusal (..))
 import AgdaMCP.Tools.Load qualified as Load
 import AgdaMCP.Tools.LoadId (LoadId (..), LoadIdRefusal (..))
 import AgdaMCP.Tools.MCP (normalizations, parseArguments, renderNormalization)
+import AgdaMCP.Tools.Source (SourceRefusal (..))
 import Data.Foldable (for_)
 
 tests :: IO TCState -> TestTree
@@ -118,18 +122,37 @@ renderResponseTests =
   testGroup
     "renderResponse"
     [ testCase "a refusal when nothing is loaded says to load first" $
-        renderResponse (ResponseRefused NoCurrentLoad)
+        renderResponse (ResponseRefused (RefusedLoadId NoCurrentLoad))
           @?= Left
             "No load is current. Either no file has been loaded yet, or the \
             \most recent load failed. Load the file, then use the load ID and \
             \goal IDs from that load result."
     , testCase "a stale load_id names the current load" $
-        renderResponse (ResponseRefused $ StaleLoadId $ LoadId 2)
+        renderResponse (ResponseRefused $ RefusedLoadId $ StaleLoadId $ LoadId 2)
           @?= Left
             "The supplied load ID is from an earlier load. The current load ID \
             \is L2. Each load makes fresh goal ID assignments, so use the most \
             \recently issued load ID and goal IDs. If you no longer have them, \
             \load the file again."
+    , testCase "a file that changed on disk says to load it again" $
+        renderResponse (ResponseRefused $ RefusedSource RefusalChanged)
+          @?= Left
+            "The file on disk no longer matches the source Agda checked. Load \
+            \the file again, then use the load ID and goal IDs from that load \
+            \result."
+    , testCase "a file that could not be read reports why" $
+        renderResponse
+          (ResponseRefused $ RefusedSource $ RefusalUnreadable "no such file")
+          @?= Left
+            ( rendered
+                [ "Could not read the file to check it still matches the \
+                  \source Agda checked. Load the file again once it is \
+                  \readable, then use the load ID and goal IDs from that load \
+                  \result."
+                , ""
+                , "  no such file"
+                ]
+            )
     , testCase "an unknown goal id points back at the load result" $
         renderResponse (ResponseUnknownGoal 5)
           @?= Left
@@ -358,8 +381,38 @@ sessionTests warm =
                   , goalRequestGoalId = 0
                   , goalRequestNormalization = Simplified
                   }
-            liftIO $ refused @?= ResponseRefused NoCurrentLoad
+            liftIO $ refused @?= ResponseRefused (RefusedLoadId NoCurrentLoad)
           _ -> liftIO $ assertFailure "expected two staged fixtures"
+    , testCase "a file edited outside the session is refused until reloaded" $
+        withFixtureToolSession warm "test/fixtures/HoleNatural.agda" $ \path -> do
+          _ <-
+            Load.load Load.Request {Load.loadRequestPath = path}
+              >>= liftIO . expectLoadOk "the first load"
+          liftIO $ Text.IO.appendFile path "\n-- edited in another window\n"
+          refused <- Goal.goal (goalRequest $ LoadId 1)
+          liftIO $ refused @?= ResponseRefused (RefusedSource RefusalChanged)
+          reloaded <-
+            Load.load Load.Request {Load.loadRequestPath = path}
+              >>= liftIO . expectLoadOk "the reload"
+          liftIO $ Load.loadReportId reloaded @?= LoadId 2
+          answered <- Goal.goal (goalRequest $ LoadId 2)
+          liftIO $ case answered of
+            ResponseOk {} -> pure ()
+            other ->
+              assertFailure $
+                "expected the reloaded goal to answer, got " <> show other
+    , testCase "a file that has gone missing is refused" $
+        withFixtureToolSession warm "test/fixtures/HoleNatural.agda" $ \path -> do
+          _ <-
+            Load.load Load.Request {Load.loadRequestPath = path}
+              >>= liftIO . expectLoadOk "load"
+          liftIO $ removeFile path
+          refused <- Goal.goal (goalRequest $ LoadId 1)
+          liftIO $ case refused of
+            ResponseRefused (RefusedSource (RefusalUnreadable _)) -> pure ()
+            other ->
+              assertFailure $
+                "expected the missing file to be refused, got " <> show other
     , testCase "a goal id that no load reported is unknown" $
         withFixtureToolSession warm "test/fixtures/HoleNatural.agda" $ \path -> do
           loaded <-
@@ -411,6 +464,14 @@ sessionTests warm =
 
 rendered :: [Text] -> Text
 rendered = Text.intercalate "\n"
+
+goalRequest :: LoadId -> Request
+goalRequest loadId =
+  Request
+    { goalRequestLoadId = loadId
+    , goalRequestGoalId = 0
+    , goalRequestNormalization = Simplified
+    }
 
 emptyReport :: GoalReport
 emptyReport =

@@ -5,8 +5,11 @@ module AgdaMCP.Tools.Load (
   Request (..),
   Response (..),
   LoadReport (..),
+  LoadRefusal (..),
   load,
   withEditableLoad,
+  requireCheckedLoad,
+  renderLoadRefusal,
   renderResponse,
 ) where
 
@@ -46,18 +49,26 @@ import AgdaMCP.Tools.LoadId (
   LoadId (..),
   LoadIdRefusal,
   renderLoadId,
+  renderLoadIdRefusal,
   requireCurrentLoad,
  )
-import AgdaMCP.Tools.MCP (Tool (..), textToolHandle)
+import AgdaMCP.Tools.MCP (
+  Tool (..),
+  loadBudget,
+  textToolHandle,
+  timeoutSchema,
+ )
 import AgdaMCP.Tools.Render (
   blocks,
   indent,
   renderContextEntry,
   renderShape,
+  renderSourceRefusal,
   renderSpan,
   renderWarning,
   section,
  )
+import AgdaMCP.Tools.Source (SourceRefusal, readChecked)
 import AgdaMCP.Tools.State (ToolM, ToolState (..), liftInteraction)
 
 loadTool :: Tool
@@ -67,12 +78,14 @@ loadTool =
         ( mkToolDefinition "load" loadDescription $
             schema $
               SchemaObject
-                [("path", describedSchema pathDescription $ SchemaString Nothing)]
+                [ ("path", describedSchema pathDescription $ SchemaString Nothing)
+                , ("timeout", timeoutSchema loadBudget)
+                ]
                 ["path"]
         )
           { toolDefinitionAnnotations = Just loadAnnotations
           }
-    , toolRun = textToolHandle load $ Right . renderResponse
+    , toolRun = textToolHandle loadBudget load $ Right . renderResponse
     }
  where
   loadAnnotations :: ToolAnnotations
@@ -169,6 +182,26 @@ withEditableLoad loadId handle =
       (,)
         <$> handle current
         <*> load Request {loadRequestPath = currentLoadPath current}
+
+data LoadRefusal
+  = RefusedLoadId LoadIdRefusal
+  | RefusedSource SourceRefusal
+  deriving (Eq, Show)
+
+requireCheckedLoad :: LoadId -> ToolM (Either LoadRefusal CurrentLoad)
+requireCheckedLoad loadId = do
+  generation <- gets toolLoadGeneration
+  case requireCurrentLoad generation loadId of
+    Left refusal -> pure $ Left $ RefusedLoadId refusal
+    Right current -> do
+      checked <-
+        liftIO $
+          readChecked (currentLoadPath current) (currentLoadSourceHash current)
+      pure $ either (Left . RefusedSource) (const $ Right current) checked
+
+renderLoadRefusal :: LoadRefusal -> Text
+renderLoadRefusal (RefusedLoadId refusal) = renderLoadIdRefusal refusal
+renderLoadRefusal (RefusedSource refusal) = renderSourceRefusal refusal
 
 issueLoadId :: Interaction.Load.LoadedFile -> ToolM LoadId
 issueLoadId file = do

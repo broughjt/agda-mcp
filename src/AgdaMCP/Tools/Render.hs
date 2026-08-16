@@ -8,6 +8,9 @@ module AgdaMCP.Tools.Render (
   renderFileChanged,
   renderSourceUnreadable,
   renderWriteFailed,
+  renderSourceRefusal,
+  renderReadOnlyTimeout,
+  renderEditingTimeout,
   blocks,
   section,
   indent,
@@ -25,6 +28,7 @@ import AgdaMCP.Interaction (
   Span (..),
   Warning (..),
  )
+import AgdaMCP.Tools.Source (SourceRefusal (..))
 
 {- | Either "n:a-b" if the start and end lines are the same, or "n:a-m:b"
 otherwise.
@@ -107,6 +111,40 @@ renderWriteFailed message =
       \valid."
     , indent message
     ]
+
+renderSourceRefusal :: SourceRefusal -> Text
+renderSourceRefusal RefusalChanged =
+  "The file on disk no longer matches the source Agda checked. Load the file \
+  \again, then use the load ID and goal IDs from that load result."
+renderSourceRefusal (RefusalUnreadable message) =
+  blocks
+    [ "Could not read the file to check it still matches the source Agda \
+      \checked. Load the file again once it is readable, then use the load ID \
+      \and goal IDs from that load result."
+    , indent message
+    ]
+
+renderReadOnlyTimeout :: Int -> Text
+renderReadOnlyTimeout seconds =
+  "The call ran longer than its timeout of "
+    <> renderSeconds seconds
+    <> " and was canceled. Nothing was modified, and the file loaded before \
+       \the call is still the current one, so its load ID and goal IDs remain \
+       \valid. Retry with a larger `timeout` if the work needs longer."
+
+renderEditingTimeout :: Int -> Text
+renderEditingTimeout seconds =
+  "The call ran longer than its timeout of "
+    <> renderSeconds seconds
+    <> " and was canceled. If it had already written its edits, the file on \
+       \disk has changed but has not been checked, and the other tools refuse \
+       \to work against the earlier load until you call `load` again. Load the \
+       \file to see where it stands, and retry with a larger `timeout` if the \
+       \work needs longer."
+
+renderSeconds :: Int -> Text
+renderSeconds 1 = "1 second"
+renderSeconds seconds = Text.pack (show seconds) <> " seconds"
 
 -- | Blocks are separated by one blank line.
 blocks :: [Text] -> Text

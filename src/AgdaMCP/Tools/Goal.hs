@@ -11,7 +11,6 @@ module AgdaMCP.Tools.Goal (
 
 import Agda.Interaction.Base (Rewrite)
 import Agda.Syntax.Common (InteractionId (..))
-import Control.Monad.State (gets)
 import Data.Aeson (FromJSON (..), withObject, (.:))
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -30,20 +29,22 @@ import AgdaMCP.Interaction (
   GoalReport (..),
  )
 import AgdaMCP.Interaction.Goal qualified as Interaction.Goal
-import AgdaMCP.Tools.LoadId (
-  LoadId,
-  LoadIdRefusal,
-  renderLoadIdRefusal,
-  requireCurrentLoad,
+import AgdaMCP.Tools.Load (
+  LoadRefusal,
+  renderLoadRefusal,
+  requireCheckedLoad,
  )
+import AgdaMCP.Tools.LoadId (LoadId)
 import AgdaMCP.Tools.MCP (
   Tool (..),
   goalIdSchema,
+  inspectBudget,
   loadIdSchema,
   normalizationSchema,
   parseNormalizationField,
   renderNormalization,
   textToolHandle,
+  timeoutSchema,
  )
 import AgdaMCP.Tools.Render (
   blocks,
@@ -53,7 +54,7 @@ import AgdaMCP.Tools.Render (
   renderWarning,
   section,
  )
-import AgdaMCP.Tools.State (ToolM, ToolState (..), liftInteraction)
+import AgdaMCP.Tools.State (ToolM, liftInteraction)
 
 goalTool :: Tool
 goalTool =
@@ -65,12 +66,13 @@ goalTool =
                 [ ("load_id", loadIdSchema)
                 , ("goal", goalIdSchema)
                 , ("normalization", normalizationSchema)
+                , ("timeout", timeoutSchema inspectBudget)
                 ]
                 ["load_id", "goal"]
         )
           { toolDefinitionAnnotations = Just goalAnnotations
           }
-    , toolRun = textToolHandle goal renderResponse
+    , toolRun = textToolHandle inspectBudget goal renderResponse
     }
  where
   goalAnnotations :: ToolAnnotations
@@ -83,7 +85,7 @@ goalTool =
 
   goalDescription :: Text
   goalDescription =
-    "Inspect an open goal in the currently loaded Agda file without modifying anything. Reports the goal's type, its local context, its cubical boundary when the goal has one, and any unsolved constraints mentioning the goal. Types are rendered at the requested normalization. To try an expression at a goal, use `check` instead."
+    "Inspect an open goal in the currently loaded Agda file without modifying anything. Reports the goal's type, its local context, its cubical boundary when the goal has one, and any unsolved constraints mentioning the goal. Types are rendered at the requested normalization. To try an expression at a goal, use check instead."
 
 data Request = Request
   { goalRequestLoadId :: LoadId
@@ -93,7 +95,7 @@ data Request = Request
   deriving (Eq, Show)
 
 data Response
-  = ResponseRefused LoadIdRefusal
+  = ResponseRefused LoadRefusal
   | ResponseUnknownGoal InteractionId
   | -- No known reproducer.
     ResponseFailed Error
@@ -103,27 +105,28 @@ data Response
 -- Business logic
 
 goal :: Request -> ToolM Response
-goal request = do
-  generation <- gets toolLoadGeneration
-  case requireCurrentLoad generation (goalRequestLoadId request) of
-    Left refusal -> pure $ ResponseRefused refusal
-    Right _ -> do
-      response <-
-        liftInteraction $
-          Interaction.Goal.goal
-            Interaction.Goal.Request
-              { Interaction.Goal.requestNormalization =
-                  goalRequestNormalization request
-              , Interaction.Goal.requestGoalId = goalRequestGoalId request
-              }
-      pure $ case response of
-        Left (GoalUnknownId unknownId) -> ResponseUnknownGoal unknownId
-        Left (GoalFailed e) -> ResponseFailed e
-        Right report ->
-          ResponseOk
-            (goalRequestGoalId request)
-            (goalRequestNormalization request)
-            report
+goal request =
+  requireCheckedLoad (goalRequestLoadId request)
+    >>= either (pure . ResponseRefused) (const query)
+ where
+  query :: ToolM Response
+  query = do
+    response <-
+      liftInteraction $
+        Interaction.Goal.goal
+          Interaction.Goal.Request
+            { Interaction.Goal.requestNormalization =
+                goalRequestNormalization request
+            , Interaction.Goal.requestGoalId = goalRequestGoalId request
+            }
+    pure $ case response of
+      Left (GoalUnknownId unknownId) -> ResponseUnknownGoal unknownId
+      Left (GoalFailed e) -> ResponseFailed e
+      Right report ->
+        ResponseOk
+          (goalRequestGoalId request)
+          (goalRequestNormalization request)
+          report
 
 -- Request parsing
 
@@ -137,7 +140,7 @@ instance FromJSON Request where
 -- Response rendering
 
 renderResponse :: Response -> Either Text Text
-renderResponse (ResponseRefused refusal) = Left $ renderLoadIdRefusal refusal
+renderResponse (ResponseRefused refusal) = Left $ renderLoadRefusal refusal
 renderResponse (ResponseUnknownGoal unknownId) =
   Left $
     "No goal ?"

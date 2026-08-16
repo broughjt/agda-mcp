@@ -50,9 +50,11 @@ import AgdaMCP.Tools.LoadId (
  )
 import AgdaMCP.Tools.MCP (
   Tool (..),
+  editBudget,
   goalIdSchema,
   loadIdSchema,
   textToolHandle,
+  timeoutSchema,
  )
 import AgdaMCP.Tools.Render (
   blocks,
@@ -86,12 +88,13 @@ caseSplitTool =
                   , describedSchema variableDescription $
                       SchemaArray (schema $ SchemaString Nothing)
                   )
+                , ("timeout", timeoutSchema editBudget)
                 ]
                 ["load_id", "goal", "variables"]
         )
           { toolDefinitionAnnotations = Just caseSplitAnnotations
           }
-    , toolRun = textToolHandle caseSplit renderResponse
+    , toolRun = textToolHandle editBudget caseSplit renderResponse
     }
  where
   caseSplitAnnotations :: ToolAnnotations
@@ -105,7 +108,7 @@ caseSplitTool =
 
   caseSplitDescription :: Text
   caseSplitDescription =
-    "Split an open goal into cases, replacing the clause containing the goal with one clause per case. Pass the pattern variables to split on, or the empty list to introduce the clause's remaining arguments. A variable not currently in scope is revealed as a visible pattern rather than split on. The replacement is written to the file, and a reload follows, which issues a new load ID and fresh goal ID assignments, so the goal IDs in this request are no longer valid afterwards."
+    "Split an open goal into cases, replacing the clause containing the goal with one clause per case. Pass the pattern variables to split on, or the empty list to introduce the clause's remaining arguments. A variable not currently in scope is revealed as a visible pattern rather than split on. The replacement is written to the file, and a reload follows, which issues a new load ID and fresh goal ID assignments, so the goal IDs in this request are no longer valid afterwards. If the call runs out of time after the replacement is written but before the reload finishes, the file on disk has changed without having been checked, and the other tools refuse to work against the earlier load until you call `load` again."
 
   variableDescription :: Text
   variableDescription =

@@ -25,6 +25,7 @@ import AgdaMCP.Tools.CaseSplit qualified as CaseSplit
 import AgdaMCP.Tools.Check qualified as Check
 import AgdaMCP.Tools.Give qualified as Give
 import AgdaMCP.Tools.Goal qualified as Goal
+import AgdaMCP.Tools.Load (LoadRefusal (..))
 import AgdaMCP.Tools.Load qualified as Load
 import AgdaMCP.Tools.LoadId (LoadId (..), LoadIdRefusal (..))
 import Test.Tool.Harness (withFixtureToolSession)
@@ -109,7 +110,8 @@ distributivity warm =
               , Goal.goalRequestGoalId = 0
               , Goal.goalRequestNormalization = Simplified
               }
-        liftIO $ refused @?= Goal.ResponseRefused (StaleLoadId $ LoadId 2)
+        liftIO $
+          refused @?= Goal.ResponseRefused (RefusedLoadId $ StaleLoadId $ LoadId 2)
 
       afterSplit <- do
         (edit, report) <-

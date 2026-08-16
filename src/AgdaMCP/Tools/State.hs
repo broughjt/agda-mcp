@@ -4,11 +4,14 @@ module AgdaMCP.Tools.State (
   newToolState,
   liftInteraction,
   runToolM,
+  withBudget,
 ) where
 
 import Agda.Interaction.Options (CommandLineOptions)
 import Control.Concurrent.MVar (MVar, modifyMVar)
 import Control.Monad.State (StateT (..))
+import Data.Bifunctor (first)
+import System.Timeout (timeout)
 
 import AgdaMCP.Interaction (
   InteractionM,
@@ -52,3 +55,11 @@ liftInteraction action = StateT $ \state -> do
 runToolM :: MVar ToolState -> ToolM a -> IO a
 runToolM stateVariable action =
   modifyMVar stateVariable $ fmap swap . runStateT action
+
+{- | Run an action under a budget, in microseconds, answering @Nothing@ and
+discarding its state change if it runs longer.
+-}
+withBudget :: Int -> ToolM a -> ToolM (Maybe a)
+withBudget budget action = StateT $ \state ->
+  maybe (Nothing, state) (first Just)
+    <$> timeout budget (runStateT action state)

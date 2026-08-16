@@ -2,14 +2,20 @@
 
 module AgdaMCP.Tools.MCP (
   Tool (..),
+  Budget (..),
+  inspectBudget,
+  loadBudget,
+  editBudget,
   textToolHandle,
   parseArguments,
+  parseTimeout,
   parseNormalizationField,
   normalizations,
   renderNormalization,
   loadIdSchema,
   goalIdSchema,
   normalizationSchema,
+  timeoutSchema,
 ) where
 
 import Agda.Interaction.Base (Rewrite (..))
@@ -35,7 +41,8 @@ import MCP.Server (
   toolResult,
  )
 
-import AgdaMCP.Tools.State (ToolM, ToolState, runToolM)
+import AgdaMCP.Tools.Render (renderEditingTimeout, renderReadOnlyTimeout)
+import AgdaMCP.Tools.State (ToolM, ToolState, runToolM, withBudget)
 
 {- | A tool definition together with the handler that runs it. The library
 pairs the two only through the call handler's name dispatch, so we carry them
@@ -46,30 +53,49 @@ data Tool = Tool
   , toolRun :: MVar ToolState -> Map Text Value -> IO (Either Error ToolResult)
   }
 
-{- | Build a tool handler that decodes its arguments, runs the tool, and reports
-the rendered response as text.
+{- | How long a tool's calls may run before the server cancels them, and how to
+report this.
+-}
+data Budget = Budget
+  { budgetDefault :: Int
+  -- ^ Seconds, used by a call that does not supply its own `timeout`.
+  , budgetTimedOut :: Int -> Text
+  -- ^ Reports a call abandoned after the given number of seconds.
+  }
 
-Arguments that fail to decode are reported as a tool result with `isError`
-set rather than as a JSON-RPC error, so the model sees the problem and can
-correct it.
+inspectBudget, loadBudget, editBudget :: Budget
+inspectBudget = Budget 30 renderReadOnlyTimeout
+loadBudget = Budget 60 renderReadOnlyTimeout
+editBudget = Budget 60 renderEditingTimeout
+
+{- | Build a tool handler that decodes its arguments, runs the tool under its
+timeout, and reports the rendered response as text.
+
+Arguments that fail to decode, and calls that run out of time, are reported as
+a tool result with `isError` set rather than as a JSON-RPC error, so the model
+sees the problem and can correct it.
+
+The timeout is handled here rather than by the tool, so it never reaches the
+request types and the tools stay unaware of it.
 -}
 textToolHandle ::
   (FromJSON p) =>
+  Budget ->
   (p -> ToolM q) ->
   (q -> Either Text Text) ->
   (MVar ToolState -> Map Text Value -> IO (Either Error ToolResult))
-textToolHandle handle renderResponse stateVar =
-  either
-    (pure . Right . toolError)
-    ( fmap
-        ( Right
-            . either toolError (toolResult . (: []) . ContentText)
-            . renderResponse
-        )
-        . runToolM stateVar
-        . handle
-    )
-    . parseArguments
+textToolHandle budget handle renderResponse stateVar arguments =
+  fmap Right $
+    case (,) <$> parseArguments arguments <*> parseTimeout budget arguments of
+      Left message -> pure $ toolError message
+      Right (request, seconds) -> do
+        result <-
+          runToolM stateVar $
+            withBudget (seconds * microsecondsPerSecond) (handle request)
+        pure $ maybe (toolError $ budgetTimedOut budget seconds) rendered result
+ where
+  rendered =
+    either toolError (toolResult . (: []) . ContentText) . renderResponse
 
 -- Request parsing helpers
 
@@ -83,6 +109,37 @@ parseArguments =
     . Aeson.parseEither Aeson.parseJSON
     . Aeson.Object
     . KeyMap.fromMapText
+
+{- | The call's timeout in seconds, defaulting to the tool's budget.
+
+The value is clamped so that converting it to the microseconds `withBudget`
+takes cannot overflow, but it is otherwise unbounded.
+-}
+parseTimeout :: Budget -> Map Text Value -> Either Text Int
+parseTimeout budget arguments =
+  case Map.lookup "timeout" arguments of
+    Nothing -> Right $ budgetDefault budget
+    Just value -> maybe (Left timeoutRefusal) Right $ seconds value
+ where
+  seconds :: Value -> Maybe Int
+  seconds value = do
+    -- Aeson's `Integer` refuses a fractional number and refuses an exponent
+    -- large enough to be expensive to expand, both of which we want refused.
+    requested <- either (const Nothing) Just $ Aeson.parseEither parseJSON value
+    if requested > (0 :: Integer)
+      then Just $ fromInteger $ min requested maximumSeconds
+      else Nothing
+
+  maximumSeconds :: Integer
+  maximumSeconds =
+    toInteger (maxBound :: Int) `div` toInteger microsecondsPerSecond
+
+timeoutRefusal :: Text
+timeoutRefusal =
+  "expected timeout to be a whole number of seconds greater than zero"
+
+microsecondsPerSecond :: Int
+microsecondsPerSecond = 1000000
 
 parseNormalization :: Value -> Aeson.Parser Rewrite
 parseNormalization =
@@ -138,6 +195,15 @@ goalIdSchema = describedSchema description SchemaInteger
  where
   description :: Text
   description = "The target goal's interaction ID (the N in `?N`)."
+
+timeoutSchema :: Budget -> Schema
+timeoutSchema budget = describedSchema description SchemaInteger
+ where
+  description :: Text
+  description =
+    "How long this call may run, in seconds, before the server cancels it. Defaults to "
+      <> Text.pack (show $ budgetDefault budget)
+      <> "."
 
 normalizationSchema :: Schema
 normalizationSchema =

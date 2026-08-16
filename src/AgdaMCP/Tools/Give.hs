@@ -59,9 +59,11 @@ import AgdaMCP.Tools.LoadId (
  )
 import AgdaMCP.Tools.MCP (
   Tool (..),
+  editBudget,
   goalIdSchema,
   loadIdSchema,
   textToolHandle,
+  timeoutSchema,
  )
 import AgdaMCP.Tools.Render (
   blocks,
@@ -112,12 +114,13 @@ giveTool =
                             ]
                             ["goal", "expression"]
                   )
+                , ("timeout", timeoutSchema editBudget)
                 ]
                 ["load_id", "gives"]
         )
           { toolDefinitionAnnotations = Just giveAnnotations
           }
-    , toolRun = textToolHandle give renderResponse
+    , toolRun = textToolHandle editBudget give renderResponse
     }
  where
   giveAnnotations :: ToolAnnotations
@@ -131,7 +134,7 @@ giveTool =
 
   giveDescription :: Text
   giveDescription =
-    "Fill open goals in the currently loaded Agda file by writing expressions into them. The batch is all-or-nothing and executed in order. If one item is rejected, the rest are skipped and no edits are written. Before writing, the server checks that the file on disk still matches the source Agda checked, and refuses everything if it changed. Except when the load ID is refused, every outcome is followed by a reload that issues a new load ID and fresh goal ID assignments, so the goal IDs in this request are no longer valid afterwards. What is written may be Agda's rendering of the expression rather than the submitted text, so the response shows what went in. Files are written back as UTF-8 with LF line endings."
+    "Fill open goals in the currently loaded Agda file by writing expressions into them. The batch is all-or-nothing and executed in order. If one item is rejected, the rest are skipped and no edits are written. Before writing, the server checks that the file on disk still matches the source Agda checked, and refuses everything if it changed. Except when the load ID is refused, every outcome is followed by a reload that issues a new load ID and fresh goal ID assignments, so the goal IDs in this request are no longer valid afterwards. What is written may be Agda's rendering of the expression rather than the submitted text, so the response shows what went in. Files are written back as UTF-8 with LF line endings. If the call runs out of time after the edits are written but before the reload finishes, the file on disk has changed without having been checked, and the other tools refuse to work against the earlier load until you call `load` again."
 
   givesDescription :: Text
   givesDescription =
