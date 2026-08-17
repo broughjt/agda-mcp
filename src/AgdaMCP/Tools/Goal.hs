@@ -6,7 +6,6 @@ module AgdaMCP.Tools.Goal (
   Response (..),
   goal,
   renderResponse,
-  renderGoalReport,
 ) where
 
 import Agda.Interaction.Base (Rewrite)
@@ -24,7 +23,7 @@ import MCP.Server (
  )
 
 import AgdaMCP.Interaction (
-  Error (..),
+  Error,
   GoalError (..),
   GoalReport (..),
  )
@@ -50,8 +49,9 @@ import AgdaMCP.Tools.Render (
   blocks,
   indent,
   renderContextEntry,
+  renderAgdaError,
   renderShape,
-  renderWarning,
+  renderUnknownGoal,
   section,
  )
 import AgdaMCP.Tools.State (ToolM, liftInteraction)
@@ -142,15 +142,8 @@ instance FromJSON Request where
 renderResponse :: Response -> Either Text Text
 renderResponse (ResponseRefused refusal) = Left $ renderLoadRefusal refusal
 renderResponse (ResponseUnknownGoal unknownId) =
-  Left $
-    "No goal ?"
-      <> Text.pack (show $ interactionId unknownId)
-      <> " in the current load. Check the goal IDs in the most recent result."
-renderResponse (ResponseFailed e) =
-  Right $
-    blocks $
-      ["Goal query failed:", indent $ errorMessage e]
-        <> section "Warnings:" (map renderWarning $ errorWarnings e)
+  Left $ renderUnknownGoal unknownId
+renderResponse (ResponseFailed e) = Right $ renderAgdaError "Goal query failed:" e
 renderResponse (ResponseOk goalId rewrite report) =
   Right $ renderGoalReport rewrite goalId report
 

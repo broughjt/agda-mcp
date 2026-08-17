@@ -24,8 +24,13 @@ import MCP.Server (
   schema,
  )
 
-import AgdaMCP.Interaction (Error)
-import AgdaMCP.Tools.Load (LoadRefusal)
+import AgdaMCP.Interaction (Error, GoalError (..))
+import AgdaMCP.Interaction.GoalCheck qualified as Interaction.GoalCheck
+import AgdaMCP.Tools.Load (
+  LoadRefusal,
+  renderLoadRefusal,
+  requireCheckedLoad,
+ )
 import AgdaMCP.Tools.LoadId (LoadId)
 import AgdaMCP.Tools.MCP (
   Tool (..),
@@ -37,7 +42,15 @@ import AgdaMCP.Tools.MCP (
   textToolHandle,
   timeoutSchema,
  )
-import AgdaMCP.Tools.State (ToolM)
+import AgdaMCP.Tools.Render (
+  blocks,
+  indent,
+  renderAgdaError,
+  renderGoalId,
+  renderUnknownGoal,
+  section,
+ )
+import AgdaMCP.Tools.State (ToolM, liftInteraction)
 
 checkTool :: Tool
 checkTool =
@@ -72,11 +85,12 @@ checkTool =
 
   checkDescription :: Text
   checkDescription =
-    "Infer the type of an expression and check its elaboration against the type of the goal. Nothing is modified, so use this as a dry run before give. The response reports the goal's type, context, boundary, and constraints, then the inference under \"Have:\" and the elaboration under \"Elaborates to:\". These two queries are independent and answer different questions. Inference does not consult the goal type, so inference can succeed while checking fails. Both are reported whichever way they land, and a failure in either is a normal result rather than a tool error. The expression is parsed and checked in the goal's scope, so its errors carry positions relative to the expression, not the file. Types are rendered at the requested normalization. To just inspect the goal, use goal instead."
+    "Check an expression against the type of an open goal. Nothing is modified, so use this as a dry run before give. The response states whether the expression checks, and on success reports what it elaborates to. A failure is a normal result rather than a tool error; when it fails, use infer to see the expression's inferred type. The expression is parsed and checked in the goal's scope, so its errors carry positions relative to the expression, not the file. Types are rendered at the requested normalization. Several read-only calls may use the same load ID at the same time. To just inspect the goal, use goal instead."
+  -- TODO: "Several read-only calls may use the same load ID at the same time.
 
   expressionDescription :: Text
   expressionDescription =
-    "The Agda expression to infer the type of and to check against the goal."
+    "The Agda expression to check against the goal."
 
 data Request = Request
   { checkRequestLoadId :: LoadId
@@ -97,7 +111,23 @@ data Response
 -- Business logic
 
 check :: Request -> ToolM Response
-check _ = error "not implemented"
+check (Request loadId goalId normalization expression) =
+  requireCheckedLoad loadId >>= either (pure . ResponseRefused) (const query)
+ where
+  query :: ToolM Response
+  query = do
+    response <-
+      liftInteraction $
+        Interaction.GoalCheck.goalCheck
+          Interaction.GoalCheck.Request
+            { Interaction.GoalCheck.requestNormalization = normalization
+            , Interaction.GoalCheck.requestGoalId = goalId
+            , Interaction.GoalCheck.requestExpression = expression
+            }
+    pure $ case response of
+      Left (GoalUnknownId unknownId) -> ResponseUnknownGoal unknownId
+      Left (GoalFailed e) -> ResponseFailed goalId e
+      Right (_, elaborated) -> ResponseOk goalId elaborated
 
 -- Request parsing
 
@@ -121,5 +151,16 @@ parseExpression = Aeson.withText "expression" $ \text ->
 -- Response rendering
 
 renderResponse :: Response -> Either Text Text
-renderResponse _ =
-  error "not implemented"
+renderResponse (ResponseRefused refusal) = Left $ renderLoadRefusal refusal
+renderResponse (ResponseUnknownGoal unknownId) =
+  Left $ renderUnknownGoal unknownId
+renderResponse (ResponseFailed goalId e) =
+  Right $
+    renderAgdaError
+      ("The expression does not check at " <> renderGoalId goalId <> ":")
+      e
+renderResponse (ResponseOk goalId elaborated) =
+  Right $
+    blocks $
+      ["The expression checks at " <> renderGoalId goalId <> "."]
+        <> section "Elaborates to:" [indent elaborated]

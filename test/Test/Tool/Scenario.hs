@@ -203,9 +203,6 @@ distributivity warm =
               , Check.checkRequestExpression = wrongStep
               }
         liftIO $ case response of
-          -- TODO: Revisit this behavior during implementation
-          -- Check parses at `noRange`, so its positions are the
-          -- expression's own rather than the file's.
           Check.ResponseFailed goalId e -> do
             goalId @?= 1
             errorShouldBe

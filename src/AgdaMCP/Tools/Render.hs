@@ -5,6 +5,9 @@ module AgdaMCP.Tools.Render (
   renderShape,
   renderContextEntry,
   renderWarning,
+  renderGoalId,
+  renderUnknownGoal,
+  renderAgdaError,
   renderFileChanged,
   renderSourceUnreadable,
   renderWriteFailed,
@@ -16,6 +19,7 @@ module AgdaMCP.Tools.Render (
   indent,
 ) where
 
+import Agda.Syntax.Common (InteractionId (..))
 import Control.Monad (guard)
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
@@ -23,6 +27,7 @@ import Data.Text qualified as Text
 
 import AgdaMCP.Interaction (
   ContextEntry (..),
+  Error (..),
   GoalShape (..),
   Position (..),
   Span (..),
@@ -87,6 +92,22 @@ renderWarning (Warning (_, message)) =
   -- The structural location beside the message is not rendered. The message
   -- embeds its own location, so printing both would print it twice.
   indent message
+
+renderGoalId :: InteractionId -> Text
+renderGoalId goalId = "?" <> Text.pack (show $ interactionId goalId)
+
+renderUnknownGoal :: InteractionId -> Text
+renderUnknownGoal unknownId =
+  "No goal "
+    <> renderGoalId unknownId
+    <> " in the current load. Check the goal IDs in the most recent result."
+
+-- | A headline, the error message, and the warnings raised on the way.
+renderAgdaError :: Text -> Error -> Text
+renderAgdaError headline e =
+  blocks $
+    [headline, indent $ errorMessage e]
+      <> section "Warnings:" (map renderWarning $ errorWarnings e)
 
 renderFileChanged :: Text
 renderFileChanged =
