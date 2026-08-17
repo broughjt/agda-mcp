@@ -48,8 +48,8 @@ import AgdaMCP.Tools.MCP (
 import AgdaMCP.Tools.Render (
   blocks,
   indent,
-  renderContextEntry,
   renderAgdaError,
+  renderContextEntry,
   renderShape,
   renderUnknownGoal,
   section,
@@ -85,7 +85,7 @@ goalTool =
 
   goalDescription :: Text
   goalDescription =
-    "Inspect an open goal in the currently loaded Agda file without modifying anything. Reports the goal's type, its local context, its cubical boundary when the goal has one, and any unsolved constraints mentioning the goal. Types are rendered at the requested normalization. To try an expression at a goal, use check instead."
+    "Inspect an open goal in the currently loaded Agda file without modifying anything. Reports the goal's type, its local context, its cubical boundary when the goal has one, and any unsolved constraints mentioning the goal. Types are rendered at the requested normalization. To try an expression at a goal, use check or infer instead."
 
 data Request = Request
   { goalRequestLoadId :: LoadId

@@ -85,7 +85,7 @@ checkTool =
 
   checkDescription :: Text
   checkDescription =
-    "Check an expression against the type of an open goal. Nothing is modified, so use this as a dry run before give. The response states whether the expression checks, and on success reports what it elaborates to. A failure is a normal result rather than a tool error; when it fails, use infer to see the expression's inferred type. The expression is parsed and checked in the goal's scope, so its errors carry positions relative to the expression, not the file. Types are rendered at the requested normalization. Several read-only calls may use the same load ID at the same time. To just inspect the goal, use goal instead."
+    "Check an expression against the type of an open goal. Nothing is modified, so use this as a dry run before give. The response states whether the expression checks, and on success reports what it elaborates to. A failure is a normal result rather than a tool error. When the expression does not check, use infer to see its inferred type. The expression is parsed and checked in the goal's scope, so its errors carry positions relative to the expression, not the file. Types are rendered at the requested normalization. Several read-only calls may use the same load ID at the same time. To just inspect the goal, use goal instead."
   -- TODO: Several read-only calls may use the same load ID at the same time.
 
   expressionDescription :: Text

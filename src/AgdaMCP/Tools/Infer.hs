@@ -87,7 +87,7 @@ inferTool =
 
   inferDescription :: Text
   inferDescription =
-    "Infer the type of an expression in the scope of an open goal, reported under \"have at ?n:\". Nothing is modified. Inference does not consult the goal's type, so it can succeed where check fails on the same expression. The expression is parsed and inferred in the goal's scope, so its errors carry positions relative to the expression, not the file. Types are rendered at the requested normalization. Several read-only calls may use the same load ID at the same time. To just inspect the goal, use goal instead."
+    "Infer the type of an expression in the scope of an open goal, reported under \"Have at ?n:\". Nothing is modified. Inference does not consult the goal's type, so it can succeed where check fails on the same expression. The expression is parsed and its type inferred in the goal's scope, so its errors carry positions relative to the expression, not the file. Types are rendered at the requested normalization. Several read-only calls may use the same load ID at the same time. To just inspect the goal, use goal instead."
 
   expressionDescription :: Text
   expressionDescription = "The Agda expression to infer the type of."
