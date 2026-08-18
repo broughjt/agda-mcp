@@ -50,6 +50,7 @@ import AgdaMCP.Tools.Render (
   indent,
   renderAgdaError,
   renderContextEntry,
+  renderGoalId,
   renderShape,
   renderUnknownGoal,
   section,
@@ -160,8 +161,4 @@ renderGoalReport rewrite goalId report =
       <> section "Constraints:" (map indent $ goalReportConstraints report)
  where
   header =
-    "?"
-      <> Text.pack (show $ interactionId goalId)
-      <> " ("
-      <> renderNormalization rewrite
-      <> ")"
+    renderGoalId goalId <> " (" <> renderNormalization rewrite <> ")"

@@ -69,6 +69,7 @@ import AgdaMCP.Tools.Render (
   blocks,
   indent,
   renderFileChanged,
+  renderGoalId,
   renderSourceUnreadable,
   renderWarning,
   renderWriteFailed,
@@ -396,10 +397,7 @@ renderOutcome (OutcomeWriteFailed message) = renderWriteFailed message
 renderEdit :: Edit -> Text
 renderEdit edit =
   indent $
-    "?"
-      <> Text.pack (show $ interactionId $ editGoalId edit)
-      <> " = "
-      <> editText edit
+    renderGoalId (editGoalId edit) <> " = " <> editText edit
 
 renderRefusal :: Refusal -> Text
 renderRefusal refusal =
@@ -408,8 +406,8 @@ renderRefusal refusal =
       <> section "Warnings:" warnings
  where
   header =
-    "Rejected at ?"
-      <> Text.pack (show $ interactionId $ refusalGoalId refusal)
+    "Rejected at "
+      <> renderGoalId (refusalGoalId refusal)
       <> renderBatchPosition (refusalPosition refusal)
       <> ". No edits were written."
   (reason, warnings) = case refusalReason refusal of

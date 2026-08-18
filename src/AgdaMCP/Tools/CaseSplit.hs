@@ -60,6 +60,7 @@ import AgdaMCP.Tools.Render (
   blocks,
   indent,
   renderFileChanged,
+  renderGoalId,
   renderSourceUnreadable,
   renderWarning,
   renderWriteFailed,
@@ -325,6 +326,3 @@ whereCollapsed =
 countClauses :: Int -> Text
 countClauses 1 = "1 clause"
 countClauses n = Text.pack (show n) <> " clauses"
-
-renderGoalId :: InteractionId -> Text
-renderGoalId goalId = "?" <> Text.pack (show $ interactionId goalId)

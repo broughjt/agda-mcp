@@ -102,7 +102,6 @@ renderUnknownGoal unknownId =
     <> renderGoalId unknownId
     <> " in the current load. Check the goal IDs in the most recent result."
 
--- | A headline, the error message, and the warnings raised on the way.
 renderAgdaError :: Text -> Error -> Text
 renderAgdaError headline e =
   blocks $

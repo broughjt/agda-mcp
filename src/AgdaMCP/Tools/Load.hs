@@ -14,7 +14,7 @@ module AgdaMCP.Tools.Load (
 ) where
 
 import Agda.Interaction.Base (Rewrite (..))
-import Agda.Syntax.Common (InteractionId (..))
+import Agda.Syntax.Common (InteractionId)
 import Control.Exception (Exception, throwIO)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (gets, modify)
@@ -62,6 +62,7 @@ import AgdaMCP.Tools.Render (
   blocks,
   indent,
   renderContextEntry,
+  renderGoalId,
   renderShape,
   renderSourceRefusal,
   renderSpan,
@@ -284,7 +285,7 @@ countGoals n = Text.pack (show n) <> " goals"
 renderGoal :: Goal -> [ContextEntry] -> Text
 renderGoal goal entries =
   Text.intercalate "\n" $
-    ("?" <> Text.pack (show $ interactionId $ goalId goal))
+    renderGoalId (goalId goal)
       <> " at "
       <> renderSpan (goalSpan goal)
       -- We reverse context entries so they are listed innermost-first.

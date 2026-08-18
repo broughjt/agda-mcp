@@ -203,6 +203,8 @@ distributivity warm =
               , Check.checkRequestExpression = wrongStep
               }
         liftIO $ case response of
+          -- Check parses at `noRange`, so its positions are the expression's
+          -- rather than the file's.
           Check.ResponseFailed goalId e -> do
             goalId @?= 1
             errorShouldBe
