@@ -68,6 +68,7 @@ library
       mcp-server >= 0.2 && < 0.3,
       mtl,
       optparse-applicative,
+      random,
       text
   default-language: GHC2021
   ghc-options:
@@ -91,6 +92,7 @@ test-suite agda-mcp-test
     Test.Tool.Infer
     Test.Tool.Interruption
     Test.Tool.Load
+    Test.Tool.LoadId
     Test.Tool.Scenario
     Test.Tool.Source
   build-depends:

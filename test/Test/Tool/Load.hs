@@ -25,9 +25,9 @@ import AgdaMCP.Tools.Load (
   Response (..),
   renderResponse,
  )
-import AgdaMCP.Tools.LoadId (LoadId (..))
 import AgdaMCP.Tools.MCP (parseArguments)
 import Test.Corpus qualified as Corpus
+import Test.Tool.Harness (loadId)
 
 tests :: TestTree
 tests =
@@ -64,7 +64,7 @@ renderResponseTests =
         renderResponse (ResponseOk report)
           @?= rendered
             [ "Load succeeded: no goals"
-            , "Load ID: L17"
+            , "Load ID: L17-k7x2"
             , "File: /tmp/Example.agda"
             ]
     , testCase "a single open goal is counted in the singular" $
@@ -85,7 +85,7 @@ renderResponseTests =
           )
           @?= rendered
             [ "Load succeeded: 1 goal"
-            , "Load ID: L17"
+            , "Load ID: L17-k7x2"
             , "File: /tmp/Example.agda"
             , ""
             , "?0 at 14:16-17"
@@ -117,7 +117,7 @@ renderResponseTests =
           )
           @?= rendered
             [ "Load succeeded: 2 goals"
-            , "Load ID: L17"
+            , "Load ID: L17-k7x2"
             , "File: /tmp/Example.agda"
             , ""
             , "?0 at 14:16-17"
@@ -146,7 +146,7 @@ renderResponseTests =
           )
           @?= rendered
             [ "Load succeeded: 1 goal"
-            , "Load ID: L17"
+            , "Load ID: L17-k7x2"
             , "File: /tmp/Example.agda"
             , ""
             , "?0 at 14:16-17"
@@ -181,7 +181,7 @@ renderResponseTests =
           )
           @?= rendered
             [ "Load succeeded: 2 goals"
-            , "Load ID: L17"
+            , "Load ID: L17-k7x2"
             , "File: /tmp/Example.agda"
             , ""
             , "?1 at 5:10-11"
@@ -208,7 +208,7 @@ renderResponseTests =
           )
           @?= rendered
             [ "Load succeeded: 1 goal"
-            , "Load ID: L17"
+            , "Load ID: L17-k7x2"
             , "File: /tmp/Example.agda"
             , ""
             , "?0 at 14:16-16:4"
@@ -232,7 +232,7 @@ renderResponseTests =
           )
           @?= rendered
             [ "Load succeeded: 1 goal"
-            , "Load ID: L17"
+            , "Load ID: L17-k7x2"
             , "File: /tmp/Example.agda"
             , ""
             , "?0 at 3:8-9"
@@ -256,7 +256,7 @@ renderResponseTests =
           )
           @?= rendered
             [ "Load succeeded: 1 goal"
-            , "Load ID: L17"
+            , "Load ID: L17-k7x2"
             , "File: /tmp/Example.agda"
             , ""
             , "?0 at 30:8-13"
@@ -281,7 +281,7 @@ renderResponseTests =
           )
           @?= rendered
             [ "Load succeeded: 1 goal"
-            , "Load ID: L17"
+            , "Load ID: L17-k7x2"
             , "File: /tmp/Example.agda"
             , ""
             , "?0 at 14:16-17"
@@ -311,7 +311,7 @@ renderResponseTests =
           )
           @?= rendered
             [ "Load succeeded: 1 goal"
-            , "Load ID: L17"
+            , "Load ID: L17-k7x2"
             , "File: /tmp/Example.agda"
             , ""
             , "?0 at 14:16-17"
@@ -341,7 +341,7 @@ renderResponseTests =
           )
           @?= rendered
             [ "Load succeeded: 1 goal"
-            , "Load ID: L17"
+            , "Load ID: L17-k7x2"
             , "File: /tmp/Example.agda"
             , ""
             , "?0 at 14:16-17"
@@ -376,7 +376,7 @@ renderResponseTests =
           )
           @?= rendered
             [ "Load succeeded: 1 goal"
-            , "Load ID: L17"
+            , "Load ID: L17-k7x2"
             , "File: /tmp/Example.agda"
             , ""
             , "?0 at 14:16-17"
@@ -407,7 +407,7 @@ renderResponseTests =
           )
           @?= rendered
             [ "Load succeeded: 1 goal"
-            , "Load ID: L17"
+            , "Load ID: L17-k7x2"
             , "File: /tmp/Example.agda"
             , ""
             , "?0 at 14:16-17"
@@ -440,7 +440,7 @@ renderResponseTests =
           )
           @?= rendered
             [ "Load succeeded: 1 goal"
-            , "Load ID: L17"
+            , "Load ID: L17-k7x2"
             , "File: /tmp/Example.agda"
             , ""
             , "?0 at 14:16-17"
@@ -479,7 +479,7 @@ renderResponseTests =
           )
           @?= rendered
             [ "Load succeeded: 1 goal"
-            , "Load ID: L17"
+            , "Load ID: L17-k7x2"
             , "File: /tmp/Example.agda"
             , ""
             , "?0 at 14:16-17"
@@ -506,7 +506,7 @@ renderResponseTests =
           )
           @?= rendered
             [ "Load succeeded: 1 goal"
-            , "Load ID: L17"
+            , "Load ID: L17-k7x2"
             , "File: /tmp/Example.agda"
             , ""
             , "?0 at 14:16-17"
@@ -535,7 +535,7 @@ renderResponseTests =
           )
           @?= rendered
             [ "Load succeeded: no goals"
-            , "Load ID: L17"
+            , "Load ID: L17-k7x2"
             , "File: /tmp/Example.agda"
             , ""
             , "Unsolved metavariables:"
@@ -553,7 +553,7 @@ renderResponseTests =
           )
           @?= rendered
             [ "Load succeeded: no goals"
-            , "Load ID: L17"
+            , "Load ID: L17-k7x2"
             , "File: /fixture/Warnings.agda"
             , ""
             , "Warnings:"
@@ -583,7 +583,7 @@ renderResponseTests =
           )
           @?= rendered
             [ "Load succeeded: no goals"
-            , "Load ID: L17"
+            , "Load ID: L17-k7x2"
             , "File: /tmp/Example.agda"
             , ""
             , "Warnings:"
@@ -602,7 +602,7 @@ renderResponseTests =
           )
           @?= rendered
             [ "Load succeeded with errors: 1 goal"
-            , "Load ID: L17"
+            , "Load ID: L17-k7x2"
             , "File: /fixture/Constrained.agda"
             , ""
             , "?0 at 12:17-18"
@@ -623,7 +623,7 @@ renderResponseTests =
           )
           @?= rendered
             [ "Load succeeded with errors: no goals"
-            , "Load ID: L17"
+            , "Load ID: L17-k7x2"
             , "File: /fixture/SafePostulate.agda"
             , ""
             , "Non-fatal errors:"
@@ -650,7 +650,7 @@ renderResponseTests =
           )
           @?= rendered
             [ "Load succeeded with errors: no goals"
-            , "Load ID: L17"
+            , "Load ID: L17-k7x2"
             , "File: /tmp/Example.agda"
             , ""
             , "Non-fatal errors:"
@@ -694,7 +694,7 @@ renderResponseTests =
           )
           @?= rendered
             [ "Load succeeded with errors: 1 goal"
-            , "Load ID: L17"
+            , "Load ID: L17-k7x2"
             , "File: /tmp/Example.agda"
             , ""
             , "?0 at 14:16-17"
@@ -747,7 +747,7 @@ rendered = Text.intercalate "\n"
 report :: LoadReport
 report =
   LoadReport
-    { loadReportId = LoadId 17
+    { loadReportId = loadId 17
     , loadReportPath = "/tmp/Example.agda"
     , loadReportGoals = []
     , loadReportHiddenMetavariables = []

@@ -206,11 +206,12 @@ renderLoadRefusal (RefusedSource refusal) = renderSourceRefusal refusal
 
 issueLoadId :: Interaction.Load.LoadedFile -> ToolM LoadId
 issueLoadId file = do
-  issued <- gets $ (1 +) . loadsIssued . toolLoadGeneration
+  generation <- gets toolLoadGeneration
+  let issued = 1 + loadsIssued generation
   modify $ \state ->
     state
       { toolLoadGeneration =
-          LoadGeneration
+          generation
             { loadsIssued = issued
             , currentLoad =
                 Just
@@ -221,7 +222,7 @@ issueLoadId file = do
                     }
             }
       }
-  pure $ LoadId issued
+  pure $ LoadId (sessionNonce generation) issued
 
 clearCurrentLoad :: ToolM ()
 clearCurrentLoad = modify $ \state ->

@@ -1,4 +1,8 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Test.Tool.Harness (
+  fixtureNonce,
+  loadId,
   withFixtureToolSession,
   withFixtureToolSessions,
   withFixtureToolState,
@@ -6,11 +10,26 @@ module Test.Tool.Harness (
 
 import Agda.TypeChecking.Monad (TCState)
 import Control.Monad.State (runStateT)
+import Numeric.Natural (Natural)
 import System.FilePath (takeFileName, (</>))
 
-import AgdaMCP.Tools.LoadId (LoadGeneration (..))
+import AgdaMCP.Tools.LoadId (
+  LoadGeneration (..),
+  LoadId (..),
+  SessionNonce (..),
+ )
 import AgdaMCP.Tools.State (ToolM, ToolState (..))
 import Test.Harness (warmedSession, withStagedFiles)
+
+{- | Fix a single session nonce so that tests can pin rendered load ids
+literally.
+-}
+fixtureNonce :: SessionNonce
+fixtureNonce = SessionNonce "k7x2"
+
+-- | A load id from the fixture session.
+loadId :: Natural -> LoadId
+loadId = LoadId fixtureNonce
 
 withFixtureToolSession ::
   IO TCState -> FilePath -> (FilePath -> ToolM a) -> IO a
@@ -36,5 +55,9 @@ withFixtureToolState warm sources k =
       ToolState
         { toolInteractionState = interactionState
         , toolLoadGeneration =
-            LoadGeneration {loadsIssued = 0, currentLoad = Nothing}
+            LoadGeneration
+              { sessionNonce = fixtureNonce
+              , loadsIssued = 0
+              , currentLoad = Nothing
+              }
         }

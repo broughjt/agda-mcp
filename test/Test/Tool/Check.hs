@@ -14,7 +14,7 @@ import Data.Text.IO qualified as Text.IO
 import System.Directory (removeFile)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
-import Test.Tool.Harness (withFixtureToolSession)
+import Test.Tool.Harness (loadId, withFixtureToolSession)
 
 import AgdaMCP.Interaction (Error (..), Warning (..))
 import AgdaMCP.Tools.Check (
@@ -25,7 +25,7 @@ import AgdaMCP.Tools.Check (
 import AgdaMCP.Tools.Check qualified as Check
 import AgdaMCP.Tools.Load (LoadRefusal (..))
 import AgdaMCP.Tools.Load qualified as Load
-import AgdaMCP.Tools.LoadId (LoadId (..), LoadIdRefusal (..))
+import AgdaMCP.Tools.LoadId (LoadId, LoadIdRefusal (..))
 import AgdaMCP.Tools.MCP (parseArguments)
 import AgdaMCP.Tools.Source (SourceRefusal (..))
 
@@ -45,7 +45,7 @@ parseArgumentsTests =
     [ testCase "a call without an expression is refused" $
         parseRequest
           ( Map.fromList
-              [ ("load_id", Aeson.String "L1")
+              [ ("load_id", Aeson.String "L1-k7x2")
               , ("goal", Aeson.Number 0)
               ]
           )
@@ -62,24 +62,24 @@ parseArgumentsTests =
             \goal, but got \"  \""
     , testCase "normalization defaults to simplified" $
         parseRequest (arguments "suc zero")
-          @?= Right (Request (LoadId 1) 0 Simplified "suc zero")
+          @?= Right (Request (loadId 1) 0 Simplified "suc zero")
     , testCase "all four arguments parse" $
         parseRequest
           ( Map.fromList
-              [ ("load_id", Aeson.String "L3")
+              [ ("load_id", Aeson.String "L3-k7x2")
               , ("goal", Aeson.Number 2)
               , ("normalization", Aeson.String "normalized")
               , ("expression", Aeson.String "suc zero")
               ]
           )
-          @?= Right (Request (LoadId 3) 2 Normalised "suc zero")
+          @?= Right (Request (loadId 3) 2 Normalised "suc zero")
     ]
  where
   parseRequest :: Map.Map Text Aeson.Value -> Either Text Request
   parseRequest = parseArguments
   arguments expression =
     Map.fromList
-      [ ("load_id", Aeson.String "L1")
+      [ ("load_id", Aeson.String "L1-k7x2")
       , ("goal", Aeson.Number 0)
       , ("expression", Aeson.String expression)
       ]
@@ -95,10 +95,10 @@ renderResponseTests =
             \most recent load failed. Load the file, then use the load ID and \
             \goal IDs from that load result."
     , testCase "a stale load_id names the current load" $
-        renderResponse (ResponseRefused $ RefusedLoadId $ StaleLoadId $ LoadId 2)
+        renderResponse (ResponseRefused $ RefusedLoadId $ StaleLoadId $ loadId 2)
           @?= Left
             "The supplied load ID is from an earlier load. The current load ID \
-            \is L2. Each load makes fresh goal ID assignments, so use the most \
+            \is L2-k7x2. Each load makes fresh goal ID assignments, so use the most \
             \recently issued load ID and goal IDs. If you no longer have them, \
             \load the file again."
     , testCase "a file that changed on disk says to load it again" $
@@ -196,14 +196,14 @@ sessionTests warm =
           _ <-
             Load.load Load.Request {Load.loadRequestPath = path}
               >>= liftIO . expectLoadOk "load"
-          response <- Check.check (checkRequest (LoadId 1) 5 "suc (")
+          response <- Check.check (checkRequest (loadId 1) 5 "suc (")
           liftIO $ response @?= ResponseUnknownGoal 5
     , testCase "a parse error is a failure carrying expression-relative positions" $
         withFixtureToolSession warm "test/fixtures/InferCheck.agda" $ \path -> do
           _ <-
             Load.load Load.Request {Load.loadRequestPath = path}
               >>= liftIO . expectLoadOk "load"
-          response <- Check.check (checkRequest (LoadId 1) 0 "suc (")
+          response <- Check.check (checkRequest (loadId 1) 0 "suc (")
           liftIO $ case response of
             ResponseFailed goalId e -> do
               goalId @?= 0
@@ -216,7 +216,7 @@ sessionTests warm =
           _ <-
             Load.load Load.Request {Load.loadRequestPath = path}
               >>= liftIO . expectLoadOk "load"
-          response <- Check.check (checkRequest (LoadId 1) 0 "tt")
+          response <- Check.check (checkRequest (loadId 1) 0 "tt")
           liftIO $ case response of
             ResponseFailed goalId e -> do
               goalId @?= 0
@@ -229,7 +229,7 @@ sessionTests warm =
           _ <-
             Load.load Load.Request {Load.loadRequestPath = path}
               >>= liftIO . expectLoadOk "load"
-          response <- Check.check (checkRequest (LoadId 1) 0 "p i")
+          response <- Check.check (checkRequest (loadId 1) 0 "p i")
           liftIO $ response @?= ResponseOk 0 "p i"
     , testCase "a file edited behind the session is refused until reloaded" $
         withFixtureToolSession warm "test/fixtures/InferCheck.agda" $ \path -> do
@@ -237,13 +237,13 @@ sessionTests warm =
             Load.load Load.Request {Load.loadRequestPath = path}
               >>= liftIO . expectLoadOk "the first load"
           liftIO $ Text.IO.appendFile path "\n-- edited in another window\n"
-          refused <- Check.check (checkRequest (LoadId 1) 0 "zero")
+          refused <- Check.check (checkRequest (loadId 1) 0 "zero")
           liftIO $ refused @?= ResponseRefused (RefusedSource RefusalChanged)
           reloaded <-
             Load.load Load.Request {Load.loadRequestPath = path}
               >>= liftIO . expectLoadOk "the reload"
-          liftIO $ Load.loadReportId reloaded @?= LoadId 2
-          answered <- Check.check (checkRequest (LoadId 2) 0 "zero")
+          liftIO $ Load.loadReportId reloaded @?= loadId 2
+          answered <- Check.check (checkRequest (loadId 2) 0 "zero")
           liftIO $ answered @?= ResponseOk 0 "zero"
     , testCase "a file that has gone missing is refused" $
         withFixtureToolSession warm "test/fixtures/InferCheck.agda" $ \path -> do
@@ -251,7 +251,7 @@ sessionTests warm =
             Load.load Load.Request {Load.loadRequestPath = path}
               >>= liftIO . expectLoadOk "load"
           liftIO $ removeFile path
-          refused <- Check.check (checkRequest (LoadId 1) 0 "zero")
+          refused <- Check.check (checkRequest (loadId 1) 0 "zero")
           liftIO $ case refused of
             ResponseRefused (RefusedSource (RefusalUnreadable _)) -> pure ()
             other ->
@@ -265,9 +265,9 @@ rendered :: [Text] -> Text
 rendered = Text.intercalate "\n"
 
 checkRequest :: LoadId -> InteractionId -> Text -> Request
-checkRequest loadId goalId expression =
+checkRequest submitted goalId expression =
   Request
-    { checkRequestLoadId = loadId
+    { checkRequestLoadId = submitted
     , checkRequestGoalId = goalId
     , checkRequestNormalization = Simplified
     , checkRequestExpression = expression

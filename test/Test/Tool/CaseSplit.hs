@@ -20,7 +20,7 @@ import Test.Tasty.HUnit (
   testCase,
   (@?=),
  )
-import Test.Tool.Harness (withFixtureToolSession)
+import Test.Tool.Harness (loadId, withFixtureToolSession)
 
 import AgdaMCP.Interaction (
   Error (..),
@@ -43,7 +43,7 @@ import AgdaMCP.Tools.CaseSplit (
   renderResponse,
  )
 import AgdaMCP.Tools.Load qualified as Load
-import AgdaMCP.Tools.LoadId (LoadId (..), LoadIdRefusal (..))
+import AgdaMCP.Tools.LoadId (LoadId, LoadIdRefusal (..))
 import AgdaMCP.Tools.MCP (parseArguments)
 import AgdaMCP.Tools.State (ToolM)
 
@@ -65,7 +65,7 @@ parseArgumentsTests =
     [ testCase "variables must be supplied, since silence would introduce" $
         parseRequest
           ( Map.fromList
-              [("load_id", Aeson.String "L1"), ("goal", Aeson.Number 0)]
+              [("load_id", Aeson.String "L1-k7x2"), ("goal", Aeson.Number 0)]
           )
           @?= Left "Error in $: key \"variables\" not found"
     , testCase "variables must be an array" $
@@ -107,13 +107,13 @@ parseArgumentsTests =
             \than as a variable"
     , testCase "a plain name is accepted" $
         parseRequest (arguments ["n"])
-          @?= Right (Request (LoadId 1) 0 ["n"])
+          @?= Right (Request (loadId 1) 0 ["n"])
     , testCase "several names are accepted in order" $
         parseRequest (arguments ["x", "y"])
-          @?= Right (Request (LoadId 1) 0 ["x", "y"])
+          @?= Right (Request (loadId 1) 0 ["x", "y"])
     , testCase "an empty list is accepted, and selects introduction" $
         parseRequest (arguments [])
-          @?= Right (Request (LoadId 1) 0 [])
+          @?= Right (Request (loadId 1) 0 [])
     ]
  where
   parseRequest :: Map.Map Text Aeson.Value -> Either Text Request
@@ -125,7 +125,7 @@ parseArgumentsTests =
   argumentsValue :: Aeson.Value -> Map.Map Text Aeson.Value
   argumentsValue variables =
     Map.fromList
-      [ ("load_id", Aeson.String "L1")
+      [ ("load_id", Aeson.String "L1-k7x2")
       , ("goal", Aeson.Number 0)
       , ("variables", variables)
       ]
@@ -183,10 +183,10 @@ renderResponseTests =
             \most recent load failed. Load the file, then use the load ID and \
             \goal IDs from that load result."
     , testCase "a stale load_id names the current load" $
-        renderResponse (ResponseRefused $ StaleLoadId $ LoadId 2)
+        renderResponse (ResponseRefused $ StaleLoadId $ loadId 2)
           @?= Left
             "The supplied load ID is from an earlier load. The current load ID \
-            \is L2. Each load makes fresh goal ID assignments, so use the most \
+            \is L2-k7x2. Each load makes fresh goal ID assignments, so use the most \
             \recently issued load ID and goal IDs. If you no longer have them, \
             \load the file again."
     , testCase "a split reports the clauses it wrote" $
@@ -354,7 +354,7 @@ renderResponseTests =
                 , "  *-distribʳ-+ x (suc y) z = ?"
                 , ""
                 , "Load succeeded: 1 goal"
-                , "Load ID: L5"
+                , "Load ID: L5-k7x2"
                 , "File: /tmp/Example.agda"
                 , ""
                 , "?0 at 14:16-17"
@@ -398,9 +398,9 @@ sessionTests warm =
     "sessions"
     [ testCase "an extended lambda is spliced inside its braces" $
         withFixtureToolSession warm "test/fixtures/BraceLambdaSplit.agda" $ \path -> do
-          void $ expectLoaded (LoadId 1) path
+          void $ expectLoaded (loadId 1) path
           (outcome, resync) <-
-            caseSplit (Request (LoadId 1) 0 ["n"])
+            caseSplit (Request (loadId 1) 0 ["n"])
               >>= liftIO . expectCompleted 0 "a split inside a brace lambda"
           report <- liftIO $ expectLoadOk "the resync" resync
           liftIO $ do
@@ -410,15 +410,15 @@ sessionTests warm =
             editClauses edit @?= ["zero → ?", "(suc n) → ?"]
             editCollapsesWhere edit @?= False
             contentsShouldBe path braceLambdaSplit
-            Load.loadReportId report @?= LoadId 2
+            Load.loadReportId report @?= loadId 2
             goalShapes report @?= replicate 2 (GoalOfType "ℕ")
     , -- " ; " also parses here, so the layout is a choice rather than a
       -- requirement; it is Emacs's, and it is what this pins.
       testCase "a lambda-where block is spliced one clause per line" $
         withFixtureToolSession warm "test/fixtures/LambdaWhereSplit.agda" $ \path -> do
-          void $ expectLoaded (LoadId 1) path
+          void $ expectLoaded (loadId 1) path
           (outcome, resync) <-
-            caseSplit (Request (LoadId 1) 0 ["n"])
+            caseSplit (Request (loadId 1) 0 ["n"])
               >>= liftIO . expectCompleted 0 "a split inside a lambda-where"
           report <- liftIO $ expectLoadOk "the resync" resync
           liftIO $ do
@@ -427,13 +427,13 @@ sessionTests warm =
             editLayout edit @?= OnePerLine
             editClauses edit @?= ["zero → ?", "(suc n) → ?"]
             contentsShouldBe path lambdaWhereSplit
-            Load.loadReportId report @?= LoadId 2
+            Load.loadReportId report @?= loadId 2
             goalShapes report @?= replicate 2 (GoalOfType "ℕ")
     , testCase "splitting a clause with a where block breaks the file" $
         withFixtureToolSession warm "test/fixtures/WhereCollapse.agda" $ \path -> do
-          void $ expectLoaded (LoadId 1) path
+          void $ expectLoaded (loadId 1) path
           (outcome, resync) <-
-            caseSplit (Request (LoadId 1) 0 ["n"])
+            caseSplit (Request (loadId 1) 0 ["n"])
               >>= liftIO . expectCompleted 0 "a split over a where block"
           liftIO $ do
             edit <- expectApplied outcome
@@ -452,35 +452,35 @@ sessionTests warm =
               other -> assertFailure $ "expected a failed reload, got " <> show other
     , testCase "a file edited on disk since the load is refused unwritten" $
         withFixtureToolSession warm "test/fixtures/MakeCase.agda" $ \path -> do
-          void $ expectLoaded (LoadId 1) path
+          void $ expectLoaded (loadId 1) path
           liftIO $ Text.IO.appendFile path onDiskEdit
           contents <- liftIO $ Text.IO.readFile path
           (outcome, resync) <-
-            caseSplit (Request (LoadId 1) 0 ["n"])
+            caseSplit (Request (loadId 1) 0 ["n"])
               >>= liftIO . expectCompleted 0 "a split against an edited file"
           report <- liftIO $ expectLoadOk "the resync" resync
           liftIO $ do
             outcome @?= OutcomeFileChanged
             contentsShouldBe path contents
-            Load.loadReportId report @?= LoadId 2
+            Load.loadReportId report @?= loadId 2
     , testCase "a goal id that is not in the load is reloaded and issues the next id" $
         withFixtureToolSession warm "test/fixtures/MakeCase.agda" $ \path -> do
-          void $ expectLoaded (LoadId 1) path
+          void $ expectLoaded (loadId 1) path
           contents <- liftIO $ Text.IO.readFile path
           (outcome, resync) <-
-            caseSplit (Request (LoadId 1) 99 ["n"])
+            caseSplit (Request (loadId 1) 99 ["n"])
               >>= liftIO . expectCompleted 99 "a split at a goal that does not exist"
           report <- liftIO $ expectLoadOk "the resync" resync
           liftIO $ do
             outcome @?= OutcomeUnknownGoal
             contentsShouldBe path contents
-            Load.loadReportId report @?= LoadId 2
+            Load.loadReportId report @?= loadId 2
     , testCase "an unbound variable is reported and writes nothing" $
         withFixtureToolSession warm "test/fixtures/MakeCase.agda" $ \path -> do
-          void $ expectLoaded (LoadId 1) path
+          void $ expectLoaded (loadId 1) path
           contents <- liftIO $ Text.IO.readFile path
           (outcome, resync) <-
-            caseSplit (Request (LoadId 1) 0 ["nope"])
+            caseSplit (Request (loadId 1) 0 ["nope"])
               >>= liftIO . expectCompleted 0 "a split on a name that is not bound"
           report <- liftIO $ expectLoadOk "the resync" resync
           liftIO $ do
@@ -489,25 +489,25 @@ sessionTests warm =
                 Corpus.normalizeError path e @?= Corpus.caseSplitError
               other -> assertFailure $ "unexpected outcome: " <> show other
             contentsShouldBe path contents
-            Load.loadReportId report @?= LoadId 2
+            Load.loadReportId report @?= loadId 2
     , testCase "a stale load id is refused before anything runs" $
         withFixtureToolSession warm "test/fixtures/MakeCase.agda" $ \path -> do
-          void $ expectLoaded (LoadId 1) path
+          void $ expectLoaded (loadId 1) path
           contents <- liftIO $ Text.IO.readFile path
-          refused <- caseSplit (Request (LoadId 7) 0 ["n"])
+          refused <- caseSplit (Request (loadId 7) 0 ["n"])
           liftIO $ do
-            refused @?= ResponseRefused (StaleLoadId $ LoadId 1)
+            refused @?= ResponseRefused (StaleLoadId $ loadId 1)
             contentsShouldBe path contents
     ]
 
 -- Helpers
 
 expectLoaded :: LoadId -> FilePath -> ToolM Load.LoadReport
-expectLoaded loadId path = do
+expectLoaded expected path = do
   report <-
     Load.load Load.Request {Load.loadRequestPath = path}
       >>= liftIO . expectLoadOk "load"
-  liftIO $ Load.loadReportId report @?= loadId
+  liftIO $ Load.loadReportId report @?= expected
   pure report
 
 expectLoadOk :: String -> Load.Response -> IO Load.LoadReport
@@ -596,14 +596,14 @@ reload = Load.ResponseOk reloadReport
 reloadLines :: [Text]
 reloadLines =
   [ "Load succeeded: no goals"
-  , "Load ID: L5"
+  , "Load ID: L5-k7x2"
   , "File: /tmp/Example.agda"
   ]
 
 reloadReport :: Load.LoadReport
 reloadReport =
   Load.LoadReport
-    { Load.loadReportId = LoadId 5
+    { Load.loadReportId = loadId 5
     , Load.loadReportPath = "/tmp/Example.agda"
     , Load.loadReportGoals = []
     , Load.loadReportHiddenMetavariables = []
