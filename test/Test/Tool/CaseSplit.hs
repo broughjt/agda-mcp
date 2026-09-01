@@ -6,6 +6,7 @@ import Agda.Syntax.Common (InteractionId)
 import Agda.TypeChecking.Monad (TCState)
 import Control.Monad.IO.Class (liftIO)
 import Data.Aeson qualified as Aeson
+import Data.Aeson.Types qualified as Aeson (Pair)
 import Data.Functor (void)
 import Data.Map qualified as Map
 import Data.Text (Text)
@@ -20,7 +21,12 @@ import Test.Tasty.HUnit (
   testCase,
   (@?=),
  )
-import Test.Tool.Harness (loadId, withFixtureToolSession)
+import Test.Tool.Harness (
+  describedKinds,
+  describedOutcomes,
+  loadId,
+  withFixtureToolSession,
+ )
 
 import AgdaMCP.Interaction (
   Error (..),
@@ -38,14 +44,15 @@ import AgdaMCP.Tools.CaseSplit (
   Request (..),
   Response (..),
   caseSplit,
+  caseSplitTool,
   clauseLayout,
   layoutClauses,
   renderResponse,
  )
 import AgdaMCP.Tools.Load qualified as Load
 import AgdaMCP.Tools.LoadId (LoadId, LoadIdRefusal (..))
-import AgdaMCP.Tools.MCP (parseArguments)
 import AgdaMCP.Tools.State (ToolM)
+import AgdaMCP.Tools.Tool (parseArguments)
 
 tests :: IO TCState -> TestTree
 tests warm =
@@ -55,6 +62,7 @@ tests warm =
     , clauseLayoutTests
     , layoutClausesTests
     , renderResponseTests
+    , toJSONTests
     , sessionTests warm
     ]
 
@@ -392,6 +400,133 @@ renderResponseTests =
             )
     ]
 
+toJSONTests :: TestTree
+toJSONTests =
+  testGroup
+    "toJSON"
+    [ testCase "a refusal is its own kind, with the prose as its message" $
+        Aeson.toJSON (ResponseRefused $ StaleLoadId $ loadId 2)
+          @?= Aeson.object
+            [ "kind" Aeson..= Aeson.String "stale_load_id"
+            , "current_load_id" Aeson..= Aeson.String "L2-k7x2"
+            , "message"
+                Aeson..= Aeson.String
+                  "The supplied load ID is from an earlier load. The current load ID \
+                  \is L2-k7x2. Each load makes fresh goal ID assignments, so use the most \
+                  \recently issued load ID and goal IDs. If you no longer have them, \
+                  \load the file again."
+            ]
+    , testCase "a split carries the clauses it wrote and how it laid them out" $
+        completedValue 0 (OutcomeApplied distribEdit)
+          @?= outcome
+            0
+            [ "kind" Aeson..= Aeson.String "applied"
+            , "span" Aeson..= distribSpanValue
+            , "variant" Aeson..= Aeson.String "function"
+            , "layout" Aeson..= Aeson.String "one_per_line"
+            , "clauses"
+                Aeson..= map
+                  Aeson.String
+                  [ "*-distribʳ-+ x zero z = ?"
+                  , "*-distribʳ-+ x (suc y) z = ?"
+                  ]
+            , "collapses_where" Aeson..= False
+            ]
+    , testCase "an extended lambda split inline, collapsing a where block" $
+        completedValue
+          1
+          ( OutcomeApplied
+              distribEdit
+                { editVariant = MakeCaseExtendedLambda
+                , editLayout = Inline
+                , editClauses = ["zero → ?", "(suc n) → ?"]
+                , editCollapsesWhere = True
+                }
+          )
+          @?= outcome
+            1
+            [ "kind" Aeson..= Aeson.String "applied"
+            , "span" Aeson..= distribSpanValue
+            , "variant" Aeson..= Aeson.String "extended_lambda"
+            , "layout" Aeson..= Aeson.String "inline"
+            , "clauses" Aeson..= map Aeson.String ["zero → ?", "(suc n) → ?"]
+            , "collapses_where" Aeson..= True
+            ]
+    , testCase "an unknown goal" $
+        completedValue 7 OutcomeUnknownGoal
+          @?= outcome 7 ["kind" Aeson..= Aeson.String "unknown_goal"]
+    , testCase "a failed split carries Agda's error at its file position" $
+        completedValue 0 (OutcomeFailed Corpus.caseSplitError)
+          @?= outcome
+            0
+            [ "kind" Aeson..= Aeson.String "failed"
+            , "error"
+                Aeson..= Aeson.object
+                  [ "message" Aeson..= errorMessage Corpus.caseSplitError
+                  , "location"
+                      Aeson..= Aeson.object
+                        [ "path" Aeson..= Corpus.fixtureFile "MakeCase.agda"
+                        , "span" Aeson..= spanValue (217, 9, 12) (218, 9, 13)
+                        ]
+                  , "warnings" Aeson..= ([] :: [Aeson.Value])
+                  ]
+            ]
+    , testCase "a changed file" $
+        completedValue 0 OutcomeFileChanged
+          @?= outcome 0 ["kind" Aeson..= Aeson.String "file_changed"]
+    , testCase "an unreadable file carries the detail" $
+        completedValue
+          0
+          (OutcomeSourceUnreadable "Example.agda: openFile: does not exist")
+          @?= outcome
+            0
+            [ "kind" Aeson..= Aeson.String "source_unreadable"
+            , "detail" Aeson..= Aeson.String "Example.agda: openFile: does not exist"
+            ]
+    , testCase "a failed write carries the detail" $
+        completedValue
+          0
+          (OutcomeWriteFailed "Example.agda: openFile: permission denied")
+          @?= outcome
+            0
+            [ "kind" Aeson..= Aeson.String "write_failed"
+            , "detail" Aeson..= Aeson.String "Example.agda: openFile: permission denied"
+            ]
+    , testCase "every kind is described" $
+        describedKinds
+          caseSplitTool
+          renderResponse
+          [ ResponseRefused $ StaleLoadId $ loadId 2
+          , ResponseCompleted 0 OutcomeFileChanged reload
+          ]
+    , testCase "every outcome is described" $
+        describedOutcomes
+          caseSplitTool
+          "outcome"
+          [ ResponseCompleted 0 (OutcomeApplied distribEdit) reload
+          , ResponseCompleted 7 OutcomeUnknownGoal reload
+          , ResponseCompleted 0 (OutcomeFailed Corpus.caseSplitError) reload
+          , ResponseCompleted 0 OutcomeFileChanged reload
+          , ResponseCompleted 0 (OutcomeSourceUnreadable "unreadable") reload
+          , ResponseCompleted 0 (OutcomeWriteFailed "denied") reload
+          ]
+    ]
+ where
+  completedValue :: InteractionId -> Outcome -> Aeson.Value
+  completedValue goalId o = Aeson.toJSON (ResponseCompleted goalId o reload)
+
+  outcome :: Int -> [Aeson.Pair] -> Aeson.Value
+  outcome goalId fields =
+    Aeson.object
+      [ "kind" Aeson..= Aeson.String "completed"
+      , "goal" Aeson..= goalId
+      , "outcome" Aeson..= Aeson.object fields
+      , "reload" Aeson..= reloadValue
+      ]
+
+  distribSpanValue :: Aeson.Value
+  distribSpanValue = spanValue (100, 9, 1) (128, 9, 29)
+
 sessionTests :: IO TCState -> TestTree
 sessionTests warm =
   testGroup
@@ -626,6 +761,29 @@ reloadWithGoal =
             )
           ]
       }
+
+spanValue :: (Int, Int, Int) -> (Int, Int, Int) -> Aeson.Value
+spanValue start end =
+  Aeson.object ["start" Aeson..= position start, "end" Aeson..= position end]
+ where
+  position (offset, line, column) =
+    Aeson.object
+      [ "offset" Aeson..= offset
+      , "line" Aeson..= line
+      , "column" Aeson..= column
+      ]
+
+reloadValue :: Aeson.Value
+reloadValue =
+  Aeson.object
+    [ "kind" Aeson..= Aeson.String "loaded"
+    , "load_id" Aeson..= Aeson.String "L5-k7x2"
+    , "path" Aeson..= Aeson.String "/tmp/Example.agda"
+    , "goals" Aeson..= ([] :: [Aeson.Value])
+    , "hidden_metavariables" Aeson..= ([] :: [Aeson.Value])
+    , "warnings" Aeson..= ([] :: [Aeson.Value])
+    , "non_fatal_errors" Aeson..= ([] :: [Aeson.Value])
+    ]
 
 distribEdit :: Edit
 distribEdit =

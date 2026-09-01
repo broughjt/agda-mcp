@@ -15,6 +15,7 @@ import Test.Corpus qualified as Corpus
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
 import Test.Tool.Harness (
+  describedKinds,
   loadId,
   withFixtureToolSession,
   withFixtureToolSessions,
@@ -22,6 +23,7 @@ import Test.Tool.Harness (
 
 import AgdaMCP.Interaction (
   ContextEntry (..),
+  Error (..),
   Goal (..),
   GoalReport (..),
   GoalShape (..),
@@ -29,14 +31,15 @@ import AgdaMCP.Interaction (
 import AgdaMCP.Tools.Goal (
   Request (..),
   Response (..),
+  goalTool,
   renderResponse,
  )
 import AgdaMCP.Tools.Goal qualified as Goal
 import AgdaMCP.Tools.Load (LoadRefusal (..))
 import AgdaMCP.Tools.Load qualified as Load
 import AgdaMCP.Tools.LoadId (LoadId, LoadIdRefusal (..))
-import AgdaMCP.Tools.MCP (normalizations, parseArguments, renderNormalization)
 import AgdaMCP.Tools.Source (SourceRefusal (..))
+import AgdaMCP.Tools.Tool (normalizations, parseArguments, renderNormalization)
 import Data.Foldable (for_)
 
 tests :: IO TCState -> TestTree
@@ -46,6 +49,7 @@ tests warm =
     [ parseArgumentsTests
     , renderNormalizationTests
     , renderResponseTests
+    , toJSONTests
     , sessionTests warm
     ]
 
@@ -358,6 +362,79 @@ renderResponseTests =
             )
     ]
 
+toJSONTests :: TestTree
+toJSONTests =
+  testGroup
+    "toJSON"
+    [ testCase "a refusal is its own kind, with the prose as its message" $
+        Aeson.toJSON (ResponseRefused $ RefusedLoadId $ StaleLoadId $ loadId 2)
+          @?= Aeson.object
+            [ "kind" Aeson..= Aeson.String "stale_load_id"
+            , "current_load_id" Aeson..= Aeson.String "L2-k7x2"
+            , "message"
+                Aeson..= Aeson.String
+                  "The supplied load ID is from an earlier load. The current load ID \
+                  \is L2-k7x2. Each load makes fresh goal ID assignments, so use the most \
+                  \recently issued load ID and goal IDs. If you no longer have them, \
+                  \load the file again."
+            ]
+    , testCase "an unknown goal" $
+        Aeson.toJSON (ResponseUnknownGoal 5)
+          @?= Aeson.object
+            [ "kind" Aeson..= Aeson.String "unknown_goal"
+            , "goal" Aeson..= (5 :: Int)
+            , "message"
+                Aeson..= Aeson.String
+                  "No goal ?5 in the current load. Check the goal IDs in the most \
+                  \recent result."
+            ]
+    , testCase "a failed query carries Agda's error" $
+        Aeson.toJSON (ResponseFailed (plainError "it failed"))
+          @?= Aeson.object
+            [ "kind" Aeson..= Aeson.String "failed"
+            , "error"
+                Aeson..= Aeson.object
+                  [ "message" Aeson..= Aeson.String "it failed"
+                  , "location" Aeson..= Aeson.Null
+                  , "warnings" Aeson..= ([] :: [Aeson.Value])
+                  ]
+            ]
+    , testCase "a goal carries every section, the context in Agda's order" $
+        Aeson.toJSON
+          ( ResponseOk
+              3
+              Normalised
+              emptyReport
+                { goalReportContext = [contextEntry "x" "ℕ", contextEntry "y" "ℕ"]
+                , goalReportBoundary = ["i = i0 ⊢ x"]
+                , goalReportConstraints = ["a constraint"]
+                }
+          )
+          @?= Aeson.object
+            [ "kind" Aeson..= Aeson.String "goal"
+            , "goal" Aeson..= (3 :: Int)
+            , "normalization" Aeson..= Aeson.String "normalized"
+            , "shape"
+                Aeson..= Aeson.object
+                  [ "kind" Aeson..= Aeson.String "of_type"
+                  , "type" Aeson..= Aeson.String "ℕ"
+                  ]
+            , "context" Aeson..= [entryValue "x" "ℕ", entryValue "y" "ℕ"]
+            , "boundary" Aeson..= [Aeson.String "i = i0 ⊢ x"]
+            , "constraints" Aeson..= [Aeson.String "a constraint"]
+            ]
+    , testCase "every kind is described" $
+        describedKinds
+          goalTool
+          renderResponse
+          [ ResponseRefused $ RefusedLoadId $ StaleLoadId $ loadId 2
+          , ResponseRefused $ RefusedSource RefusalChanged
+          , ResponseUnknownGoal 5
+          , ResponseFailed (plainError "it failed")
+          , ResponseOk 3 Normalised emptyReport
+          ]
+    ]
+
 sessionTests :: IO TCState -> TestTree
 sessionTests warm =
   testGroup
@@ -501,6 +578,30 @@ contextEntry name ty =
     , contextEntryErased = False
     , contextEntryRelevance = Nothing
     }
+
+plainError :: Text -> Error
+plainError message =
+  Error
+    { errorMessage = message
+    , errorPathSpan = Nothing
+    , errorWarnings = []
+    }
+
+entryValue :: Text -> Text -> Aeson.Value
+entryValue name ty =
+  Aeson.object
+    [ "original_name" Aeson..= name
+    , "reified_name" Aeson..= name
+    , "original_in_scope" Aeson..= True
+    , "reified_in_scope" Aeson..= True
+    , "type" Aeson..= ty
+    , "let_value" Aeson..= Aeson.Null
+    , "is_instance" Aeson..= False
+    , "cohesion" Aeson..= Aeson.Null
+    , "polarity" Aeson..= Aeson.Null
+    , "erased" Aeson..= False
+    , "relevance" Aeson..= Aeson.Null
+    ]
 
 expectLoadOk :: String -> Load.Response -> IO Load.LoadReport
 expectLoadOk _ (Load.ResponseOk report) = pure report

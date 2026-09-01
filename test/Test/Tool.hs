@@ -7,10 +7,12 @@ import Test.Tasty (TestTree, testGroup, withResource)
 import Test.Harness (warmInteractionState)
 import Test.Tool.CaseSplit qualified as CaseSplit
 import Test.Tool.Check qualified as Check
+import Test.Tool.Description qualified as Description
 import Test.Tool.Give qualified as Give
 import Test.Tool.Goal qualified as Goal
 import Test.Tool.Infer qualified as Infer
 import Test.Tool.Interruption qualified as Interruption
+import Test.Tool.Json qualified as Json
 import Test.Tool.Load qualified as Load
 import Test.Tool.LoadId qualified as LoadId
 import Test.Tool.Scenario qualified as Scenario
@@ -23,6 +25,8 @@ tests =
       "Tool"
       [ Source.tests
       , LoadId.tests
+      , Json.tests
+      , Description.tests
       , Load.tests
       , Goal.tests warm
       , Infer.tests warm

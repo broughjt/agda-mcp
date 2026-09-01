@@ -14,20 +14,21 @@ import Data.Text.IO qualified as Text.IO
 import System.Directory (removeFile)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
-import Test.Tool.Harness (loadId, withFixtureToolSession)
+import Test.Tool.Harness (describedKinds, loadId, withFixtureToolSession)
 
 import AgdaMCP.Interaction (Error (..), Warning (..))
 import AgdaMCP.Tools.Check (
   Request (..),
   Response (..),
+  checkTool,
   renderResponse,
  )
 import AgdaMCP.Tools.Check qualified as Check
 import AgdaMCP.Tools.Load (LoadRefusal (..))
 import AgdaMCP.Tools.Load qualified as Load
 import AgdaMCP.Tools.LoadId (LoadId, LoadIdRefusal (..))
-import AgdaMCP.Tools.MCP (parseArguments)
 import AgdaMCP.Tools.Source (SourceRefusal (..))
+import AgdaMCP.Tools.Tool (parseArguments)
 
 tests :: IO TCState -> TestTree
 tests warm =
@@ -35,6 +36,7 @@ tests warm =
     "Check"
     [ parseArgumentsTests
     , renderResponseTests
+    , toJSONTests
     , sessionTests warm
     ]
 
@@ -185,6 +187,61 @@ renderResponseTests =
                 , "  a warning raised on the way"
                 ]
             )
+    ]
+
+toJSONTests :: TestTree
+toJSONTests =
+  testGroup
+    "toJSON"
+    [ testCase "a refusal is its own kind, with the prose as its message" $
+        Aeson.toJSON (ResponseRefused (RefusedLoadId NoCurrentLoad))
+          @?= Aeson.object
+            [ "kind" Aeson..= Aeson.String "no_current_load"
+            , "message"
+                Aeson..= Aeson.String
+                  "No load is current. Either no file has been loaded yet, or the \
+                  \most recent load failed. Load the file, then use the load ID and \
+                  \goal IDs from that load result."
+            ]
+    , testCase "an unknown goal" $
+        Aeson.toJSON (ResponseUnknownGoal 5)
+          @?= Aeson.object
+            [ "kind" Aeson..= Aeson.String "unknown_goal"
+            , "goal" Aeson..= (5 :: Int)
+            , "message"
+                Aeson..= Aeson.String
+                  "No goal ?5 in the current load. Check the goal IDs in the most \
+                  \recent result."
+            ]
+    , testCase "an expression that does not check carries the goal and the error" $
+        Aeson.toJSON (ResponseFailed 3 (plainError parseError))
+          @?= Aeson.object
+            [ "kind" Aeson..= Aeson.String "failed"
+            , "goal" Aeson..= (3 :: Int)
+            , "error"
+                Aeson..= Aeson.object
+                  [ "message" Aeson..= parseError
+                  , "location" Aeson..= Aeson.Null
+                  , "warnings" Aeson..= ([] :: [Aeson.Value])
+                  ]
+            ]
+    , testCase "an expression that checks carries its elaboration" $
+        Aeson.toJSON (ResponseOk 0 "1")
+          @?= Aeson.object
+            [ "kind" Aeson..= Aeson.String "checks"
+            , "goal" Aeson..= (0 :: Int)
+            , "elaborated" Aeson..= Aeson.String "1"
+            ]
+    , testCase "every kind is described" $
+        describedKinds
+          checkTool
+          renderResponse
+          [ ResponseRefused (RefusedLoadId NoCurrentLoad)
+          , ResponseRefused (RefusedSource RefusalChanged)
+          , ResponseUnknownGoal 5
+          , ResponseFailed 3 (plainError parseError)
+          , ResponseOk 0 "1"
+          ]
     ]
 
 sessionTests :: IO TCState -> TestTree

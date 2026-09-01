@@ -6,6 +6,7 @@ import Agda.Syntax.Common (InteractionId)
 import Agda.TypeChecking.Monad (TCState)
 import Control.Monad.IO.Class (liftIO)
 import Data.Aeson qualified as Aeson
+import Data.Aeson.Types qualified as Aeson (Pair)
 import Data.Map qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -32,15 +33,21 @@ import AgdaMCP.Tools.Give (
   Request (..),
   Response (..),
   give,
+  giveTool,
   renderResponse,
  )
 import AgdaMCP.Tools.Load qualified as Load
 import AgdaMCP.Tools.LoadId (LoadId, LoadIdRefusal (..))
-import AgdaMCP.Tools.MCP (parseArguments)
 import AgdaMCP.Tools.State (ToolM)
+import AgdaMCP.Tools.Tool (parseArguments)
 import Data.Functor (void)
 import Test.Corpus qualified as Corpus
-import Test.Tool.Harness (loadId, withFixtureToolSession)
+import Test.Tool.Harness (
+  describedKinds,
+  describedOutcomes,
+  loadId,
+  withFixtureToolSession,
+ )
 
 tests :: IO TCState -> TestTree
 tests warm =
@@ -48,6 +55,7 @@ tests warm =
     "Give"
     [ parseArgumentsTests
     , renderResponseTests
+    , toJSONTests
     , sessionTests warm
     ]
 
@@ -396,6 +404,146 @@ renderResponseTests =
  where
   renders response expected = renderResponse response @?= Right expected
 
+toJSONTests :: TestTree
+toJSONTests =
+  testGroup
+    "toJSON"
+    [ testCase "a refusal is its own kind, with the prose as its message" $
+        Aeson.toJSON (ResponseRefused NoCurrentLoad)
+          @?= Aeson.object
+            [ "kind" Aeson..= Aeson.String "no_current_load"
+            , "message"
+                Aeson..= Aeson.String
+                  "No load is current. Either no file has been loaded yet, or the \
+                  \most recent load failed. Load the file, then use the load ID and \
+                  \goal IDs from that load result."
+            ]
+    , testCase "applied edits carry their goal, span, text and kind" $
+        completedValue
+          ( OutcomeApplied
+              [ edit 0 "refl"
+              , (edit 1 "suc zero") {editKind = EditKindVerbatim}
+              , (edit 2 "suc (suc zero)") {editKind = EditKindParentheses}
+              ]
+          )
+          @?= outcome
+            [ "kind" Aeson..= Aeson.String "applied"
+            , "edits"
+                Aeson..= [ editValue 0 "refl" "computed"
+                         , editValue 1 "suc zero" "verbatim"
+                         , editValue 2 "suc (suc zero)" "parenthesized"
+                         ]
+            ]
+    , testCase "a rejection carries its position in the batch and the error" $
+        completedValue
+          ( OutcomeRefused
+              Refusal
+                { refusalGoalId = 1
+                , refusalSpan = Just holeSpan
+                , refusalPosition = BatchPosition 1 2
+                , refusalReason = RefusedError (plainError "it does not check")
+                }
+          )
+          @?= outcome
+            [ "kind" Aeson..= Aeson.String "rejected"
+            , "goal" Aeson..= (1 :: Int)
+            , "span" Aeson..= holeSpanValue
+            , "position"
+                Aeson..= Aeson.object
+                  ["index" Aeson..= (1 :: Int), "length" Aeson..= (2 :: Int)]
+            , "reason"
+                Aeson..= Aeson.object
+                  [ "kind" Aeson..= Aeson.String "error"
+                  , "error"
+                      Aeson..= Aeson.object
+                        [ "message" Aeson..= Aeson.String "it does not check"
+                        , "location" Aeson..= Aeson.Null
+                        , "warnings" Aeson..= ([] :: [Aeson.Value])
+                        ]
+                  ]
+            ]
+    , testCase "a rejection for an unknown goal has no span" $
+        completedValue
+          ( OutcomeRefused
+              Refusal
+                { refusalGoalId = 7
+                , refusalSpan = Nothing
+                , refusalPosition = BatchPosition 0 2
+                , refusalReason = RefusedUnknownGoal
+                }
+          )
+          @?= outcome
+            [ "kind" Aeson..= Aeson.String "rejected"
+            , "goal" Aeson..= (7 :: Int)
+            , "span" Aeson..= Aeson.Null
+            , "position"
+                Aeson..= Aeson.object
+                  ["index" Aeson..= (0 :: Int), "length" Aeson..= (2 :: Int)]
+            , "reason"
+                Aeson..= Aeson.object ["kind" Aeson..= Aeson.String "unknown_goal"]
+            ]
+    , testCase "a changed file" $
+        completedValue OutcomeFileChanged
+          @?= outcome ["kind" Aeson..= Aeson.String "file_changed"]
+    , testCase "an unreadable file carries the detail" $
+        completedValue
+          (OutcomeSourceUnreadable "Example.agda: openFile: does not exist")
+          @?= outcome
+            [ "kind" Aeson..= Aeson.String "source_unreadable"
+            , "detail" Aeson..= Aeson.String "Example.agda: openFile: does not exist"
+            ]
+    , testCase "a failed write carries the detail" $
+        completedValue (OutcomeWriteFailed "Example.agda: openFile: permission denied")
+          @?= outcome
+            [ "kind" Aeson..= Aeson.String "write_failed"
+            , "detail" Aeson..= Aeson.String "Example.agda: openFile: permission denied"
+            ]
+    , testCase "every kind is described" $
+        describedKinds
+          giveTool
+          renderResponse
+          [ResponseRefused NoCurrentLoad, ResponseCompleted OutcomeFileChanged reload]
+    , testCase "every outcome is described" $
+        describedOutcomes
+          giveTool
+          "outcome"
+          [ ResponseCompleted (OutcomeApplied [edit 0 "refl"]) reload
+          , ResponseCompleted
+              ( OutcomeRefused
+                  Refusal
+                    { refusalGoalId = 7
+                    , refusalSpan = Nothing
+                    , refusalPosition = BatchPosition 0 2
+                    , refusalReason = RefusedUnknownGoal
+                    }
+              )
+              reload
+          , ResponseCompleted OutcomeFileChanged reload
+          , ResponseCompleted (OutcomeSourceUnreadable "unreadable") reload
+          , ResponseCompleted (OutcomeWriteFailed "denied") reload
+          ]
+    ]
+ where
+  completedValue :: Outcome -> Aeson.Value
+  completedValue o = Aeson.toJSON (ResponseCompleted o reload)
+
+  outcome :: [Aeson.Pair] -> Aeson.Value
+  outcome fields =
+    Aeson.object
+      [ "kind" Aeson..= Aeson.String "completed"
+      , "outcome" Aeson..= Aeson.object fields
+      , "reload" Aeson..= reloadValue
+      ]
+
+  editValue :: Int -> Text -> Text -> Aeson.Value
+  editValue goalId text kind =
+    Aeson.object
+      [ "goal" Aeson..= goalId
+      , "span" Aeson..= holeSpanValue
+      , "text" Aeson..= text
+      , "kind" Aeson..= kind
+      ]
+
 sessionTests :: IO TCState -> TestTree
 sessionTests warm =
   testGroup
@@ -624,6 +772,33 @@ edit goalId text =
 
 holeSpan :: Span
 holeSpan = Span (Position 10 2 5) (Position 11 2 6)
+
+holeSpanValue :: Aeson.Value
+holeSpanValue =
+  Aeson.object
+    [ "start" Aeson..= position 10 2 5
+    , "end" Aeson..= position 11 2 6
+    ]
+ where
+  position :: Int -> Int -> Int -> Aeson.Value
+  position offset line column =
+    Aeson.object
+      [ "offset" Aeson..= offset
+      , "line" Aeson..= line
+      , "column" Aeson..= column
+      ]
+
+reloadValue :: Aeson.Value
+reloadValue =
+  Aeson.object
+    [ "kind" Aeson..= Aeson.String "loaded"
+    , "load_id" Aeson..= Aeson.String "L5-k7x2"
+    , "path" Aeson..= Aeson.String "/tmp/Example.agda"
+    , "goals" Aeson..= ([] :: [Aeson.Value])
+    , "hidden_metavariables" Aeson..= ([] :: [Aeson.Value])
+    , "warnings" Aeson..= ([] :: [Aeson.Value])
+    , "non_fatal_errors" Aeson..= ([] :: [Aeson.Value])
+    ]
 
 plainError :: Text -> Error
 plainError message =

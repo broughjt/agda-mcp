@@ -10,7 +10,7 @@ module AgdaMCP.Tools.Check (
 
 import Agda.Interaction.Base (Rewrite)
 import Agda.Syntax.Common (InteractionId (..))
-import Data.Aeson (FromJSON (..), withObject, (.:))
+import Data.Aeson (FromJSON (..), ToJSON (..), withObject, (.:))
 import Data.Aeson.Types qualified as Aeson
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -33,12 +33,9 @@ import AgdaMCP.Tools.Load (
  )
 import AgdaMCP.Tools.LoadId (LoadId)
 import AgdaMCP.Tools.MCP (
-  Tool (..),
   goalIdSchema,
-  inspectBudget,
   loadIdSchema,
   normalizationSchema,
-  parseNormalizationField,
   textToolHandle,
   timeoutSchema,
  )
@@ -51,11 +48,18 @@ import AgdaMCP.Tools.Render (
   section,
  )
 import AgdaMCP.Tools.State (ToolM, liftInteraction)
+import AgdaMCP.Tools.Tool (
+  Tool (..),
+  inspectBudget,
+  parseNormalizationField,
+  toolHandle,
+ )
 
 checkTool :: Tool
 checkTool =
   Tool
-    { toolDefinition =
+    { toolDescription = error "not implemented"
+    , toolDefinition =
         ( mkToolDefinition "check" checkDescription $
             schema $
               SchemaObject
@@ -73,6 +77,7 @@ checkTool =
           { toolDefinitionAnnotations = Just checkAnnotations
           }
     , toolRun = textToolHandle inspectBudget check renderResponse
+    , toolCall = toolHandle inspectBudget check renderResponse
     }
  where
   checkAnnotations :: ToolAnnotations
@@ -164,3 +169,6 @@ renderResponse (ResponseOk goalId elaborated) =
     blocks $
       ["The expression checks at " <> renderGoalId goalId <> "."]
         <> section "Elaborates to:" [indent elaborated]
+
+instance ToJSON Response where
+  toJSON = error "not implemented"

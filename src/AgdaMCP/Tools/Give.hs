@@ -32,7 +32,7 @@ import Agda.Syntax.Common (InteractionId (..))
 import Control.Exception (throwIO)
 import Control.Monad.Except (ExceptT (..), runExceptT)
 import Control.Monad.IO.Class (liftIO)
-import Data.Aeson (FromJSON (..), (.:))
+import Data.Aeson (FromJSON (..), ToJSON (..), (.:))
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Aeson.Types qualified as Aeson
 import Data.Foldable (toList, traverse_)
@@ -58,8 +58,6 @@ import AgdaMCP.Tools.LoadId (
   renderLoadIdRefusal,
  )
 import AgdaMCP.Tools.MCP (
-  Tool (..),
-  editBudget,
   goalIdSchema,
   loadIdSchema,
   textToolHandle,
@@ -83,6 +81,11 @@ import AgdaMCP.Tools.Source (
   readChecked,
  )
 import AgdaMCP.Tools.State (ToolM, liftInteraction)
+import AgdaMCP.Tools.Tool (
+  Tool (..),
+  editBudget,
+  toolHandle,
+ )
 
 -- The `minItems` and `default` keywords this schema used to carry are not
 -- expressible in the library's schema type. The action default is stated in
@@ -90,7 +93,8 @@ import AgdaMCP.Tools.State (ToolM, liftInteraction)
 giveTool :: Tool
 giveTool =
   Tool
-    { toolDefinition =
+    { toolDescription = error "not implemented"
+    , toolDefinition =
         ( mkToolDefinition "give" giveDescription $
             schema $
               SchemaObject
@@ -122,6 +126,7 @@ giveTool =
           { toolDefinitionAnnotations = Just giveAnnotations
           }
     , toolRun = textToolHandle editBudget give renderResponse
+    , toolCall = toolHandle editBudget give renderResponse
     }
  where
   giveAnnotations :: ToolAnnotations
@@ -429,3 +434,6 @@ renderBatchPosition position
         <> " of "
         <> Text.pack (show $ batchLength position)
         <> ")"
+
+instance ToJSON Response where
+  toJSON = error "not implemented"

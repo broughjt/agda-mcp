@@ -1,4 +1,5 @@
 module AgdaMCP.Tools (
+  allTools,
   caseSplitTool,
   checkTool,
   giveTool,
@@ -16,3 +17,7 @@ import AgdaMCP.Tools.Goal (goalTool)
 import AgdaMCP.Tools.Infer (inferTool)
 import AgdaMCP.Tools.Load (loadTool)
 import AgdaMCP.Tools.State (ToolState, newToolState)
+import AgdaMCP.Tools.Tool (Tool)
+
+allTools :: [Tool]
+allTools = [loadTool, goalTool, checkTool, inferTool, giveTool, caseSplitTool]

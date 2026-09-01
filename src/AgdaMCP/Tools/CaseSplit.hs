@@ -16,7 +16,7 @@ module AgdaMCP.Tools.CaseSplit (
 import Agda.Syntax.Common (InteractionId (..))
 import Control.Exception (throwIO)
 import Control.Monad.IO.Class (liftIO)
-import Data.Aeson (FromJSON (..), withObject, (.:))
+import Data.Aeson (FromJSON (..), ToJSON (..), withObject, (.:))
 import Data.Aeson.Types qualified as Aeson
 import Data.Char (isSpace)
 import Data.Foldable (toList)
@@ -49,8 +49,6 @@ import AgdaMCP.Tools.LoadId (
   renderLoadIdRefusal,
  )
 import AgdaMCP.Tools.MCP (
-  Tool (..),
-  editBudget,
   goalIdSchema,
   loadIdSchema,
   textToolHandle,
@@ -74,11 +72,17 @@ import AgdaMCP.Tools.Source (
   readChecked,
  )
 import AgdaMCP.Tools.State (ToolM, liftInteraction)
+import AgdaMCP.Tools.Tool (
+  Tool (..),
+  editBudget,
+  toolHandle,
+ )
 
 caseSplitTool :: Tool
 caseSplitTool =
   Tool
-    { toolDefinition =
+    { toolDescription = error "not implemented"
+    , toolDefinition =
         ( mkToolDefinition "case_split" caseSplitDescription $
             schema $
               SchemaObject
@@ -96,6 +100,7 @@ caseSplitTool =
           { toolDefinitionAnnotations = Just caseSplitAnnotations
           }
     , toolRun = textToolHandle editBudget caseSplit renderResponse
+    , toolCall = toolHandle editBudget caseSplit renderResponse
     }
  where
   caseSplitAnnotations :: ToolAnnotations
@@ -326,3 +331,6 @@ whereCollapsed =
 countClauses :: Int -> Text
 countClauses 1 = "1 clause"
 countClauses n = Text.pack (show n) <> " clauses"
+
+instance ToJSON Response where
+  toJSON = error "not implemented"

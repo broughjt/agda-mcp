@@ -44,11 +44,20 @@ library interaction
 library
   hs-source-dirs: src
   exposed-modules:
-    AgdaMCP
+    AgdaMCP.MCP
+    AgdaMCP.Options
+    AgdaMCP.Interact.CLI
+    AgdaMCP.Interact.Daemon.Client
+    AgdaMCP.Interact.Daemon.Key
+    AgdaMCP.Interact.Daemon.Protocol
+    AgdaMCP.Interact.Daemon.Server
+    AgdaMCP.Interact.Help
     AgdaMCP.Tools
-    AgdaMCP.Tools.LoadId
+    AgdaMCP.Tools.Description
+    AgdaMCP.Tools.Tool
     AgdaMCP.Tools.MCP
-    AgdaMCP.Tools.Options
+    AgdaMCP.Tools.LoadId
+    AgdaMCP.Tools.Json
     AgdaMCP.Tools.Render
     AgdaMCP.Tools.Source
     AgdaMCP.Tools.State
@@ -64,12 +73,21 @@ library
       aeson,
       atomic-write,
       base >= 4.18 && < 5,
+      bytestring,
       containers,
+      directory,
+      filelock,
+      filepath,
       mcp-server >= 0.2 && < 0.3,
       mtl,
+      network,
       optparse-applicative,
+      process,
       random,
-      text
+      stm,
+      text,
+      time,
+      unix
   default-language: GHC2021
   ghc-options:
       -Wall
@@ -81,16 +99,26 @@ test-suite agda-mcp-test
   other-modules:
     Test.Corpus
     Test.Harness
+    Test.Interact
+    Test.Interact.CLI
+    Test.Interact.Daemon.Key
+    Test.Interact.Daemon.Protocol
+    Test.Interact.Daemon.Server
+    Test.Interact.Help
     Test.Interaction
+    Test.MCP
     Test.Model
+    Test.Options
     Test.Tool
     Test.Tool.CaseSplit
     Test.Tool.Check
+    Test.Tool.Description
     Test.Tool.Give
     Test.Tool.Goal
     Test.Tool.Harness
     Test.Tool.Infer
     Test.Tool.Interruption
+    Test.Tool.Json
     Test.Tool.Load
     Test.Tool.LoadId
     Test.Tool.Scenario
@@ -104,7 +132,9 @@ test-suite agda-mcp-test
       base >= 4.18 && < 5,
       containers,
       directory,
+      filelock,
       filepath,
+      mcp-server >= 0.2 && < 0.3,
       mtl,
       tasty,
       tasty-hunit,
@@ -120,11 +150,30 @@ test-suite agda-mcp-test
 
 executable agda-mcp
   main-is: Main.hs
-  hs-source-dirs: app
+  hs-source-dirs: app/mcp
   build-depends:
       agda-mcp,
       base >= 4.18 && < 5,
       mcp-server >= 0.2 && < 0.3,
+      text,
+  default-language: GHC2021
+  ghc-options:
+      -Wall
+      -Wcompat
+      -Wincomplete-record-updates
+      -Wincomplete-uni-patterns
+      -Wmissing-home-modules
+      -Wpartial-fields
+      -Wredundant-constraints
+      -threaded
+
+executable agda-interact
+  main-is: Main.hs
+  hs-source-dirs: app/interact
+  build-depends:
+      agda-mcp,
+      base >= 4.18 && < 5,
+      directory,
       text,
   default-language: GHC2021
   ghc-options:

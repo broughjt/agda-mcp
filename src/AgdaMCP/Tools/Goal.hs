@@ -10,7 +10,7 @@ module AgdaMCP.Tools.Goal (
 
 import Agda.Interaction.Base (Rewrite)
 import Agda.Syntax.Common (InteractionId (..))
-import Data.Aeson (FromJSON (..), withObject, (.:))
+import Data.Aeson (FromJSON (..), ToJSON (..), withObject, (.:))
 import Data.Text (Text)
 import Data.Text qualified as Text
 import MCP.Server (
@@ -35,13 +35,9 @@ import AgdaMCP.Tools.Load (
  )
 import AgdaMCP.Tools.LoadId (LoadId)
 import AgdaMCP.Tools.MCP (
-  Tool (..),
   goalIdSchema,
-  inspectBudget,
   loadIdSchema,
   normalizationSchema,
-  parseNormalizationField,
-  renderNormalization,
   textToolHandle,
   timeoutSchema,
  )
@@ -56,11 +52,19 @@ import AgdaMCP.Tools.Render (
   section,
  )
 import AgdaMCP.Tools.State (ToolM, liftInteraction)
+import AgdaMCP.Tools.Tool (
+  Tool (..),
+  inspectBudget,
+  parseNormalizationField,
+  renderNormalization,
+  toolHandle,
+ )
 
 goalTool :: Tool
 goalTool =
   Tool
-    { toolDefinition =
+    { toolDescription = error "not implemented"
+    , toolDefinition =
         ( mkToolDefinition "goal" goalDescription $
             schema $
               SchemaObject
@@ -74,6 +78,7 @@ goalTool =
           { toolDefinitionAnnotations = Just goalAnnotations
           }
     , toolRun = textToolHandle inspectBudget goal renderResponse
+    , toolCall = toolHandle inspectBudget goal renderResponse
     }
  where
   goalAnnotations :: ToolAnnotations
@@ -162,3 +167,6 @@ renderGoalReport rewrite goalId report =
  where
   header =
     renderGoalId goalId <> " (" <> renderNormalization rewrite <> ")"
+
+instance ToJSON Response where
+  toJSON = error "not implemented"

@@ -1,0 +1,256 @@
+{
+  "tools": [
+    {
+      "annotations": {
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Load and type-check an Agda source file. On success, reports open goals (each with their local context), unsolved hidden metavariables, warnings, and non-fatal errors. On failure, reports the error message and associated warnings. Agda keeps only one file loaded at a time: each load replaces the one before it and makes fresh goal ID assignments. A successful load returns a load ID for the state it produced. Other tools require that load ID to confirm the request refers to that state, and refuse an earlier one rather than misread it.",
+      "inputSchema": {
+        "properties": {
+          "path": {
+            "description": "Path to an Agda source file (.agda, but also literate formats such as .lagda.md, .lagda.tex, .lagda.typ, etc). Relative paths are resolved against the server process's working directory, so prefer an absolute path when that directory may be ambiguous.",
+            "type": "string"
+          },
+          "timeout": {
+            "description": "How long this call may run, in seconds, before the server cancels it. Defaults to 60.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "name": "load"
+    },
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Inspect an open goal in the currently loaded Agda file without modifying anything. Reports the goal's type, its local context, its cubical boundary when the goal has one, and any unsolved constraints mentioning the goal. Types are rendered at the requested normalization. To try an expression at a goal, use check or infer instead.",
+      "inputSchema": {
+        "properties": {
+          "goal": {
+            "description": "The target goal's interaction ID (the N in `?N`).",
+            "type": "integer"
+          },
+          "load_id": {
+            "description": "The load ID from the load result that issued this goal ID. Each load makes fresh goal ID assignments, so use the most recently issued load ID and goal IDs. If you no longer have that result, load the file again.",
+            "type": "string"
+          },
+          "normalization": {
+            "description": "How much to normalize reported types. Defaults to `simplified`, which is what Agda's interactive goal display shows, but which does not unfold definitions. `normalized` unfolds definitions all the way, while `asis` reports types exactly as written.",
+            "enum": [
+              "asis",
+              "headnormal",
+              "instantiated",
+              "normalized",
+              "simplified"
+            ],
+            "type": "string"
+          },
+          "timeout": {
+            "description": "How long this call may run, in seconds, before the server cancels it. Defaults to 30.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "load_id",
+          "goal"
+        ],
+        "type": "object"
+      },
+      "name": "goal"
+    },
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Check an expression against the type of an open goal. Nothing is modified, so use this as a dry run before give. The response states whether the expression checks, and on success reports the elaboration under \"Elaborates to:\". A failure is a normal result rather than a tool error. When the expression does not check, use infer to see its inferred type. The expression is parsed and checked in the goal's scope, so its errors carry positions relative to the expression, not the file. The elaboration is rendered at the requested normalization. Several read-only calls may use the same load ID at the same time. To just inspect the goal, use goal instead.",
+      "inputSchema": {
+        "properties": {
+          "expression": {
+            "description": "The Agda expression to check against the goal.",
+            "type": "string"
+          },
+          "goal": {
+            "description": "The target goal's interaction ID (the N in `?N`).",
+            "type": "integer"
+          },
+          "load_id": {
+            "description": "The load ID from the load result that issued this goal ID. Each load makes fresh goal ID assignments, so use the most recently issued load ID and goal IDs. If you no longer have that result, load the file again.",
+            "type": "string"
+          },
+          "normalization": {
+            "description": "How much to normalize reported types. Defaults to `simplified`, which is what Agda's interactive goal display shows, but which does not unfold definitions. `normalized` unfolds definitions all the way, while `asis` reports types exactly as written.",
+            "enum": [
+              "asis",
+              "headnormal",
+              "instantiated",
+              "normalized",
+              "simplified"
+            ],
+            "type": "string"
+          },
+          "timeout": {
+            "description": "How long this call may run, in seconds, before the server cancels it. Defaults to 30.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "load_id",
+          "goal",
+          "expression"
+        ],
+        "type": "object"
+      },
+      "name": "check"
+    },
+    {
+      "annotations": {
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "description": "Infer the type of an expression in the scope of an open goal. Nothing is modified. The response reports the inferred type under \"Have at ?n:\". A failure is a normal result rather than a tool error. Inference does not consult the goal's type, so it can succeed where check fails on the same expression. The expression is parsed and its type inferred in the goal's scope, so its errors carry positions relative to the expression, not the file. Types are rendered at the requested normalization. Several read-only calls may use the same load ID at the same time. To just inspect the goal, use goal instead.",
+      "inputSchema": {
+        "properties": {
+          "expression": {
+            "description": "The Agda expression to infer the type of.",
+            "type": "string"
+          },
+          "goal": {
+            "description": "The target goal's interaction ID (the N in `?N`).",
+            "type": "integer"
+          },
+          "load_id": {
+            "description": "The load ID from the load result that issued this goal ID. Each load makes fresh goal ID assignments, so use the most recently issued load ID and goal IDs. If you no longer have that result, load the file again.",
+            "type": "string"
+          },
+          "normalization": {
+            "description": "How much to normalize reported types. Defaults to `simplified`, which is what Agda's interactive goal display shows, but which does not unfold definitions. `normalized` unfolds definitions all the way, while `asis` reports types exactly as written.",
+            "enum": [
+              "asis",
+              "headnormal",
+              "instantiated",
+              "normalized",
+              "simplified"
+            ],
+            "type": "string"
+          },
+          "timeout": {
+            "description": "How long this call may run, in seconds, before the server cancels it. Defaults to 30.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "load_id",
+          "goal",
+          "expression"
+        ],
+        "type": "object"
+      },
+      "name": "infer"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Fill open goals in the currently loaded Agda file by writing expressions into them. The batch is all-or-nothing and executed in order. If one item is rejected, the rest are skipped and no edits are written. Before writing, the server checks that the file on disk still matches the source Agda checked, and refuses everything if it changed. Except when the load ID is refused, every outcome is followed by a reload that issues a new load ID and fresh goal ID assignments, so the goal IDs in this request are no longer valid afterwards. What is written may be Agda's rendering of the expression rather than the submitted text, so the response shows what went in. Files are written back as UTF-8 with LF line endings. If the call runs out of time after the edits are written but before the reload finishes, the file on disk has changed without having been checked, and the other tools refuse to work against the earlier load until you call `load` again.",
+      "inputSchema": {
+        "properties": {
+          "gives": {
+            "description": "The batch of goals to fill. Each goal may appear at most once.",
+            "items": {
+              "properties": {
+                "action": {
+                  "description": "`give` checks the expression against the goal and writes it, while `refine` partially fills the goal and leaves new subgoals in its place. Defaults to `give`.",
+                  "enum": [
+                    "give",
+                    "refine"
+                  ],
+                  "type": "string"
+                },
+                "expression": {
+                  "description": "The Agda expression to write into the goal.",
+                  "type": "string"
+                },
+                "goal": {
+                  "description": "The target goal's interaction ID (the N in `?N`).",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "goal",
+                "expression"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "load_id": {
+            "description": "The load ID from the load result that issued this goal ID. Each load makes fresh goal ID assignments, so use the most recently issued load ID and goal IDs. If you no longer have that result, load the file again.",
+            "type": "string"
+          },
+          "timeout": {
+            "description": "How long this call may run, in seconds, before the server cancels it. Defaults to 60.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "load_id",
+          "gives"
+        ],
+        "type": "object"
+      },
+      "name": "give"
+    },
+    {
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Split an open goal into cases, replacing the clause containing the goal with one clause per case. Pass the pattern variables to split on, or the empty list to introduce the clause's remaining arguments. A variable not currently in scope is revealed as a visible pattern rather than split on. The replacement is written to the file, and a reload follows, which issues a new load ID and fresh goal ID assignments, so the goal IDs in this request are no longer valid afterwards. If the call runs out of time after the replacement is written but before the reload finishes, the file on disk has changed without having been checked, and the other tools refuse to work against the earlier load until you call `load` again.",
+      "inputSchema": {
+        "properties": {
+          "goal": {
+            "description": "The target goal's interaction ID (the N in `?N`).",
+            "type": "integer"
+          },
+          "load_id": {
+            "description": "The load ID from the load result that issued this goal ID. Each load makes fresh goal ID assignments, so use the most recently issued load ID and goal IDs. If you no longer have that result, load the file again.",
+            "type": "string"
+          },
+          "timeout": {
+            "description": "How long this call may run, in seconds, before the server cancels it. Defaults to 60.",
+            "type": "integer"
+          },
+          "variables": {
+            "description": "The pattern variables to split on, by name. An empty list instead introduces the clause's remaining arguments.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "load_id",
+          "goal",
+          "variables"
+        ],
+        "type": "object"
+      },
+      "name": "case_split"
+    }
+  ]
+}

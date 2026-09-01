@@ -20,6 +20,7 @@ import Data.Aeson qualified as Aeson
 import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Text (Text)
+import Data.Text qualified as Text
 import Numeric.Natural (Natural)
 import System.Timeout (timeout)
 import Test.Tasty (TestTree, testGroup)
@@ -27,18 +28,21 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 import AgdaMCP.Tools.Load qualified as Load
 import AgdaMCP.Tools.LoadId (LoadGeneration (..))
-import AgdaMCP.Tools.MCP (
-  Budget (..),
-  inspectBudget,
-  loadBudget,
-  parseTimeout,
- )
+import AgdaMCP.Tools.Render (renderReadOnlyTimeout)
 import AgdaMCP.Tools.State (
   ToolM,
   ToolState (..),
   newToolState,
   runToolM,
   withBudget,
+ )
+import AgdaMCP.Tools.Tool (
+  Answer (..),
+  Budget (..),
+  Tool (..),
+  inspectBudget,
+  loadBudget,
+  parseTimeout,
  )
 import Test.Tool.Harness (withFixtureToolState)
 
@@ -76,6 +80,29 @@ agdaTests warm =
           response <-
             runToolM stateVariable $ withBudget (seconds 1) (loadOf path)
           response @?= Nothing
+          issued stateVariable >>= (@?= 0)
+    , testCase "one that outruns its budget answers timed_out" $
+        withSlowCheck warm $ \path stateVariable -> do
+          answer <-
+            toolCall
+              Load.loadTool
+              stateVariable
+              ( Map.fromList
+                  [ ("path", Aeson.String $ Text.pack path)
+                  , ("timeout", Aeson.Number 1)
+                  ]
+              )
+          answer
+            @?= Answer
+              { answerOk = False
+              , answerText = renderReadOnlyTimeout 1
+              , answerValue =
+                  Aeson.object
+                    [ "kind" Aeson..= Aeson.String "timed_out"
+                    , "seconds" Aeson..= (1 :: Int)
+                    , "message" Aeson..= renderReadOnlyTimeout 1
+                    ]
+              }
           issued stateVariable >>= (@?= 0)
     ]
  where

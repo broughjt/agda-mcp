@@ -7,8 +7,13 @@ import System.Environment (getArgs)
 import System.Exit (exitFailure, exitSuccess)
 import System.IO (BufferMode (..), hSetBuffering, stderr)
 
-import AgdaMCP (handlers, newToolState, serverInfo)
-import AgdaMCP.Tools.Options (Outcome (Helped, Parsed, Rejected), parseOptions)
+import AgdaMCP.MCP (
+  Outcome (Helped, Parsed, Rejected),
+  handlers,
+  parseOptions,
+  serverInfo,
+ )
+import AgdaMCP.Tools (newToolState)
 
 main :: IO ()
 main = do

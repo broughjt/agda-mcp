@@ -12,7 +12,7 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
-import Test.Tool.Harness (loadId, withFixtureToolSession)
+import Test.Tool.Harness (describedKinds, loadId, withFixtureToolSession)
 
 import AgdaMCP.Interaction (Error (..), Warning (..))
 import AgdaMCP.Interaction.GoalInfer (Have (..))
@@ -20,14 +20,15 @@ import AgdaMCP.Tools.Infer (
   InferReport (..),
   Request (..),
   Response (..),
+  inferTool,
   renderResponse,
  )
 import AgdaMCP.Tools.Infer qualified as Infer
 import AgdaMCP.Tools.Load (LoadRefusal (..))
 import AgdaMCP.Tools.Load qualified as Load
 import AgdaMCP.Tools.LoadId (LoadId, LoadIdRefusal (..))
-import AgdaMCP.Tools.MCP (parseArguments)
 import AgdaMCP.Tools.Source (SourceRefusal (..))
+import AgdaMCP.Tools.Tool (parseArguments)
 
 tests :: IO TCState -> TestTree
 tests warm =
@@ -35,6 +36,7 @@ tests warm =
     "Infer"
     [ parseArgumentsTests
     , renderResponseTests
+    , toJSONTests
     , sessionTests warm
     ]
 
@@ -253,6 +255,64 @@ renderResponseTests =
                 , "  i = i1 ⊢ x"
                 ]
             )
+    ]
+
+toJSONTests :: TestTree
+toJSONTests =
+  testGroup
+    "toJSON"
+    [ testCase "a refusal is its own kind, with the prose as its message" $
+        Aeson.toJSON (ResponseRefused $ RefusedSource RefusalChanged)
+          @?= Aeson.object
+            [ "kind" Aeson..= Aeson.String "source_changed"
+            , "message"
+                Aeson..= Aeson.String
+                  "The file on disk no longer matches the source Agda checked. Load \
+                  \the file again, then use the load ID and goal IDs from that load \
+                  \result."
+            ]
+    , testCase "an unknown goal" $
+        Aeson.toJSON (ResponseUnknownGoal 5)
+          @?= Aeson.object
+            [ "kind" Aeson..= Aeson.String "unknown_goal"
+            , "goal" Aeson..= (5 :: Int)
+            , "message"
+                Aeson..= Aeson.String
+                  "No goal ?5 in the current load. Check the goal IDs in the most \
+                  \recent result."
+            ]
+    , testCase "an expression that does not infer carries the goal and the error" $
+        Aeson.toJSON (ResponseFailed 0 (plainError parseError))
+          @?= Aeson.object
+            [ "kind" Aeson..= Aeson.String "failed"
+            , "goal" Aeson..= (0 :: Int)
+            , "error"
+                Aeson..= Aeson.object
+                  [ "message" Aeson..= parseError
+                  , "location" Aeson..= Aeson.Null
+                  , "warnings" Aeson..= ([] :: [Aeson.Value])
+                  ]
+            ]
+    , testCase "an inferred type comes with both boundaries" $
+        Aeson.toJSON (ResponseOk 0 inferredPath)
+          @?= Aeson.object
+            [ "kind" Aeson..= Aeson.String "inferred"
+            , "goal" Aeson..= (0 :: Int)
+            , "expression" Aeson..= Aeson.String "p i"
+            , "type" Aeson..= Aeson.String "A"
+            , "boundary" Aeson..= map Aeson.String ["i = i0 ⊢ x", "i = i1 ⊢ y"]
+            , "goal_boundary" Aeson..= map Aeson.String goalFaces
+            ]
+    , testCase "every kind is described" $
+        describedKinds
+          inferTool
+          renderResponse
+          [ ResponseRefused $ RefusedSource RefusalChanged
+          , ResponseRefused $ RefusedLoadId NoCurrentLoad
+          , ResponseUnknownGoal 5
+          , ResponseFailed 0 (plainError parseError)
+          , ResponseOk 0 inferredPath
+          ]
     ]
 
 sessionTests :: IO TCState -> TestTree

@@ -2,6 +2,8 @@
 
 module Test.Tool.Load (tests) where
 
+import Agda.Interaction.Options (defaultOptions)
+import Control.Concurrent.MVar (newMVar)
 import Data.Aeson qualified as Aeson
 import Data.Map qualified as Map
 import Data.Text (Text)
@@ -11,6 +13,7 @@ import Test.Tasty.HUnit (testCase, (@?=))
 
 import AgdaMCP.Interaction (
   ContextEntry (..),
+  Error (..),
   Goal (..),
   GoalShape (..),
   HiddenMetavariable (..),
@@ -23,18 +26,22 @@ import AgdaMCP.Tools.Load (
   LoadReport (..),
   Request (..),
   Response (..),
+  loadTool,
   renderResponse,
  )
-import AgdaMCP.Tools.MCP (parseArguments)
+import AgdaMCP.Tools.State (newToolState)
+import AgdaMCP.Tools.Tool (Answer (..), Tool (..), parseArguments)
 import Test.Corpus qualified as Corpus
-import Test.Tool.Harness (loadId)
+import Test.Tool.Harness (describedKinds, loadId)
 
 tests :: TestTree
 tests =
   testGroup
     "Load"
     [ parseArgumentsTests
+    , toolCallTests
     , renderResponseTests
+    , toJSONTests
     ]
 
 parseArgumentsTests :: TestTree
@@ -55,6 +62,42 @@ parseArgumentsTests =
  where
   parseRequest :: Map.Map Text Aeson.Value -> Either Text Request
   parseRequest = parseArguments
+
+toolCallTests :: TestTree
+toolCallTests =
+  testGroup
+    "toolCall"
+    [ testCase "arguments that fail to decode answer invalid_arguments" $ do
+        stateVariable <- newToolState defaultOptions >>= newMVar
+        answer <- toolCall loadTool stateVariable Map.empty
+        answer @?= invalidArguments "Error in $: key \"path\" not found"
+    , testCase "a timeout that fails to parse answers invalid_arguments" $ do
+        stateVariable <- newToolState defaultOptions >>= newMVar
+        answer <-
+          toolCall
+            loadTool
+            stateVariable
+            ( Map.fromList
+                [ ("path", Aeson.String "/tmp/Example.agda")
+                , ("timeout", Aeson.Number 0)
+                ]
+            )
+        answer
+          @?= invalidArguments
+            "expected timeout to be a whole number of seconds greater than zero"
+    ]
+ where
+  invalidArguments :: Text -> Answer
+  invalidArguments message =
+    Answer
+      { answerOk = False
+      , answerText = message
+      , answerValue =
+          Aeson.object
+            [ "kind" Aeson..= Aeson.String "invalid_arguments"
+            , "message" Aeson..= message
+            ]
+      }
 
 renderResponseTests :: TestTree
 renderResponseTests =
@@ -739,7 +782,150 @@ renderResponseTests =
               \being checked. Load it again."
     ]
 
+toJSONTests :: TestTree
+toJSONTests =
+  testGroup
+    "toJSON"
+    [ testCase "a load with nothing to report has every section, empty" $
+        Aeson.toJSON (ResponseOk report)
+          @?= Aeson.object
+            [ "kind" Aeson..= Aeson.String "loaded"
+            , "load_id" Aeson..= Aeson.String "L17-k7x2"
+            , "path" Aeson..= Aeson.String "/tmp/Example.agda"
+            , "goals" Aeson..= ([] :: [Aeson.Value])
+            , "hidden_metavariables" Aeson..= ([] :: [Aeson.Value])
+            , "warnings" Aeson..= ([] :: [Aeson.Value])
+            , "non_fatal_errors" Aeson..= ([] :: [Aeson.Value])
+            ]
+    , testCase "every section is encoded" $
+        Aeson.toJSON
+          ( ResponseOk
+              report
+                { loadReportGoals =
+                    [
+                      ( Goal
+                          { goalId = 0
+                          , goalSpan = Span (Position 0 14 16) (Position 1 14 17)
+                          , goalShape = GoalOfType "ℕ"
+                          }
+                      , [contextEntry "x" "ℕ"]
+                      )
+                    ]
+                , loadReportHiddenMetavariables =
+                    [ HiddenMetavariable
+                        { hiddenMetavariableName = "_12"
+                        , hiddenMetavariableSpan = Nothing
+                        , hiddenMetavariableShape = GoalSort
+                        }
+                    ]
+                , loadReportWarnings =
+                    [ Warning
+                        ( Just
+                            ( "/tmp/Example.agda"
+                            , Span (Position 20 8 1) (Position 31 8 12)
+                            )
+                        , "a warning"
+                        )
+                    ]
+                , loadReportNonFatalErrors =
+                    [NonFatalError (Nothing, "Unsolved constraints")]
+                }
+          )
+          @?= Aeson.object
+            [ "kind" Aeson..= Aeson.String "loaded"
+            , "load_id" Aeson..= Aeson.String "L17-k7x2"
+            , "path" Aeson..= Aeson.String "/tmp/Example.agda"
+            , "goals"
+                Aeson..= [ Aeson.object
+                             [ "id" Aeson..= (0 :: Int)
+                             , "span" Aeson..= spanValue (0, 14, 16) (1, 14, 17)
+                             , "shape"
+                                 Aeson..= Aeson.object
+                                   [ "kind" Aeson..= Aeson.String "of_type"
+                                   , "type" Aeson..= Aeson.String "ℕ"
+                                   ]
+                             , "context" Aeson..= [entryValue "x" "ℕ"]
+                             ]
+                         ]
+            , "hidden_metavariables"
+                Aeson..= [ Aeson.object
+                             [ "name" Aeson..= Aeson.String "_12"
+                             , "span" Aeson..= Aeson.Null
+                             , "shape"
+                                 Aeson..= Aeson.object
+                                   ["kind" Aeson..= Aeson.String "sort"]
+                             ]
+                         ]
+            , "warnings"
+                Aeson..= [ Aeson.object
+                             [ "message" Aeson..= Aeson.String "a warning"
+                             , "location"
+                                 Aeson..= Aeson.object
+                                   [ "path" Aeson..= Aeson.String "/tmp/Example.agda"
+                                   , "span" Aeson..= spanValue (20, 8, 1) (31, 8, 12)
+                                   ]
+                             ]
+                         ]
+            , "non_fatal_errors"
+                Aeson..= [ Aeson.object
+                             [ "message" Aeson..= Aeson.String "Unsolved constraints"
+                             , "location" Aeson..= Aeson.Null
+                             ]
+                         ]
+            ]
+    , testCase "a failed load carries the error and its location" $
+        Aeson.toJSON (ResponseError Corpus.typeError)
+          @?= Aeson.object
+            [ "kind" Aeson..= Aeson.String "failed"
+            , "error"
+                Aeson..= Aeson.object
+                  [ "message" Aeson..= errorMessage Corpus.typeError
+                  , "location"
+                      Aeson..= Aeson.object
+                        [ "path" Aeson..= Corpus.fixtureFile "TypeError.agda"
+                        , "span" Aeson..= spanValue (76, 6, 9) (77, 6, 10)
+                        ]
+                  , "warnings" Aeson..= ([] :: [Aeson.Value])
+                  ]
+            ]
+    , testCase "a stale load is file_changed" $
+        Aeson.toJSON ResponseStale
+          @?= Aeson.object ["kind" Aeson..= Aeson.String "file_changed"]
+    , testCase "every kind is described" $
+        describedKinds
+          loadTool
+          (Right . renderResponse)
+          [ResponseOk report, ResponseError Corpus.typeError, ResponseStale]
+    ]
+
 -- Helpers
+
+spanValue :: (Int, Int, Int) -> (Int, Int, Int) -> Aeson.Value
+spanValue start end =
+  Aeson.object ["start" Aeson..= position start, "end" Aeson..= position end]
+ where
+  position (offset, line, column) =
+    Aeson.object
+      [ "offset" Aeson..= offset
+      , "line" Aeson..= line
+      , "column" Aeson..= column
+      ]
+
+entryValue :: Text -> Text -> Aeson.Value
+entryValue name ty =
+  Aeson.object
+    [ "original_name" Aeson..= name
+    , "reified_name" Aeson..= name
+    , "original_in_scope" Aeson..= True
+    , "reified_in_scope" Aeson..= True
+    , "type" Aeson..= ty
+    , "let_value" Aeson..= Aeson.Null
+    , "is_instance" Aeson..= False
+    , "cohesion" Aeson..= Aeson.Null
+    , "polarity" Aeson..= Aeson.Null
+    , "erased" Aeson..= False
+    , "relevance" Aeson..= Aeson.Null
+    ]
 
 rendered :: [Text] -> Text
 rendered = Text.intercalate "\n"

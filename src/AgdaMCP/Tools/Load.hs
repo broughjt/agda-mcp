@@ -18,7 +18,7 @@ import Agda.Syntax.Common (InteractionId)
 import Control.Exception (Exception, throwIO)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (gets, modify)
-import Data.Aeson (FromJSON (..), withObject, (.:))
+import Data.Aeson (FromJSON (..), ToJSON (..), withObject, (.:))
 import Data.Text (Text)
 import Data.Text qualified as Text
 import MCP.Server (
@@ -53,8 +53,6 @@ import AgdaMCP.Tools.LoadId (
   requireCurrentLoad,
  )
 import AgdaMCP.Tools.MCP (
-  Tool (..),
-  loadBudget,
   textToolHandle,
   timeoutSchema,
  )
@@ -71,11 +69,17 @@ import AgdaMCP.Tools.Render (
  )
 import AgdaMCP.Tools.Source (SourceRefusal, readChecked)
 import AgdaMCP.Tools.State (ToolM, ToolState (..), liftInteraction)
+import AgdaMCP.Tools.Tool (
+  Tool (..),
+  loadBudget,
+  toolHandle,
+ )
 
 loadTool :: Tool
 loadTool =
   Tool
-    { toolDefinition =
+    { toolDescription = error "not implemented"
+    , toolDefinition =
         ( mkToolDefinition "load" loadDescription $
             schema $
               SchemaObject
@@ -87,6 +91,7 @@ loadTool =
           { toolDefinitionAnnotations = Just loadAnnotations
           }
     , toolRun = textToolHandle loadBudget load $ Right . renderResponse
+    , toolCall = toolHandle loadBudget load $ Right . renderResponse
     }
  where
   loadAnnotations :: ToolAnnotations
@@ -306,3 +311,6 @@ renderNonFatalError (NonFatalError (_, message)) =
   -- Like warnings, the structural location beside the message is not rendered:
   -- the message embeds its own location.
   indent message
+
+instance ToJSON Response where
+  toJSON = error "not implemented"
