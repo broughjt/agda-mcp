@@ -14,7 +14,11 @@ import System.Directory (removeFile)
 import Test.Corpus qualified as Corpus
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertBool, assertFailure, testCase, (@?=))
-import Test.Tool.Harness (withFixtureToolSession, withFixtureToolSessions)
+import Test.Tool.Harness (
+  loadId,
+  withFixtureToolSession,
+  withFixtureToolSessions,
+ )
 
 import AgdaMCP.Interaction (
   ContextEntry (..),
@@ -30,7 +34,7 @@ import AgdaMCP.Tools.Goal (
 import AgdaMCP.Tools.Goal qualified as Goal
 import AgdaMCP.Tools.Load (LoadRefusal (..))
 import AgdaMCP.Tools.Load qualified as Load
-import AgdaMCP.Tools.LoadId (LoadId (..), LoadIdRefusal (..))
+import AgdaMCP.Tools.LoadId (LoadId, LoadIdRefusal (..))
 import AgdaMCP.Tools.MCP (normalizations, parseArguments, renderNormalization)
 import AgdaMCP.Tools.Source (SourceRefusal (..))
 import Data.Foldable (for_)
@@ -61,14 +65,14 @@ parseArgumentsTests =
           )
           @?= Left
             "Error in $['load_id']: expected a load_id from the most recent \
-            \result, such as \"L17\", but got \"17\""
+            \result, such as \"L17-k7x2\", but got \"17\""
     , testCase "a call without a goal is refused" $
-        parseRequest (Map.fromList [("load_id", Aeson.String "L1")])
+        parseRequest (Map.fromList [("load_id", Aeson.String "L1-k7x2")])
           @?= Left "Error in $: key \"goal\" not found"
     , testCase "a goal that is not an integer is refused" $
         parseRequest
           ( Map.fromList
-              [ ("load_id", Aeson.String "L1")
+              [ ("load_id", Aeson.String "L1-k7x2")
               , ("goal", Aeson.String "?0")
               ]
           )
@@ -78,7 +82,7 @@ parseArgumentsTests =
     , testCase "an unknown normalization is refused" $
         parseRequest
           ( Map.fromList
-              [ ("load_id", Aeson.String "L1")
+              [ ("load_id", Aeson.String "L1-k7x2")
               , ("goal", Aeson.Number 0)
               , ("normalization", Aeson.String "very")
               ]
@@ -89,20 +93,20 @@ parseArgumentsTests =
     , testCase "normalization defaults to simplified" $
         parseRequest
           ( Map.fromList
-              [ ("load_id", Aeson.String "L3")
+              [ ("load_id", Aeson.String "L3-k7x2")
               , ("goal", Aeson.Number 0)
               ]
           )
-          @?= Right (Request (LoadId 3) 0 Simplified)
+          @?= Right (Request (loadId 3) 0 Simplified)
     , testCase "all three arguments parse" $
         parseRequest
           ( Map.fromList
-              [ ("load_id", Aeson.String "L3")
+              [ ("load_id", Aeson.String "L3-k7x2")
               , ("goal", Aeson.Number 2)
               , ("normalization", Aeson.String "normalized")
               ]
           )
-          @?= Right (Request (LoadId 3) 2 Normalised)
+          @?= Right (Request (loadId 3) 2 Normalised)
     ]
  where
   parseRequest :: Map.Map Text Aeson.Value -> Either Text Request
@@ -128,10 +132,10 @@ renderResponseTests =
             \most recent load failed. Load the file, then use the load ID and \
             \goal IDs from that load result."
     , testCase "a stale load_id names the current load" $
-        renderResponse (ResponseRefused $ RefusedLoadId $ StaleLoadId $ LoadId 2)
+        renderResponse (ResponseRefused $ RefusedLoadId $ StaleLoadId $ loadId 2)
           @?= Left
             "The supplied load ID is from an earlier load. The current load ID \
-            \is L2. Each load makes fresh goal ID assignments, so use the most \
+            \is L2-k7x2. Each load makes fresh goal ID assignments, so use the most \
             \recently issued load ID and goal IDs. If you no longer have them, \
             \load the file again."
     , testCase "a file that changed on disk says to load it again" $
@@ -367,7 +371,7 @@ sessionTests warm =
             loaded <-
               Load.load Load.Request {Load.loadRequestPath = holes}
                 >>= liftIO . expectLoadOk "the first load"
-            liftIO $ Load.loadReportId loaded @?= LoadId 1
+            liftIO $ Load.loadReportId loaded @?= loadId 1
             failed <- Load.load Load.Request {Load.loadRequestPath = broken}
             liftIO $ case failed of
               Load.ResponseError _ -> pure ()
@@ -377,7 +381,7 @@ sessionTests warm =
             refused <-
               Goal.goal
                 Goal.Request
-                  { goalRequestLoadId = LoadId 1
+                  { goalRequestLoadId = loadId 1
                   , goalRequestGoalId = 0
                   , goalRequestNormalization = Simplified
                   }
@@ -389,13 +393,13 @@ sessionTests warm =
             Load.load Load.Request {Load.loadRequestPath = path}
               >>= liftIO . expectLoadOk "the first load"
           liftIO $ Text.IO.appendFile path "\n-- edited in another window\n"
-          refused <- Goal.goal (goalRequest $ LoadId 1)
+          refused <- Goal.goal (goalRequest $ loadId 1)
           liftIO $ refused @?= ResponseRefused (RefusedSource RefusalChanged)
           reloaded <-
             Load.load Load.Request {Load.loadRequestPath = path}
               >>= liftIO . expectLoadOk "the reload"
-          liftIO $ Load.loadReportId reloaded @?= LoadId 2
-          answered <- Goal.goal (goalRequest $ LoadId 2)
+          liftIO $ Load.loadReportId reloaded @?= loadId 2
+          answered <- Goal.goal (goalRequest $ loadId 2)
           liftIO $ case answered of
             ResponseOk {} -> pure ()
             other ->
@@ -407,7 +411,7 @@ sessionTests warm =
             Load.load Load.Request {Load.loadRequestPath = path}
               >>= liftIO . expectLoadOk "load"
           liftIO $ removeFile path
-          refused <- Goal.goal (goalRequest $ LoadId 1)
+          refused <- Goal.goal (goalRequest $ loadId 1)
           liftIO $ case refused of
             ResponseRefused (RefusedSource (RefusalUnreadable _)) -> pure ()
             other ->
@@ -423,7 +427,7 @@ sessionTests warm =
           response <-
             Goal.goal
               Goal.Request
-                { goalRequestLoadId = LoadId 1
+                { goalRequestLoadId = loadId 1
                 , goalRequestGoalId = 5
                 , goalRequestNormalization = Simplified
                 }
@@ -441,7 +445,7 @@ sessionTests warm =
           report <-
             Goal.goal
               Goal.Request
-                { goalRequestLoadId = LoadId 1
+                { goalRequestLoadId = loadId 1
                 , goalRequestGoalId = 0
                 , goalRequestNormalization = AsIs
                 }
@@ -466,9 +470,9 @@ rendered :: [Text] -> Text
 rendered = Text.intercalate "\n"
 
 goalRequest :: LoadId -> Request
-goalRequest loadId =
+goalRequest submitted =
   Request
-    { goalRequestLoadId = loadId
+    { goalRequestLoadId = submitted
     , goalRequestGoalId = 0
     , goalRequestNormalization = Simplified
     }

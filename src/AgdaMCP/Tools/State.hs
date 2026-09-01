@@ -18,7 +18,7 @@ import AgdaMCP.Interaction (
   InteractionState,
   newInteractionState,
  )
-import AgdaMCP.Tools.LoadId (LoadGeneration (..))
+import AgdaMCP.Tools.LoadId (LoadGeneration (..), newSessionNonce)
 import Data.Tuple (swap)
 
 {- | Tool state, consisting of interaction-layer state, held opaquely, and state
@@ -32,9 +32,19 @@ data ToolState = ToolState
 type ToolM = StateT ToolState IO
 
 newToolState :: CommandLineOptions -> IO ToolState
-newToolState options =
-  flip ToolState LoadGeneration {loadsIssued = 0, currentLoad = Nothing}
-    <$> newInteractionState options
+newToolState options = do
+  nonce <- newSessionNonce
+  interactionState <- newInteractionState options
+  pure
+    ToolState
+      { toolInteractionState = interactionState
+      , toolLoadGeneration =
+          LoadGeneration
+            { sessionNonce = nonce
+            , loadsIssued = 0
+            , currentLoad = Nothing
+            }
+      }
 
 {- | Run an interaction-layer action on the session inside @ToolState@, writing
 the successor session back.

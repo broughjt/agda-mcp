@@ -35,12 +35,12 @@ import AgdaMCP.Tools.Give (
   renderResponse,
  )
 import AgdaMCP.Tools.Load qualified as Load
-import AgdaMCP.Tools.LoadId (LoadId (..), LoadIdRefusal (..))
+import AgdaMCP.Tools.LoadId (LoadId, LoadIdRefusal (..))
 import AgdaMCP.Tools.MCP (parseArguments)
 import AgdaMCP.Tools.State (ToolM)
 import Data.Functor (void)
 import Test.Corpus qualified as Corpus
-import Test.Tool.Harness (withFixtureToolSession)
+import Test.Tool.Harness (loadId, withFixtureToolSession)
 
 tests :: IO TCState -> TestTree
 tests warm =
@@ -56,7 +56,7 @@ parseArgumentsTests =
   testGroup
     "parseArguments"
     [ testCase "a call without any gives is refused" $
-        parseRequest (Map.fromList [("load_id", Aeson.String "L1")])
+        parseRequest (Map.fromList [("load_id", Aeson.String "L1-k7x2")])
           @?= Left "Error in $: key \"gives\" not found"
     , testCase "gives must be an array" $
         parseRequest
@@ -145,7 +145,7 @@ parseArgumentsTests =
             \but encountered Null"
     , testCase "the action defaults to give" $
         parseRequest (arguments [item 0 "refl" Nothing])
-          @?= Right (Request (LoadId 1) [(0, ActionGive "refl")])
+          @?= Right (Request (loadId 1) [(0, ActionGive "refl")])
     , testCase "a batch of both actions parses in order" $
         parseRequest
           ( arguments
@@ -155,7 +155,7 @@ parseArgumentsTests =
           )
           @?= Right
             ( Request
-                (LoadId 1)
+                (loadId 1)
                 [(0, ActionGive "refl"), (1, ActionRefine "suc ?")]
             )
     ]
@@ -170,7 +170,7 @@ parseArgumentsTests =
   argumentsValue :: Aeson.Value -> Map.Map Text Aeson.Value
   argumentsValue gives =
     Map.fromList
-      [ ("load_id", Aeson.String "L1")
+      [ ("load_id", Aeson.String "L1-k7x2")
       , ("gives", gives)
       ]
 
@@ -200,10 +200,10 @@ renderResponseTests =
             \most recent load failed. Load the file, then use the load ID and \
             \goal IDs from that load result."
     , testCase "a stale load_id names the current load" $
-        renderResponse (ResponseRefused $ StaleLoadId $ LoadId 2)
+        renderResponse (ResponseRefused $ StaleLoadId $ loadId 2)
           @?= Left
             "The supplied load ID is from an earlier load. The current load ID \
-            \is L2. Each load makes fresh goal ID assignments, so use the most \
+            \is L2-k7x2. Each load makes fresh goal ID assignments, so use the most \
             \recently issued load ID and goal IDs. If you no longer have them, \
             \load the file again."
     , testCase "one applied edit reports the text that went in" $
@@ -370,7 +370,7 @@ renderResponseTests =
                         , "  ?0 = suc ?"
                         , ""
                         , "Load succeeded: 1 goal"
-                        , "Load ID: L5"
+                        , "Load ID: L5-k7x2"
                         , "File: /tmp/Example.agda"
                         , ""
                         , "?0 at 14:16-17"
@@ -402,32 +402,32 @@ sessionTests warm =
     "sessions"
     [ testCase "a file edited on disk since the load is refused unwritten" $
         withFixtureToolSession warm "test/fixtures/HoleNatural.agda" $ \path -> do
-          void $ expectLoaded (LoadId 1) path
+          void $ expectLoaded (loadId 1) path
           liftIO $ Text.IO.appendFile path onDiskEdit
           (outcome, report) <-
-            give (Request (LoadId 1) [(0, ActionGive "zero")])
+            give (Request (loadId 1) [(0, ActionGive "zero")])
               >>= liftIO . expectCompleted "a give against an edited file"
           liftIO $ do
             outcome @?= OutcomeFileChanged
             contentsShouldBe path (holeNatural <> onDiskEdit)
-            Load.loadReportId report @?= LoadId 2
+            Load.loadReportId report @?= loadId 2
             goals report @?= [(0, GoalOfType "ℕ")]
     , testCase
         "when the file is edited on disk and the expression would be rejected, \
         \the edit is reported rather than the rejection"
         $ withFixtureToolSession warm "test/fixtures/GiveExpressions.agda"
         $ \path -> do
-          _ <- expectLoaded (LoadId 1) path
+          _ <- expectLoaded (loadId 1) path
           liftIO $ Text.IO.appendFile path onDiskEdit
           (outcome, _) <-
-            give (Request (LoadId 1) [(0, ActionGive "suc suc")])
+            give (Request (loadId 1) [(0, ActionGive "suc suc")])
               >>= liftIO . expectCompleted "an ill-typed give against an edited file"
           liftIO $ outcome @?= OutcomeFileChanged
     , testCase "a literate file is spliced inside its code block" $
         withFixtureToolSession warm "test/fixtures/Literate.lagda.md" $ \path -> do
-          void $ expectLoaded (LoadId 1) path
+          void $ expectLoaded (loadId 1) path
           (outcome, report) <-
-            give (Request (LoadId 1) [(0, ActionGive "suc zero")])
+            give (Request (loadId 1) [(0, ActionGive "suc zero")])
               >>= liftIO . expectCompleted "a give into a literate hole"
           liftIO $ do
             case outcome of
@@ -437,13 +437,13 @@ sessionTests warm =
                 editKind applied @?= EditKindVerbatim
               other -> assertFailure $ "unexpected outcome: " <> show other
             contentsShouldBe path literateFilled
-            Load.loadReportId report @?= LoadId 2
+            Load.loadReportId report @?= loadId 2
             goals report @?= []
     , testCase "the holes a refine leaves behind arrive in its reload" $
         withFixtureToolSession warm "test/fixtures/RefineExpressions.agda" $ \path -> do
-          before <- expectLoaded (LoadId 1) path
+          before <- expectLoaded (loadId 1) path
           (outcome, report) <-
-            give (Request (LoadId 1) [(1, ActionRefine "_+_")])
+            give (Request (loadId 1) [(1, ActionRefine "_+_")])
               >>= liftIO . expectCompleted "a refine missing two arguments"
           liftIO $ do
             case outcome of
@@ -454,14 +454,14 @@ sessionTests warm =
               other -> assertFailure $ "unexpected outcome: " <> show other
             lineShouldBe path 10 "twoHoles = ? + ?"
             goalShapes before @?= replicate 3 (GoalOfType "ℕ")
-            Load.loadReportId report @?= LoadId 2
+            Load.loadReportId report @?= loadId 2
             goalShapes report @?= replicate 4 (GoalOfType "ℕ")
     , testCase "a rejected batch is reloaded and issues the next load id" $
         withFixtureToolSession warm "test/fixtures/GiveExpressions.agda" $ \path -> do
-          before <- expectLoaded (LoadId 1) path
+          before <- expectLoaded (loadId 1) path
           contents <- liftIO $ Text.IO.readFile path
           (outcome, report) <-
-            give (Request (LoadId 1) [(0, ActionGive "suc suc")])
+            give (Request (loadId 1) [(0, ActionGive "suc suc")])
               >>= liftIO . expectCompleted "an ill-typed give"
           liftIO $ do
             case outcome of
@@ -476,16 +476,16 @@ sessionTests warm =
                   other -> assertFailure $ "unexpected reason: " <> show other
               other -> assertFailure $ "unexpected outcome: " <> show other
             contentsShouldBe path contents
-            Load.loadReportId report @?= LoadId 2
+            Load.loadReportId report @?= loadId 2
             goals report @?= goals before
     , testCase
         "a goal id that is not in the load is reloaded and issues the next load id"
         $ withFixtureToolSession warm "test/fixtures/GiveExpressions.agda"
         $ \path -> do
-          _ <- expectLoaded (LoadId 1) path
+          _ <- expectLoaded (loadId 1) path
           contents <- liftIO $ Text.IO.readFile path
           (outcome, report) <-
-            give (Request (LoadId 1) [(99, ActionGive "zero")])
+            give (Request (loadId 1) [(99, ActionGive "zero")])
               >>= liftIO . expectCompleted "a give at a goal that does not exist"
           liftIO $ do
             outcome
@@ -497,17 +497,17 @@ sessionTests warm =
                   , refusalReason = RefusedUnknownGoal
                   }
             contentsShouldBe path contents
-            Load.loadReportId report @?= LoadId 2
+            Load.loadReportId report @?= loadId 2
     ]
 
 -- Helpers
 
 expectLoaded :: LoadId -> FilePath -> ToolM Load.LoadReport
-expectLoaded loadId path = do
+expectLoaded expected path = do
   report <-
     Load.load Load.Request {Load.loadRequestPath = path}
       >>= liftIO . expectLoadOk "load"
-  liftIO $ Load.loadReportId report @?= loadId
+  liftIO $ Load.loadReportId report @?= expected
   pure report
 
 expectLoadOk :: String -> Load.Response -> IO Load.LoadReport
@@ -582,14 +582,14 @@ reload = Load.ResponseOk reloadReport
 reloadLines :: [Text]
 reloadLines =
   [ "Load succeeded: no goals"
-  , "Load ID: L5"
+  , "Load ID: L5-k7x2"
   , "File: /tmp/Example.agda"
   ]
 
 reloadReport :: Load.LoadReport
 reloadReport =
   Load.LoadReport
-    { Load.loadReportId = LoadId 5
+    { Load.loadReportId = loadId 5
     , Load.loadReportPath = "/tmp/Example.agda"
     , Load.loadReportGoals = []
     , Load.loadReportHiddenMetavariables = []

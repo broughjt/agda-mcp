@@ -28,8 +28,8 @@ import AgdaMCP.Tools.Goal qualified as Goal
 import AgdaMCP.Tools.Infer qualified as Infer
 import AgdaMCP.Tools.Load (LoadRefusal (..))
 import AgdaMCP.Tools.Load qualified as Load
-import AgdaMCP.Tools.LoadId (LoadId (..), LoadIdRefusal (..))
-import Test.Tool.Harness (withFixtureToolSession)
+import AgdaMCP.Tools.LoadId (LoadIdRefusal (..))
+import Test.Tool.Harness (loadId, withFixtureToolSession)
 
 tests :: IO TCState -> TestTree
 tests warm = testGroup "Scenarios" [distributivity warm]
@@ -45,7 +45,7 @@ distributivity warm =
           Load.load Load.Request {Load.loadRequestPath = path}
             >>= liftIO . expectLoadOk "load"
         liftIO $ do
-          Load.loadReportId report @?= LoadId 1
+          Load.loadReportId report @?= loadId 1
           Load.loadReportPath report @?= path
           goals report @?= [(0, GoalOfType "_*_ DistributesOverʳ _+_")]
           contexts report @?= [[]]
@@ -56,7 +56,7 @@ distributivity warm =
         report <-
           Goal.goal
             Goal.Request
-              { Goal.goalRequestLoadId = LoadId 1
+              { Goal.goalRequestLoadId = loadId 1
               , Goal.goalRequestGoalId = 0
               , Goal.goalRequestNormalization = Simplified
               }
@@ -69,7 +69,7 @@ distributivity warm =
         report <-
           Goal.goal
             Goal.Request
-              { Goal.goalRequestLoadId = LoadId 1
+              { Goal.goalRequestLoadId = loadId 1
               , Goal.goalRequestGoalId = 0
               , Goal.goalRequestNormalization = Normalised
               }
@@ -83,7 +83,7 @@ distributivity warm =
         (edit, report) <-
           CaseSplit.caseSplit
             CaseSplit.Request
-              { CaseSplit.caseSplitRequestLoadId = LoadId 1
+              { CaseSplit.caseSplitRequestLoadId = loadId 1
               , CaseSplit.caseSplitRequestGoalId = 0
               , CaseSplit.caseSplitRequestVariables = []
               }
@@ -92,7 +92,7 @@ distributivity warm =
           CaseSplit.editVariant edit @?= MakeCaseFunction
           CaseSplit.editClauses edit @?= ["*-distribʳ-+ x y z = ?"]
           proofShouldBe path [signature, "*-distribʳ-+ x y z = ?"]
-          Load.loadReportId report @?= LoadId 2
+          Load.loadReportId report @?= loadId 2
           Load.loadReportPath report @?= path
           goals report @?= [(0, GoalOfType "(y + z) * x ≡ y * x + z * x")]
           -- TODO: Revisit when writing load response renderer
@@ -107,18 +107,18 @@ distributivity warm =
         refused <-
           Goal.goal
             Goal.Request
-              { Goal.goalRequestLoadId = LoadId 1
+              { Goal.goalRequestLoadId = loadId 1
               , Goal.goalRequestGoalId = 0
               , Goal.goalRequestNormalization = Simplified
               }
         liftIO $
-          refused @?= Goal.ResponseRefused (RefusedLoadId $ StaleLoadId $ LoadId 2)
+          refused @?= Goal.ResponseRefused (RefusedLoadId $ StaleLoadId $ loadId 2)
 
       afterSplit <- do
         (edit, report) <-
           CaseSplit.caseSplit
             CaseSplit.Request
-              { CaseSplit.caseSplitRequestLoadId = LoadId 2
+              { CaseSplit.caseSplitRequestLoadId = loadId 2
               , CaseSplit.caseSplitRequestGoalId = 0
               , CaseSplit.caseSplitRequestVariables = ["y"]
               }
@@ -129,7 +129,7 @@ distributivity warm =
                 , "*-distribʳ-+ x (suc y) z = ?"
                 ]
           proofShouldBe path splitProof
-          Load.loadReportId report @?= LoadId 3
+          Load.loadReportId report @?= loadId 3
           Load.loadReportPath report @?= path
           goals report
             @?= [ (0, GoalOfType "(zero + z) * x ≡ zero * x + z * x")
@@ -146,7 +146,7 @@ distributivity warm =
         report <-
           Goal.goal
             Goal.Request
-              { Goal.goalRequestLoadId = LoadId 3
+              { Goal.goalRequestLoadId = loadId 3
               , Goal.goalRequestGoalId = 0
               , Goal.goalRequestNormalization = Simplified
               }
@@ -159,7 +159,7 @@ distributivity warm =
         (rejection, report) <-
           Give.give
             Give.Request
-              { Give.giveRequestLoadId = LoadId 3
+              { Give.giveRequestLoadId = loadId 3
               , Give.giveRequestItems =
                   [ (0, Give.ActionGive "refl")
                   , (1, Give.ActionGive wrongStep)
@@ -187,7 +187,7 @@ distributivity warm =
                   assertFailure $ "unexpected refusal reason: " <> show other
             other -> assertFailure $ "unexpected outcome: " <> show other
           proofShouldBe path splitProof
-          Load.loadReportId report @?= LoadId 4
+          Load.loadReportId report @?= loadId 4
           Load.loadReportPath report @?= path
           goals report @?= goals afterSplit
           contexts report @?= contexts afterSplit
@@ -197,7 +197,7 @@ distributivity warm =
         response <-
           Check.check
             Check.Request
-              { Check.checkRequestLoadId = LoadId 4
+              { Check.checkRequestLoadId = loadId 4
               , Check.checkRequestGoalId = 1
               , Check.checkRequestNormalization = Simplified
               , Check.checkRequestExpression = wrongStep
@@ -225,7 +225,7 @@ distributivity warm =
         report <-
           Infer.infer
             Infer.Request
-              { Infer.inferRequestLoadId = LoadId 4
+              { Infer.inferRequestLoadId = loadId 4
               , Infer.inferRequestGoalId = 1
               , Infer.inferRequestNormalization = Simplified
               , Infer.inferRequestExpression = wrongStep
@@ -239,7 +239,7 @@ distributivity warm =
         response <-
           Check.check
             Check.Request
-              { Check.checkRequestLoadId = LoadId 4
+              { Check.checkRequestLoadId = loadId 4
               , Check.checkRequestGoalId = 1
               , Check.checkRequestNormalization = Simplified
               , Check.checkRequestExpression = step
@@ -250,7 +250,7 @@ distributivity warm =
         (applied, report) <-
           Give.give
             Give.Request
-              { Give.giveRequestLoadId = LoadId 4
+              { Give.giveRequestLoadId = loadId 4
               , Give.giveRequestItems =
                   [ (0, Give.ActionGive "refl")
                   , (1, Give.ActionGive step)
@@ -268,7 +268,7 @@ distributivity warm =
               Give.editKind stepEdit @?= Give.EditKindVerbatim
             other -> assertFailure $ "unexpected outcome: " <> show other
           proofShouldBe path [signature, baseClause <> "refl", stepClause <> step]
-          Load.loadReportId report @?= LoadId 5
+          Load.loadReportId report @?= loadId 5
           Load.loadReportPath report @?= path
           Load.loadReportGoals report @?= []
           onlyGoals report

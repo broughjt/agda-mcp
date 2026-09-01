@@ -12,6 +12,7 @@ import Test.Tool.Goal qualified as Goal
 import Test.Tool.Infer qualified as Infer
 import Test.Tool.Interruption qualified as Interruption
 import Test.Tool.Load qualified as Load
+import Test.Tool.LoadId qualified as LoadId
 import Test.Tool.Scenario qualified as Scenario
 import Test.Tool.Source qualified as Source
 
@@ -21,6 +22,7 @@ tests =
     testGroup
       "Tool"
       [ Source.tests
+      , LoadId.tests
       , Load.tests
       , Goal.tests warm
       , Infer.tests warm

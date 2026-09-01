@@ -12,7 +12,7 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
-import Test.Tool.Harness (withFixtureToolSession)
+import Test.Tool.Harness (loadId, withFixtureToolSession)
 
 import AgdaMCP.Interaction (Error (..), Warning (..))
 import AgdaMCP.Interaction.GoalInfer (Have (..))
@@ -25,7 +25,7 @@ import AgdaMCP.Tools.Infer (
 import AgdaMCP.Tools.Infer qualified as Infer
 import AgdaMCP.Tools.Load (LoadRefusal (..))
 import AgdaMCP.Tools.Load qualified as Load
-import AgdaMCP.Tools.LoadId (LoadId (..), LoadIdRefusal (..))
+import AgdaMCP.Tools.LoadId (LoadId, LoadIdRefusal (..))
 import AgdaMCP.Tools.MCP (parseArguments)
 import AgdaMCP.Tools.Source (SourceRefusal (..))
 
@@ -45,7 +45,7 @@ parseArgumentsTests =
     [ testCase "a call without an expression is refused" $
         parseRequest
           ( Map.fromList
-              [ ("load_id", Aeson.String "L1")
+              [ ("load_id", Aeson.String "L1-k7x2")
               , ("goal", Aeson.Number 0)
               ]
           )
@@ -62,24 +62,24 @@ parseArgumentsTests =
             \goal, but got \"  \""
     , testCase "normalization defaults to simplified" $
         parseRequest (arguments "suc zero")
-          @?= Right (Request (LoadId 1) 0 Simplified "suc zero")
+          @?= Right (Request (loadId 1) 0 Simplified "suc zero")
     , testCase "all four arguments parse" $
         parseRequest
           ( Map.fromList
-              [ ("load_id", Aeson.String "L3")
+              [ ("load_id", Aeson.String "L3-k7x2")
               , ("goal", Aeson.Number 2)
               , ("normalization", Aeson.String "normalized")
               , ("expression", Aeson.String "suc zero")
               ]
           )
-          @?= Right (Request (LoadId 3) 2 Normalised "suc zero")
+          @?= Right (Request (loadId 3) 2 Normalised "suc zero")
     ]
  where
   parseRequest :: Map.Map Text Aeson.Value -> Either Text Request
   parseRequest = parseArguments
   arguments expression =
     Map.fromList
-      [ ("load_id", Aeson.String "L1")
+      [ ("load_id", Aeson.String "L1-k7x2")
       , ("goal", Aeson.Number 0)
       , ("expression", Aeson.String expression)
       ]
@@ -95,10 +95,10 @@ renderResponseTests =
             \most recent load failed. Load the file, then use the load ID and \
             \goal IDs from that load result."
     , testCase "a stale load_id names the current load" $
-        renderResponse (ResponseRefused $ RefusedLoadId $ StaleLoadId $ LoadId 2)
+        renderResponse (ResponseRefused $ RefusedLoadId $ StaleLoadId $ loadId 2)
           @?= Left
             "The supplied load ID is from an earlier load. The current load ID \
-            \is L2. Each load makes fresh goal ID assignments, so use the most \
+            \is L2-k7x2. Each load makes fresh goal ID assignments, so use the most \
             \recently issued load ID and goal IDs. If you no longer have them, \
             \load the file again."
     , testCase "a file that changed on disk says to load it again" $
@@ -264,14 +264,14 @@ sessionTests warm =
           _ <-
             Load.load Load.Request {Load.loadRequestPath = path}
               >>= liftIO . expectLoadOk "load"
-          response <- Infer.infer (inferRequest (LoadId 1) 5 "suc (")
+          response <- Infer.infer (inferRequest (loadId 1) 5 "suc (")
           liftIO $ response @?= ResponseUnknownGoal 5
     , testCase "a parse error is a failure carrying expression-relative positions" $
         withFixtureToolSession warm "test/fixtures/InferCheck.agda" $ \path -> do
           _ <-
             Load.load Load.Request {Load.loadRequestPath = path}
               >>= liftIO . expectLoadOk "load"
-          response <- Infer.infer (inferRequest (LoadId 1) 0 "suc (")
+          response <- Infer.infer (inferRequest (loadId 1) 0 "suc (")
           liftIO $ case response of
             ResponseFailed goalId e -> do
               goalId @?= 0
@@ -285,7 +285,7 @@ sessionTests warm =
             Load.load Load.Request {Load.loadRequestPath = path}
               >>= liftIO . expectLoadOk "load"
           report <-
-            Infer.infer (inferRequest (LoadId 1) 0 "tt")
+            Infer.infer (inferRequest (loadId 1) 0 "tt")
               >>= liftIO . expectInferOk "the expression that only infers"
           liftIO $ do
             inferReportHave report @?= Have "⊤" []
@@ -296,7 +296,7 @@ sessionTests warm =
             Load.load Load.Request {Load.loadRequestPath = path}
               >>= liftIO . expectLoadOk "load"
           report <-
-            Infer.infer (inferRequest (LoadId 1) 0 "p i")
+            Infer.infer (inferRequest (loadId 1) 0 "p i")
               >>= liftIO . expectInferOk "the reversed path"
           liftIO $ do
             inferReportHave report @?= Have "A" ["i = i0 ⊢ x", "i = i1 ⊢ y"]
@@ -307,7 +307,7 @@ sessionTests warm =
             Load.load Load.Request {Load.loadRequestPath = path}
               >>= liftIO . expectLoadOk "load"
           report <-
-            Infer.infer (inferRequest (LoadId 1) 0 "p (primINeg i)")
+            Infer.infer (inferRequest (loadId 1) 0 "p (primINeg i)")
               >>= liftIO . expectInferOk "the symmetric path"
           liftIO $ do
             inferReportHave report @?= Have "A" goalFaces
@@ -320,9 +320,9 @@ rendered :: [Text] -> Text
 rendered = Text.intercalate "\n"
 
 inferRequest :: LoadId -> InteractionId -> Text -> Request
-inferRequest loadId goalId expression =
+inferRequest submitted goalId expression =
   Request
-    { inferRequestLoadId = loadId
+    { inferRequestLoadId = submitted
     , inferRequestGoalId = goalId
     , inferRequestNormalization = Simplified
     , inferRequestExpression = expression
