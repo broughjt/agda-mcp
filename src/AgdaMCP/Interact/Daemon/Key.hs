@@ -15,10 +15,31 @@ module AgdaMCP.Interact.Daemon.Key (
   keyPaths,
 ) where
 
+import Control.Exception (IOException, try)
+import Data.Bits (xor)
+import Data.ByteString qualified as ByteString
 import Data.Text (Text)
+import Data.Text qualified as Text
+import Data.Text.Encoding (encodeUtf8)
+import Data.Word (Word64)
+import Numeric (showHex)
+import System.Directory (
+  canonicalizePath,
+  createDirectoryIfMissing,
+  listDirectory,
+ )
+import System.Environment (lookupEnv)
+import System.FilePath (
+  isAbsolute,
+  takeDirectory,
+  takeExtension,
+  (</>),
+ )
+import System.Posix.Files (setFileMode)
 import System.Posix.Types (UserID)
+import System.Posix.User (getRealUserID)
 
-import AgdaMCP.Options (AgdaFlags)
+import AgdaMCP.Options (AgdaFlags (..), renderFlags)
 
 data Key = Key
   { keyRoot :: FilePath
@@ -39,17 +60,42 @@ filesystem root, or a directory that cannot be read, answers the working
 directory itself.
 -}
 findProjectRoot :: FilePath -> IO FilePath
-findProjectRoot = error "not implemented"
+findProjectRoot directory = do
+  start <- canonicalizePath directory
+  let walk candidate = do
+        entries <- try $ listDirectory candidate
+        case entries of
+          Left (_ :: IOException) -> pure start
+          Right names
+            | any ((== ".agda-lib") . takeExtension) names -> pure candidate
+            | parent == candidate -> pure start
+            | otherwise -> walk parent
+           where
+            parent = takeDirectory candidate
+  walk start
 
 -- | The key for a given working directory and set of command flags.
 newKey :: FilePath -> AgdaFlags -> IO Key
-newKey = error "not implemented"
+newKey directory flags = do
+  root <- findProjectRoot directory
+  pure
+    Key
+      { keyRoot = root
+      , keyFlags = flags {libraryFile = absolute <$> libraryFile flags}
+      }
+ where
+  absolute path
+    | isAbsolute path = path
+    | otherwise = directory </> path
 
 {- | The text the key hashes: the root, then each rendered flag, separated by
 NUL, which no path or flag can contain.
 -}
 keyText :: Key -> Text
-keyText = error "not implemented"
+keyText key =
+  Text.pack (keyRoot key)
+    <> "\0"
+    <> Text.intercalate "\0" (map Text.pack $ renderFlags $ keyFlags key)
 
 {- | FNV-1a 64 over the UTF-8 of `keyText`, as sixteen lowercase hex digits.
 Written by hand rather than taken from a library so that two builds of the
@@ -57,18 +103,36 @@ program compute the same directory for the same key, or a rebuild would
 strand the daemon the old build started.
 -}
 keyHash :: Key -> Text
-keyHash = error "not implemented"
+keyHash key = Text.justifyRight 16 '0' $ Text.pack $ showHex digest ""
+ where
+  digest :: Word64
+  digest =
+    foldl'
+      (\hash byte -> (hash `xor` fromIntegral byte) * 0x100000001b3)
+      0xcbf29ce484222325
+      (ByteString.unpack $ encodeUtf8 $ keyText key)
 
 {- | The daemon socket location: @$XDG_RUNTIME_DIR/agda-interact@, or
 @/tmp/agda-interact-<uid>@ with mode 0700 when that variable is unset. The
 directory will exist when this returns.
 -}
 runtimeDirectory :: IO FilePath
-runtimeDirectory = error "not implemented"
+runtimeDirectory = do
+  runtime <- lookupEnv "XDG_RUNTIME_DIR"
+  user <- getRealUserID
+  let directory = runtimeDirectoryFor runtime user
+  createDirectoryIfMissing True directory
+  -- The runtime directory is the user's own; the fallback under /tmp is
+  -- shared, so it is closed to everyone else.
+  setFileMode directory 0o700
+  pure directory
 
 -- | The directory `runtimeDirectory` chooses, given @XDG_RUNTIME_DIR@'s value.
 runtimeDirectoryFor :: Maybe FilePath -> UserID -> FilePath
-runtimeDirectoryFor = error "not implemented"
+runtimeDirectoryFor runtime user =
+  case runtime of
+    Just directory | not (null directory) -> directory </> "agda-interact"
+    _ -> "/tmp/agda-interact-" <> show user
 
 -- | The files of one daemon, all under @<runtime>/<hash>/@.
 data Paths = Paths
@@ -81,4 +145,13 @@ data Paths = Paths
   deriving (Eq, Show)
 
 keyPaths :: FilePath -> Key -> Paths
-keyPaths = error "not implemented"
+keyPaths runtime key =
+  Paths
+    { socketPath = directory </> "socket"
+    , infoPath = directory </> "info"
+    , logPath = directory </> "log"
+    , spawnLockPath = directory </> "spawn.lock"
+    , daemonLockPath = directory </> "daemon.lock"
+    }
+ where
+  directory = runtime </> Text.unpack (keyHash key)
