@@ -1,7 +1,7 @@
 module Main (main) where
 
 import Control.Concurrent.MVar (newMVar)
-import Control.Exception (catch)
+import Control.Exception (IOException, catch)
 import Data.Text qualified as Text
 import Data.Text.IO qualified as Text.IO
 import System.Directory (getCurrentDirectory)
@@ -65,7 +65,7 @@ run directory invocation = do
           , daemonPaths = paths
           , daemonBuild = build
           , daemonIdleTimeout = idleTimeout
-          , daemonReady = putStrLn "ready" >> hFlush stdout
+          , daemonReady = announceReady
           }
         stateVariable
     Invoke name arguments ->
@@ -89,6 +89,15 @@ run directory invocation = do
  where
   idleTimeout = invocationIdleTimeout invocation
   format = invocationFormat invocation
+
+{- | Tell the client that spawned this daemon that the socket is listening. A
+client that gave up, or was interrupted, while waiting has closed its end of
+the pipe; the daemon it started is still wanted by the next client, so a
+failed write is not a reason to exit.
+-}
+announceReady :: IO ()
+announceReady =
+  (putStrLn "ready" >> hFlush stdout) `catch` \(_ :: IOException) -> pure ()
 
 exit :: Exit -> IO a
 exit (Exit text stream code) = do
