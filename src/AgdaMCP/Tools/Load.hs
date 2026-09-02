@@ -10,6 +10,7 @@ module AgdaMCP.Tools.Load (
   withEditableLoad,
   requireCheckedLoad,
   renderLoadRefusal,
+  encodeLoadRefusal,
   renderResponse,
 ) where
 
@@ -18,7 +19,15 @@ import Agda.Syntax.Common (InteractionId)
 import Control.Exception (Exception, throwIO)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (gets, modify)
-import Data.Aeson (FromJSON (..), ToJSON (..), withObject, (.:))
+import Data.Aeson (
+  FromJSON (..),
+  ToJSON (..),
+  Value,
+  object,
+  withObject,
+  (.:),
+  (.=),
+ )
 import Data.Text (Text)
 import Data.Text qualified as Text
 import MCP.Server (
@@ -43,6 +52,19 @@ import AgdaMCP.Interaction (
  )
 import AgdaMCP.Interaction.Context qualified as Context
 import AgdaMCP.Interaction.Load qualified as Interaction.Load
+import AgdaMCP.Tools.Json (
+  encodeContextEntry,
+  encodeError,
+  encodeGoalId,
+  encodeHiddenMetavariable,
+  encodeLoadIdRefusal,
+  encodeNonFatalError,
+  encodeShape,
+  encodeSourceRefusal,
+  encodeSpan,
+  encodeWarning,
+  kinded,
+ )
 import AgdaMCP.Tools.LoadId (
   CurrentLoad (..),
   LoadGeneration (..),
@@ -53,7 +75,6 @@ import AgdaMCP.Tools.LoadId (
   requireCurrentLoad,
  )
 import AgdaMCP.Tools.MCP (
-  textToolHandle,
   timeoutSchema,
  )
 import AgdaMCP.Tools.Render (
@@ -90,7 +111,6 @@ loadTool =
         )
           { toolDefinitionAnnotations = Just loadAnnotations
           }
-    , toolRun = textToolHandle loadBudget load $ Right . renderResponse
     , toolCall = toolHandle loadBudget load $ Right . renderResponse
     }
  where
@@ -313,4 +333,30 @@ renderNonFatalError (NonFatalError (_, message)) =
   indent message
 
 instance ToJSON Response where
-  toJSON = error "not implemented"
+  toJSON (ResponseOk report) =
+    kinded
+      "loaded"
+      [ "load_id" .= renderLoadId (loadReportId report)
+      , "path" .= loadReportPath report
+      , "goals" .= map (uncurry encodeGoal) (loadReportGoals report)
+      , "hidden_metavariables"
+          .= map encodeHiddenMetavariable (loadReportHiddenMetavariables report)
+      , "warnings" .= map encodeWarning (loadReportWarnings report)
+      , "non_fatal_errors"
+          .= map encodeNonFatalError (loadReportNonFatalErrors report)
+      ]
+  toJSON (ResponseError e) = kinded "failed" ["error" .= encodeError e]
+  toJSON ResponseStale = kinded "file_changed" []
+
+encodeGoal :: Goal -> [ContextEntry] -> Value
+encodeGoal goal entries =
+  object
+    [ "id" .= encodeGoalId (goalId goal)
+    , "span" .= encodeSpan (goalSpan goal)
+    , "shape" .= encodeShape (goalShape goal)
+    , "context" .= map encodeContextEntry entries
+    ]
+
+encodeLoadRefusal :: LoadRefusal -> Value
+encodeLoadRefusal (RefusedLoadId refusal) = encodeLoadIdRefusal refusal
+encodeLoadRefusal (RefusedSource refusal) = encodeSourceRefusal refusal

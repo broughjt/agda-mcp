@@ -14,11 +14,14 @@ import Data.Map qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as Text
 import MCP.Server (
+  Content (..),
   Error (..),
   McpServerHandlers (..),
   McpServerInfo (..),
   ToolDefinition (..),
+  ToolResult (..),
   noHandlers,
+  toolResult,
  )
 import Options.Applicative (
   ParserInfo,
@@ -39,7 +42,7 @@ import System.Exit (ExitCode (ExitSuccess))
 import AgdaMCP.Options (AgdaFlags, flagsParser, toCommandLineOptions)
 import AgdaMCP.Tools (allTools)
 import AgdaMCP.Tools.State (ToolState)
-import AgdaMCP.Tools.Tool (Tool (..))
+import AgdaMCP.Tools.Tool (Answer (..), Tool (..))
 
 serverInfo :: McpServerInfo
 serverInfo =
@@ -67,8 +70,16 @@ handlers stateVariable =
   call _ name arguments =
     maybe
       (pure $ Left $ UnknownTool name)
-      (\tool -> toolRun tool stateVariable arguments)
+      (\tool -> Right . toolResultOf <$> toolCall tool stateVariable arguments)
       (Map.lookup name byName)
+
+  -- The rendered text as the tool's one content item, with `isError` following
+  -- `answerOk`, exactly as `toolResult` and `toolError` build it.
+  toolResultOf :: Answer -> ToolResult
+  toolResultOf answer =
+    (toolResult [ContentText $ answerText answer])
+      { toolResultIsError = not $ answerOk answer
+      }
 
 data Outcome
   = Parsed CommandLineOptions

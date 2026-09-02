@@ -32,7 +32,7 @@ import Agda.Syntax.Common (InteractionId (..))
 import Control.Exception (throwIO)
 import Control.Monad.Except (ExceptT (..), runExceptT)
 import Control.Monad.IO.Class (liftIO)
-import Data.Aeson (FromJSON (..), ToJSON (..), (.:))
+import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, (.:), (.=))
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Aeson.Types qualified as Aeson
 import Data.Foldable (toList, traverse_)
@@ -50,6 +50,13 @@ import AgdaMCP.Interaction (
  )
 import AgdaMCP.Interaction.Give qualified as Interaction.Give
 import AgdaMCP.Interaction.Refine qualified as Interaction.Refine
+import AgdaMCP.Tools.Json (
+  encodeError,
+  encodeGoalId,
+  encodeLoadIdRefusal,
+  encodeSpan,
+  kinded,
+ )
 import AgdaMCP.Tools.Load qualified as Load
 import AgdaMCP.Tools.LoadId (
   CurrentLoad (..),
@@ -60,7 +67,6 @@ import AgdaMCP.Tools.LoadId (
 import AgdaMCP.Tools.MCP (
   goalIdSchema,
   loadIdSchema,
-  textToolHandle,
   timeoutSchema,
  )
 import AgdaMCP.Tools.Render (
@@ -125,7 +131,6 @@ giveTool =
         )
           { toolDefinitionAnnotations = Just giveAnnotations
           }
-    , toolRun = textToolHandle editBudget give renderResponse
     , toolCall = toolHandle editBudget give renderResponse
     }
  where
@@ -436,4 +441,45 @@ renderBatchPosition position
         <> ")"
 
 instance ToJSON Response where
-  toJSON = error "not implemented"
+  toJSON (ResponseRefused refusal) = encodeLoadIdRefusal refusal
+  toJSON (ResponseCompleted outcome reload) =
+    kinded "completed" ["outcome" .= encodeOutcome outcome, "reload" .= reload]
+
+encodeOutcome :: Outcome -> Value
+encodeOutcome (OutcomeApplied edits) =
+  kinded "applied" ["edits" .= map encodeEdit edits]
+encodeOutcome (OutcomeRefused refusal) =
+  kinded
+    "rejected"
+    [ "goal" .= encodeGoalId (refusalGoalId refusal)
+    , "span" .= fmap encodeSpan (refusalSpan refusal)
+    , "position" .= encodeBatchPosition (refusalPosition refusal)
+    , "reason" .= encodeReason (refusalReason refusal)
+    ]
+encodeOutcome OutcomeFileChanged = kinded "file_changed" []
+encodeOutcome (OutcomeSourceUnreadable detail) =
+  kinded "source_unreadable" ["detail" .= detail]
+encodeOutcome (OutcomeWriteFailed detail) =
+  kinded "write_failed" ["detail" .= detail]
+
+encodeEdit :: Edit -> Value
+encodeEdit edit =
+  object
+    [ "goal" .= encodeGoalId (editGoalId edit)
+    , "span" .= encodeSpan (editSpan edit)
+    , "text" .= editText edit
+    , "kind" .= renderEditKind (editKind edit)
+    ]
+
+renderEditKind :: EditKind -> Text
+renderEditKind EditKindVerbatim = "verbatim"
+renderEditKind EditKindParentheses = "parenthesized"
+renderEditKind EditKindComputed = "computed"
+
+encodeBatchPosition :: BatchPosition -> Value
+encodeBatchPosition position =
+  object ["index" .= batchIndex position, "length" .= batchLength position]
+
+encodeReason :: RefusalReason -> Value
+encodeReason RefusedUnknownGoal = kinded "unknown_goal" []
+encodeReason (RefusedError e) = kinded "error" ["error" .= encodeError e]

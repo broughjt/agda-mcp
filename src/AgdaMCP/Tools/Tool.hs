@@ -17,20 +17,22 @@ module AgdaMCP.Tools.Tool (
 
 import Agda.Interaction.Base (Rewrite (..))
 import Control.Concurrent.MVar (MVar)
-import Data.Aeson (FromJSON (..), ToJSON (..), Value)
+import Data.Aeson (FromJSON (..), ToJSON (..), Value, (.=))
 import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Aeson.Types qualified as Aeson
 import Data.Bifunctor (first)
+import Data.Either (isRight)
 import Data.Map (Map)
 import Data.Map qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
-import MCP.Server (Error, ToolDefinition, ToolResult)
+import MCP.Server (ToolDefinition)
 
 import AgdaMCP.Tools.Description (Description)
+import AgdaMCP.Tools.Json (kinded)
 import AgdaMCP.Tools.Render (renderEditingTimeout, renderReadOnlyTimeout)
-import AgdaMCP.Tools.State (ToolM, ToolState)
+import AgdaMCP.Tools.State (ToolM, ToolState, runToolM, withBudget)
 
 {- | A tool definition together with the handler that runs it. The library
 pairs the two only through the call handler's name dispatch, so we carry them
@@ -39,7 +41,6 @@ side by side and let `AgdaMCP.MCP.handlers` do the lookup.
 data Tool = Tool
   { toolDescription :: Description
   , toolDefinition :: ToolDefinition
-  , toolRun :: MVar ToolState -> Map Text Value -> IO (Either Error ToolResult)
   , toolCall :: MVar ToolState -> Map Text Value -> IO Answer
   }
 
@@ -71,7 +72,11 @@ editBudget = Budget 60 renderEditingTimeout
 {- | Build a tool's call: decode its arguments, run it under its timeout, and
 answer with the rendered response and its JSON. Arguments that fail to decode
 answer @invalid_arguments@ and calls that run out of time answer @timed_out@,
-each carrying the same text `textToolHandle` reports.
+each reported as a refusal rather than as a transport error, so the caller
+sees the problem and can correct it.
+
+The timeout is handled here rather than by the tool, so it never reaches the
+request types and the tools stay unaware of it.
 -}
 toolHandle ::
   (FromJSON p, ToJSON q) =>
@@ -79,7 +84,29 @@ toolHandle ::
   (p -> ToolM q) ->
   (q -> Either Text Text) ->
   (MVar ToolState -> Map Text Value -> IO Answer)
-toolHandle = error "not implemented"
+toolHandle budget handle renderResponse stateVar arguments =
+  case (,) <$> parseArguments arguments <*> parseTimeout budget arguments of
+    Left message ->
+      pure $ refused message $ kinded "invalid_arguments" ["message" .= message]
+    Right (request, seconds) -> do
+      result <-
+        runToolM stateVar $
+          withBudget (seconds * microsecondsPerSecond) (handle request)
+      pure $ case result of
+        Nothing ->
+          let message = budgetTimedOut budget seconds
+           in refused message $
+                kinded "timed_out" ["seconds" .= seconds, "message" .= message]
+        Just response ->
+          let rendered = renderResponse response
+           in Answer
+                { answerOk = isRight rendered
+                , answerText = either id id rendered
+                , answerValue = toJSON response
+                }
+ where
+  refused message value =
+    Answer {answerOk = False, answerText = message, answerValue = value}
 
 -- Request parsing helpers
 

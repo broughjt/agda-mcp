@@ -16,7 +16,7 @@ module AgdaMCP.Tools.CaseSplit (
 import Agda.Syntax.Common (InteractionId (..))
 import Control.Exception (throwIO)
 import Control.Monad.IO.Class (liftIO)
-import Data.Aeson (FromJSON (..), ToJSON (..), withObject, (.:))
+import Data.Aeson (FromJSON (..), ToJSON (..), Value, withObject, (.:), (.=))
 import Data.Aeson.Types qualified as Aeson
 import Data.Char (isSpace)
 import Data.Foldable (toList)
@@ -37,10 +37,17 @@ import AgdaMCP.Interaction (Error (..), Position (..), Span (..))
 import AgdaMCP.Interaction.MakeCase (
   MakeCaseError (..),
   MakeCaseReport (..),
-  MakeCaseVariant,
+  MakeCaseVariant (..),
   Split (..),
  )
 import AgdaMCP.Interaction.MakeCase qualified as Interaction.MakeCase
+import AgdaMCP.Tools.Json (
+  encodeError,
+  encodeGoalId,
+  encodeLoadIdRefusal,
+  encodeSpan,
+  kinded,
+ )
 import AgdaMCP.Tools.Load qualified as Load
 import AgdaMCP.Tools.LoadId (
   CurrentLoad (..),
@@ -51,7 +58,6 @@ import AgdaMCP.Tools.LoadId (
 import AgdaMCP.Tools.MCP (
   goalIdSchema,
   loadIdSchema,
-  textToolHandle,
   timeoutSchema,
  )
 import AgdaMCP.Tools.Render (
@@ -99,7 +105,6 @@ caseSplitTool =
         )
           { toolDefinitionAnnotations = Just caseSplitAnnotations
           }
-    , toolRun = textToolHandle editBudget caseSplit renderResponse
     , toolCall = toolHandle editBudget caseSplit renderResponse
     }
  where
@@ -333,4 +338,37 @@ countClauses 1 = "1 clause"
 countClauses n = Text.pack (show n) <> " clauses"
 
 instance ToJSON Response where
-  toJSON = error "not implemented"
+  toJSON (ResponseRefused refusal) = encodeLoadIdRefusal refusal
+  toJSON (ResponseCompleted goalId outcome reload) =
+    kinded
+      "completed"
+      [ "goal" .= encodeGoalId goalId
+      , "outcome" .= encodeOutcome outcome
+      , "reload" .= reload
+      ]
+
+encodeOutcome :: Outcome -> Value
+encodeOutcome (OutcomeApplied edit) =
+  kinded
+    "applied"
+    [ "span" .= encodeSpan (editSpan edit)
+    , "variant" .= renderVariant (editVariant edit)
+    , "layout" .= renderLayout (editLayout edit)
+    , "clauses" .= editClauses edit
+    , "collapses_where" .= editCollapsesWhere edit
+    ]
+encodeOutcome OutcomeUnknownGoal = kinded "unknown_goal" []
+encodeOutcome (OutcomeFailed e) = kinded "failed" ["error" .= encodeError e]
+encodeOutcome OutcomeFileChanged = kinded "file_changed" []
+encodeOutcome (OutcomeSourceUnreadable detail) =
+  kinded "source_unreadable" ["detail" .= detail]
+encodeOutcome (OutcomeWriteFailed detail) =
+  kinded "write_failed" ["detail" .= detail]
+
+renderVariant :: MakeCaseVariant -> Text
+renderVariant MakeCaseFunction = "function"
+renderVariant MakeCaseExtendedLambda = "extended_lambda"
+
+renderLayout :: ClauseLayout -> Text
+renderLayout OnePerLine = "one_per_line"
+renderLayout Inline = "inline"

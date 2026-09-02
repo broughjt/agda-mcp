@@ -11,7 +11,7 @@ module AgdaMCP.Tools.Infer (
 
 import Agda.Interaction.Base (Rewrite)
 import Agda.Syntax.Common (InteractionId (..))
-import Data.Aeson (FromJSON (..), ToJSON (..), withObject, (.:))
+import Data.Aeson (FromJSON (..), ToJSON (..), withObject, (.:), (.=))
 import Data.Aeson.Types qualified as Aeson
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -28,8 +28,10 @@ import MCP.Server (
 import AgdaMCP.Interaction (Error, GoalError (..), GoalReport (..))
 import AgdaMCP.Interaction.GoalInfer (Have (..))
 import AgdaMCP.Interaction.GoalInfer qualified as Interaction.GoalInfer
+import AgdaMCP.Tools.Json (encodeError, encodeGoalId, encodeUnknownGoal, kinded)
 import AgdaMCP.Tools.Load (
   LoadRefusal,
+  encodeLoadRefusal,
   renderLoadRefusal,
   requireCheckedLoad,
  )
@@ -38,7 +40,6 @@ import AgdaMCP.Tools.MCP (
   goalIdSchema,
   loadIdSchema,
   normalizationSchema,
-  textToolHandle,
   timeoutSchema,
  )
 import AgdaMCP.Tools.Render (
@@ -78,7 +79,6 @@ inferTool =
         )
           { toolDefinitionAnnotations = Just inferAnnotations
           }
-    , toolRun = textToolHandle inspectBudget infer renderResponse
     , toolCall = toolHandle inspectBudget infer renderResponse
     }
  where
@@ -198,4 +198,18 @@ renderResponse (ResponseOk goalId report) =
       <> indent (indent $ ": " <> haveType have)
 
 instance ToJSON Response where
-  toJSON = error "not implemented"
+  toJSON (ResponseRefused refusal) = encodeLoadRefusal refusal
+  toJSON (ResponseUnknownGoal unknownId) = encodeUnknownGoal unknownId
+  toJSON (ResponseFailed goalId e) =
+    kinded "failed" ["goal" .= encodeGoalId goalId, "error" .= encodeError e]
+  toJSON (ResponseOk goalId report) =
+    kinded
+      "inferred"
+      [ "goal" .= encodeGoalId goalId
+      , "expression" .= inferReportExpression report
+      , "type" .= haveType have
+      , "boundary" .= haveBoundary have
+      , "goal_boundary" .= inferReportGoalBoundary report
+      ]
+   where
+    have = inferReportHave report

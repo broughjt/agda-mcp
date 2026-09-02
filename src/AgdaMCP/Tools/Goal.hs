@@ -10,7 +10,7 @@ module AgdaMCP.Tools.Goal (
 
 import Agda.Interaction.Base (Rewrite)
 import Agda.Syntax.Common (InteractionId (..))
-import Data.Aeson (FromJSON (..), ToJSON (..), withObject, (.:))
+import Data.Aeson (FromJSON (..), ToJSON (..), withObject, (.:), (.=))
 import Data.Text (Text)
 import Data.Text qualified as Text
 import MCP.Server (
@@ -28,8 +28,17 @@ import AgdaMCP.Interaction (
   GoalReport (..),
  )
 import AgdaMCP.Interaction.Goal qualified as Interaction.Goal
+import AgdaMCP.Tools.Json (
+  encodeContextEntry,
+  encodeError,
+  encodeGoalId,
+  encodeShape,
+  encodeUnknownGoal,
+  kinded,
+ )
 import AgdaMCP.Tools.Load (
   LoadRefusal,
+  encodeLoadRefusal,
   renderLoadRefusal,
   requireCheckedLoad,
  )
@@ -38,7 +47,6 @@ import AgdaMCP.Tools.MCP (
   goalIdSchema,
   loadIdSchema,
   normalizationSchema,
-  textToolHandle,
   timeoutSchema,
  )
 import AgdaMCP.Tools.Render (
@@ -77,7 +85,6 @@ goalTool =
         )
           { toolDefinitionAnnotations = Just goalAnnotations
           }
-    , toolRun = textToolHandle inspectBudget goal renderResponse
     , toolCall = toolHandle inspectBudget goal renderResponse
     }
  where
@@ -169,4 +176,16 @@ renderGoalReport rewrite goalId report =
     renderGoalId goalId <> " (" <> renderNormalization rewrite <> ")"
 
 instance ToJSON Response where
-  toJSON = error "not implemented"
+  toJSON (ResponseRefused refusal) = encodeLoadRefusal refusal
+  toJSON (ResponseUnknownGoal unknownId) = encodeUnknownGoal unknownId
+  toJSON (ResponseFailed e) = kinded "failed" ["error" .= encodeError e]
+  toJSON (ResponseOk goalId rewrite report) =
+    kinded
+      "goal"
+      [ "goal" .= encodeGoalId goalId
+      , "normalization" .= renderNormalization rewrite
+      , "shape" .= encodeShape (goalReportShape report)
+      , "context" .= map encodeContextEntry (goalReportContext report)
+      , "boundary" .= goalReportBoundary report
+      , "constraints" .= goalReportConstraints report
+      ]
