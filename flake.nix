@@ -39,47 +39,74 @@
         # The test suite resolves the pinned standard library through
         # AGDA_MCP_STDLIB, so the check phase needs it exactly as the dev shell
         # does. Without it every case fails on a missing library.
-        unwrapped = pkgs.haskell.lib.overrideCabal (haskellPackages.callCabal2nix packageName ./. { }) (
-          drv: {
-            preCheck = (drv.preCheck or "") + ''
-              export AGDA_MCP_STDLIB=${standardLibrary}
-            '';
-          }
-        );
+        unwrapped =
+          pkgs.haskell.lib.overrideCabal (haskellPackages.callCabal2nix packageName ./. { })
+            (drv: {
+              preCheck = (drv.preCheck or "") + ''
+                export AGDA_MCP_STDLIB=${standardLibrary}
+              '';
+            });
         # Mirrors `agda.withPackages` by cooking up a libraries file listing the
         # selected libraries and then passing `--library-file` in a wrapper.
         withPackages =
-          selection:
+          executableName: selection:
           let
             selected = if builtins.isList selection then selection else selection pkgs.agdaPackages;
             libraries = pkgs.writeText "libraries" (
               pkgs.lib.concatMapStringsSep "\n" (library: "${library}/${library.libraryFile}") selected
             );
           in
-          pkgs.runCommand "${packageName}-with-packages"
+          pkgs.runCommand "${executableName}-with-packages"
             {
               nativeBuildInputs = [ pkgs.makeWrapper ];
-              meta.mainProgram = packageName;
+              meta.mainProgram = executableName;
             }
             ''
               mkdir -p $out/bin
-              makeWrapper ${unwrapped}/bin/${packageName} $out/bin/${packageName} \
+              makeWrapper ${unwrapped}/bin/${executableName} $out/bin/${executableName} \
                 --add-flags "--library-file=${libraries}"
             '';
-        package = unwrapped // { inherit unwrapped withPackages; };
+        package =
+          executableName:
+          let
+            wrapped = pkgs.runCommand executableName { meta.mainProgram = executableName; } ''
+              mkdir -p $out/bin
+              ln -s ${unwrapped}/bin/${executableName} $out/bin/${executableName}
+            '';
+          in
+          wrapped
+          // {
+            inherit unwrapped;
+            withPackages = withPackages executableName;
+          };
+        agdaMcp = package "agda-mcp";
+        agdaInteract = package "agda-interact";
       in
       {
         packages = {
-          default = package;
-          ${packageName} = package;
+          default = agdaMcp;
+          agda-mcp = agdaMcp;
+          agda-interact = agdaInteract;
         };
 
         checks.${packageName} = unwrapped;
 
-        apps.default = {
-          type = "app";
-          program = "${package}/bin/${packageName}";
-          meta.description = "Run ${packageName}";
+        apps = {
+          default = {
+            type = "app";
+            program = "${agdaMcp}/bin/agda-mcp";
+            meta.description = "Run agda-mcp";
+          };
+          agda-mcp = {
+            type = "app";
+            program = "${agdaMcp}/bin/agda-mcp";
+            meta.description = "Run agda-mcp";
+          };
+          agda-interact = {
+            type = "app";
+            program = "${agdaInteract}/bin/agda-interact";
+            meta.description = "Run agda-interact";
+          };
         };
 
         devShells.default = haskellPackages.shellFor {
