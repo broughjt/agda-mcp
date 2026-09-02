@@ -70,6 +70,7 @@ library
       Agda == 2.8.*,
       agda-mcp:interaction,
       aeson,
+      async,
       atomic-write,
       base >= 4.18 && < 5,
       bytestring,
