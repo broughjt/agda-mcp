@@ -98,10 +98,16 @@ data Variant = Variant
 data Effect = Inspects | Loads | Edits
   deriving (Eq, Show)
 
--- | The description of the named parameter. Fails on a name not described.
+{- | The description of the named parameter, searching nested objects after
+the top level, since a command line may flatten them. Fails on a name not
+described.
+-}
 parameterDescription :: Text -> Description -> Text
 parameterDescription name description =
-  case [d | Field n _ (Just d) _ <- descriptionParameters description, n == name] of
+  case [ d
+       | Field n _ (Just d) _ <- descend (descriptionParameters description)
+       , n == name
+       ] of
     d : _ -> d
     [] ->
       error $
@@ -109,6 +115,12 @@ parameterDescription name description =
           <> show name
           <> " in the description of "
           <> Text.unpack (descriptionName description)
+ where
+  descend = concatMap $ \f -> f : nested (fieldShape f)
+  nested (ShapeObject fields) = descend fields
+  nested (ShapeArray shape) = nested shape
+  nested (ShapeNullable shape) = nested shape
+  nested _ = []
 
 -- | How the tools fit together, for the MCP server's instructions and the CLI's help.
 overview :: Text
