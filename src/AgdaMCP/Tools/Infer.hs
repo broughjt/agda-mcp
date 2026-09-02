@@ -15,33 +15,32 @@ import Data.Aeson (FromJSON (..), ToJSON (..), withObject, (.:), (.=))
 import Data.Aeson.Types qualified as Aeson
 import Data.Text (Text)
 import Data.Text qualified as Text
-import MCP.Server (
-  SchemaType (..),
-  ToolAnnotations (..),
-  ToolDefinition (..),
-  defaultToolAnnotations,
-  describedSchema,
-  mkToolDefinition,
-  schema,
- )
 
 import AgdaMCP.Interaction (Error, GoalError (..), GoalReport (..))
 import AgdaMCP.Interaction.GoalInfer (Have (..))
 import AgdaMCP.Interaction.GoalInfer qualified as Interaction.GoalInfer
+import AgdaMCP.Tools.Description (
+  Description (..),
+  Effect (..),
+  Shape (..),
+  Variant (..),
+  field,
+  goalIdField,
+  loadIdField,
+  normalizationField,
+  parameter,
+  timeoutField,
+  unknownGoal,
+ )
 import AgdaMCP.Tools.Json (encodeError, encodeGoalId, encodeUnknownGoal, kinded)
 import AgdaMCP.Tools.Load (
   LoadRefusal,
   encodeLoadRefusal,
+  loadRefusals,
   renderLoadRefusal,
   requireCheckedLoad,
  )
 import AgdaMCP.Tools.LoadId (LoadId)
-import AgdaMCP.Tools.MCP (
-  goalIdSchema,
-  loadIdSchema,
-  normalizationSchema,
-  timeoutSchema,
- )
 import AgdaMCP.Tools.Render (
   blocks,
   indent,
@@ -52,6 +51,7 @@ import AgdaMCP.Tools.Render (
  )
 import AgdaMCP.Tools.State (ToolM, liftInteraction)
 import AgdaMCP.Tools.Tool (
+  Budget (..),
   Tool (..),
   inspectBudget,
   parseNormalizationField,
@@ -61,41 +61,44 @@ import AgdaMCP.Tools.Tool (
 inferTool :: Tool
 inferTool =
   Tool
-    { toolDescription = error "not implemented"
-    , toolDefinition =
-        ( mkToolDefinition "infer" inferDescription $
-            schema $
-              SchemaObject
-                [ ("load_id", loadIdSchema)
-                , ("goal", goalIdSchema)
-                , ("normalization", normalizationSchema)
-                ,
-                  ( "expression"
-                  , describedSchema expressionDescription $ SchemaString Nothing
-                  )
-                , ("timeout", timeoutSchema inspectBudget)
-                ]
-                ["load_id", "goal", "expression"]
-        )
-          { toolDefinitionAnnotations = Just inferAnnotations
-          }
+    { toolDescription = inferDescription
     , toolCall = toolHandle inspectBudget infer renderResponse
     }
- where
-  inferAnnotations :: ToolAnnotations
-  inferAnnotations =
-    defaultToolAnnotations
-      { toolReadOnlyHint = Just True
-      , toolIdempotentHint = Just True
-      , toolOpenWorldHint = Just False
-      }
 
-  inferDescription :: Text
-  inferDescription =
-    "Infer the type of an expression in the scope of an open goal. Nothing is modified. The response reports the inferred type under \"Have at ?n:\". A failure is a normal result rather than a tool error. Inference does not consult the goal's type, so it can succeed where check fails on the same expression. The expression is parsed and its type inferred in the goal's scope, so its errors carry positions relative to the expression, not the file. Types are rendered at the requested normalization. Several read-only calls may use the same load ID at the same time. To just inspect the goal, use goal instead."
-
-  expressionDescription :: Text
-  expressionDescription = "The Agda expression to infer the type of."
+inferDescription :: Description
+inferDescription =
+  Description
+    { descriptionName = "infer"
+    , descriptionSummary =
+        "Infer the type of an expression in the scope of an open goal. Nothing is modified. The response reports the inferred type under \"Have at ?n:\". A failure is a normal result rather than a tool error. Inference does not consult the goal's type, so it can succeed where check fails on the same expression. The expression is parsed and its type inferred in the goal's scope, so its errors carry positions relative to the expression, not the file. Types are rendered at the requested normalization. Several read-only calls may use the same load ID at the same time. To just inspect the goal, use goal instead."
+    , descriptionParameters =
+        [ loadIdField
+        , goalIdField
+        , normalizationField
+        , parameter
+            "expression"
+            "The Agda expression to infer the type of."
+            ShapeString
+        , timeoutField (budgetDefault inspectBudget)
+        ]
+    , descriptionAnswers =
+        [ Variant
+            "inferred"
+            "the expression's type, with its boundary and the goal's"
+            [ field "goal" ShapeInteger
+            , field "expression" ShapeString
+            , field "type" ShapeString
+            , field "boundary" (ShapeArray ShapeString)
+            , field "goal_boundary" (ShapeArray ShapeString)
+            ]
+        , Variant
+            "failed"
+            "the expression's type could not be inferred"
+            [field "goal" ShapeInteger, field "error" (ShapeNamed "ERROR")]
+        ]
+    , descriptionRefusals = loadRefusals <> [unknownGoal]
+    , descriptionEffect = Inspects
+    }
 
 data Request = Request
   { inferRequestLoadId :: LoadId

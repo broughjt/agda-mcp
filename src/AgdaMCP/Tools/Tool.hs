@@ -27,20 +27,23 @@ import Data.Map qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
-import MCP.Server (ToolDefinition)
 
 import AgdaMCP.Tools.Description (Description)
 import AgdaMCP.Tools.Json (kinded)
-import AgdaMCP.Tools.Render (renderEditingTimeout, renderReadOnlyTimeout)
+import AgdaMCP.Tools.Render (
+  normalizations,
+  renderEditingTimeout,
+  renderNormalization,
+  renderReadOnlyTimeout,
+ )
 import AgdaMCP.Tools.State (ToolM, ToolState, runToolM, withBudget)
 
-{- | A tool definition together with the handler that runs it. The library
-pairs the two only through the call handler's name dispatch, so we carry them
-side by side and let `AgdaMCP.MCP.handlers` do the lookup.
+{- | A tool: how it describes itself, protocol-neutrally, and the call that
+runs it. Both front ends dispatch over the description's name and derive their
+documentation from the rest of it.
 -}
 data Tool = Tool
   { toolDescription :: Description
-  , toolDefinition :: ToolDefinition
   , toolCall :: MVar ToolState -> Map Text Value -> IO Answer
   }
 
@@ -174,20 +177,3 @@ parseNormalizationField :: Aeson.Object -> Aeson.Parser Rewrite
 parseNormalizationField o =
   fromMaybe Simplified
     <$> Aeson.explicitParseFieldMaybe parseNormalization o "normalization"
-
-normalizations :: Map Text Rewrite
-normalizations =
-  Map.fromList
-    [ ("asis", AsIs)
-    , ("instantiated", Instantiated)
-    , ("headnormal", HeadNormal)
-    , ("simplified", Simplified)
-    , ("normalized", Normalised)
-    ]
-
-renderNormalization :: Rewrite -> Text
-renderNormalization AsIs = "asis"
-renderNormalization Instantiated = "instantiated"
-renderNormalization HeadNormal = "headnormal"
-renderNormalization Simplified = "simplified"
-renderNormalization Normalised = "normalized"

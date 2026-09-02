@@ -1,8 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | The MCP front end: the server's handlers over the tool table, and its command line.
 module AgdaMCP.MCP (
   handlers,
   serverInfo,
+  toolDefinition,
   Outcome (..),
   parseOptions,
 ) where
@@ -18,9 +20,16 @@ import MCP.Server (
   Error (..),
   McpServerHandlers (..),
   McpServerInfo (..),
+  Schema,
+  SchemaType (..),
+  ToolAnnotations (..),
   ToolDefinition (..),
   ToolResult (..),
+  defaultToolAnnotations,
+  describedSchema,
+  mkToolDefinition,
   noHandlers,
+  schema,
   toolResult,
  )
 import Options.Applicative (
@@ -41,6 +50,13 @@ import System.Exit (ExitCode (ExitSuccess))
 
 import AgdaMCP.Options (AgdaFlags, flagsParser, toCommandLineOptions)
 import AgdaMCP.Tools (allTools)
+import AgdaMCP.Tools.Description (
+  Description (..),
+  Effect (..),
+  Field (..),
+  Shape (..),
+  overview,
+ )
 import AgdaMCP.Tools.State (ToolState)
 import AgdaMCP.Tools.Tool (Answer (..), Tool (..))
 
@@ -49,12 +65,8 @@ serverInfo =
   McpServerInfo
     { serverName = "agda-mcp"
     , serverVersion = "0.1.0.0"
-    , serverInstructions = instructions
+    , serverInstructions = overview
     }
-
-instructions :: Text
-instructions =
-  "Tools for developing Agda proofs interactively. Use `load` to type-check a file and see its open goals, inspect them with `goal`, try expressions against them with `check` and `infer`, and fill them with `give` and `case_split`. Agda keeps only one file loaded at a time, and each load reports a load ID that the other tools require. `goal`, `check`, and `infer` do not modify anything, while `give` and `case_split` modify the file on disk and reload it, which issues a new load ID and fresh goal ID assignments."
 
 handlers :: MVar ToolState -> McpServerHandlers
 handlers stateVariable =
@@ -63,7 +75,7 @@ handlers stateVariable =
   byName :: Map Text Tool
   byName =
     Map.fromList
-      [(toolDefinitionName $ toolDefinition tool, tool) | tool <- allTools]
+      [(descriptionName $ toolDescription tool, tool) | tool <- allTools]
 
   list _ = pure $ map toolDefinition allTools
 
@@ -80,6 +92,65 @@ handlers stateVariable =
     (toolResult [ContentText $ answerText answer])
       { toolResultIsError = not $ answerOk answer
       }
+
+{- | The tool's MCP definition, from its description: the summary, an input
+schema from its parameters, and annotations from its effect. The output schema
+is left unset.
+-}
+toolDefinition :: Tool -> ToolDefinition
+toolDefinition tool =
+  ( mkToolDefinition
+      (descriptionName description)
+      (descriptionSummary description)
+      (schema $ objectType $ descriptionParameters description)
+  )
+    { toolDefinitionAnnotations = Just $ annotations $ descriptionEffect description
+    }
+ where
+  description = toolDescription tool
+
+objectType :: [Field] -> SchemaType
+objectType fields =
+  SchemaObject
+    [(fieldName f, fieldSchema f) | f <- fields]
+    [fieldName f | f <- fields, fieldRequired f]
+
+fieldSchema :: Field -> Schema
+fieldSchema f =
+  maybe schema describedSchema (fieldDescription f) $ shapeType $ fieldShape f
+
+{- | Only the shapes a parameter takes. The output-only constructors have no
+input schema, so a parameter that used one fails at `tools/list`, which the
+golden catches.
+-}
+shapeType :: Shape -> SchemaType
+shapeType ShapeString = SchemaString Nothing
+shapeType (ShapeEnum alternatives) = SchemaString $ Just alternatives
+shapeType ShapeInteger = SchemaInteger
+shapeType ShapeBoolean = SchemaBoolean
+shapeType (ShapeArray element) = SchemaArray $ schema $ shapeType element
+shapeType (ShapeObject fields) = objectType fields
+shapeType shape = error $ "a parameter has no input schema: " <> show shape
+
+annotations :: Effect -> ToolAnnotations
+annotations Inspects =
+  defaultToolAnnotations
+    { toolReadOnlyHint = Just True
+    , toolIdempotentHint = Just True
+    , toolOpenWorldHint = Just False
+    }
+annotations Loads =
+  defaultToolAnnotations
+    { toolReadOnlyHint = Just True
+    , toolOpenWorldHint = Just False
+    }
+annotations Edits =
+  defaultToolAnnotations
+    { toolReadOnlyHint = Just False
+    , toolDestructiveHint = Just True
+    , toolIdempotentHint = Just False
+    , toolOpenWorldHint = Just False
+    }
 
 data Outcome
   = Parsed CommandLineOptions

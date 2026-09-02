@@ -17,16 +17,6 @@ module AgdaMCP.Tools.Give (
   renderResponse,
 ) where
 
-import MCP.Server (
-  SchemaType (..),
-  ToolAnnotations (..),
-  ToolDefinition (..),
-  defaultToolAnnotations,
-  describedSchema,
-  mkToolDefinition,
-  schema,
- )
-
 import Agda.Interaction.Base (UseForce (..))
 import Agda.Syntax.Common (InteractionId (..))
 import Control.Exception (throwIO)
@@ -50,6 +40,19 @@ import AgdaMCP.Interaction (
  )
 import AgdaMCP.Interaction.Give qualified as Interaction.Give
 import AgdaMCP.Interaction.Refine qualified as Interaction.Refine
+import AgdaMCP.Tools.Description (
+  Description (..),
+  Effect (..),
+  Field (..),
+  Shape (..),
+  Variant (..),
+  field,
+  goalIdField,
+  loadIdField,
+  loadIdRefusals,
+  parameter,
+  timeoutField,
+ )
 import AgdaMCP.Tools.Json (
   encodeError,
   encodeGoalId,
@@ -63,11 +66,6 @@ import AgdaMCP.Tools.LoadId (
   LoadId,
   LoadIdRefusal,
   renderLoadIdRefusal,
- )
-import AgdaMCP.Tools.MCP (
-  goalIdSchema,
-  loadIdSchema,
-  timeoutSchema,
  )
 import AgdaMCP.Tools.Render (
   blocks,
@@ -88,6 +86,7 @@ import AgdaMCP.Tools.Source (
  )
 import AgdaMCP.Tools.State (ToolM, liftInteraction)
 import AgdaMCP.Tools.Tool (
+  Budget (..),
   Tool (..),
   editBudget,
   toolHandle,
@@ -99,64 +98,103 @@ import AgdaMCP.Tools.Tool (
 giveTool :: Tool
 giveTool =
   Tool
-    { toolDescription = error "not implemented"
-    , toolDefinition =
-        ( mkToolDefinition "give" giveDescription $
-            schema $
-              SchemaObject
-                [ ("load_id", loadIdSchema)
-                ,
-                  ( "gives"
-                  , describedSchema givesDescription $
-                      SchemaArray $
-                        schema $
-                          SchemaObject
-                            [ ("goal", goalIdSchema)
-                            ,
-                              ( "expression"
-                              , describedSchema expressionDescription $
-                                  SchemaString Nothing
-                              )
-                            ,
-                              ( "action"
-                              , describedSchema actionDescription $
-                                  SchemaString (Just $ Map.keys actions)
-                              )
-                            ]
-                            ["goal", "expression"]
-                  )
-                , ("timeout", timeoutSchema editBudget)
-                ]
-                ["load_id", "gives"]
-        )
-          { toolDefinitionAnnotations = Just giveAnnotations
-          }
+    { toolDescription = giveDescription
     , toolCall = toolHandle editBudget give renderResponse
     }
- where
-  giveAnnotations :: ToolAnnotations
-  giveAnnotations =
-    defaultToolAnnotations
-      { toolReadOnlyHint = Just False
-      , toolDestructiveHint = Just True
-      , toolIdempotentHint = Just False
-      , toolOpenWorldHint = Just False
-      }
 
-  giveDescription :: Text
-  giveDescription =
-    "Fill open goals in the currently loaded Agda file by writing expressions into them. The batch is all-or-nothing and executed in order. If one item is rejected, the rest are skipped and no edits are written. Before writing, the server checks that the file on disk still matches the source Agda checked, and refuses everything if it changed. Except when the load ID is refused, every outcome is followed by a reload that issues a new load ID and fresh goal ID assignments, so the goal IDs in this request are no longer valid afterwards. What is written may be Agda's rendering of the expression rather than the submitted text, so the response shows what went in. Files are written back as UTF-8 with LF line endings. If the call runs out of time after the edits are written but before the reload finishes, the file on disk has changed without having been checked, and the other tools refuse to work against the earlier load until you call `load` again."
+-- The `minItems` and `default` keywords this schema used to carry are not
+-- expressible in the library's schema type. The action default is stated in
+-- its description, and an empty batch is still refused by `parseItems`.
+giveDescription :: Description
+giveDescription =
+  Description
+    { descriptionName = "give"
+    , descriptionSummary =
+        "Fill open goals in the currently loaded Agda file by writing expressions into them. The batch is all-or-nothing and executed in order. If one item is rejected, the rest are skipped and no edits are written. Before writing, the server checks that the file on disk still matches the source Agda checked, and refuses everything if it changed. Except when the load ID is refused, every outcome is followed by a reload that issues a new load ID and fresh goal ID assignments, so the goal IDs in this request are no longer valid afterwards. What is written may be Agda's rendering of the expression rather than the submitted text, so the response shows what went in. Files are written back as UTF-8 with LF line endings. If the call runs out of time after the edits are written but before the reload finishes, the file on disk has changed without having been checked, and the other tools refuse to work against the earlier load until you call `load` again."
+    , descriptionParameters =
+        [ loadIdField
+        , parameter
+            "gives"
+            "The batch of goals to fill. Each goal may appear at most once."
+            ( ShapeArray $
+                ShapeObject
+                  [ goalIdField
+                  , parameter
+                      "expression"
+                      "The Agda expression to write into the goal."
+                      ShapeString
+                  , ( parameter
+                        "action"
+                        "`give` checks the expression against the goal and writes it, while `refine` partially fills the goal and leaves new subgoals in its place. Defaults to `give`."
+                        (ShapeEnum $ Map.keys actions)
+                    )
+                      { fieldRequired = False
+                      }
+                  ]
+            )
+        , timeoutField (budgetDefault editBudget)
+        ]
+    , descriptionAnswers =
+        [ Variant
+            "completed"
+            "the outcome, then the reload that followed"
+            [ field "outcome" (ShapeSum "OUTCOME" giveOutcomes)
+            , field "reload" Load.loadShape
+            ]
+        ]
+    , descriptionRefusals = loadIdRefusals
+    , descriptionEffect = Edits
+    }
 
-  givesDescription :: Text
-  givesDescription =
-    "The batch of goals to fill. Each goal may appear at most once."
-
-  expressionDescription :: Text
-  expressionDescription = "The Agda expression to write into the goal."
-
-  actionDescription :: Text
-  actionDescription =
-    "`give` checks the expression against the goal and writes it, while `refine` partially fills the goal and leaves new subgoals in its place. Defaults to `give`."
+giveOutcomes :: [Variant]
+giveOutcomes =
+  [ Variant
+      "applied"
+      "the edits were written"
+      [ field
+          "edits"
+          ( ShapeArray $
+              ShapeObject
+                [ field "goal" ShapeInteger
+                , field "span" (ShapeNamed "SPAN")
+                , field "text" ShapeString
+                , field "kind" (ShapeEnum ["verbatim", "parenthesized", "computed"])
+                ]
+          )
+      ]
+  , Variant
+      "rejected"
+      "an item was rejected, so no edits were written"
+      [ field "goal" ShapeInteger
+      , field "span" (ShapeNullable (ShapeNamed "SPAN"))
+      , field
+          "position"
+          (ShapeObject [field "index" ShapeInteger, field "length" ShapeInteger])
+      , field
+          "reason"
+          ( ShapeSum
+              "REASON"
+              [ Variant "unknown_goal" "no such goal in the current load" []
+              , Variant
+                  "error"
+                  "Agda rejected the expression"
+                  [field "error" (ShapeNamed "ERROR")]
+              ]
+          )
+      ]
+  , Variant
+      "file_changed"
+      "the file on disk no longer matches the source Agda checked, so no edits were written"
+      []
+  , Variant
+      "source_unreadable"
+      "the file could not be read, so no edits were written"
+      [field "detail" ShapeString]
+  , Variant
+      "write_failed"
+      "the file could not be written, so it is unchanged"
+      [field "detail" ShapeString]
+  ]
 
 data Request = Request
   { giveRequestLoadId :: LoadId

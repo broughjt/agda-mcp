@@ -23,15 +23,6 @@ import Data.Foldable (toList)
 import Data.List.NonEmpty (nonEmpty)
 import Data.Text (Text)
 import Data.Text qualified as Text
-import MCP.Server (
-  SchemaType (..),
-  ToolAnnotations (..),
-  ToolDefinition (..),
-  defaultToolAnnotations,
-  describedSchema,
-  mkToolDefinition,
-  schema,
- )
 
 import AgdaMCP.Interaction (Error (..), Position (..), Span (..))
 import AgdaMCP.Interaction.MakeCase (
@@ -41,6 +32,18 @@ import AgdaMCP.Interaction.MakeCase (
   Split (..),
  )
 import AgdaMCP.Interaction.MakeCase qualified as Interaction.MakeCase
+import AgdaMCP.Tools.Description (
+  Description (..),
+  Effect (..),
+  Shape (..),
+  Variant (..),
+  field,
+  goalIdField,
+  loadIdField,
+  loadIdRefusals,
+  parameter,
+  timeoutField,
+ )
 import AgdaMCP.Tools.Json (
   encodeError,
   encodeGoalId,
@@ -54,11 +57,6 @@ import AgdaMCP.Tools.LoadId (
   LoadId,
   LoadIdRefusal,
   renderLoadIdRefusal,
- )
-import AgdaMCP.Tools.MCP (
-  goalIdSchema,
-  loadIdSchema,
-  timeoutSchema,
  )
 import AgdaMCP.Tools.Render (
   blocks,
@@ -79,6 +77,7 @@ import AgdaMCP.Tools.Source (
  )
 import AgdaMCP.Tools.State (ToolM, liftInteraction)
 import AgdaMCP.Tools.Tool (
+  Budget (..),
   Tool (..),
   editBudget,
   toolHandle,
@@ -87,43 +86,70 @@ import AgdaMCP.Tools.Tool (
 caseSplitTool :: Tool
 caseSplitTool =
   Tool
-    { toolDescription = error "not implemented"
-    , toolDefinition =
-        ( mkToolDefinition "case_split" caseSplitDescription $
-            schema $
-              SchemaObject
-                [ ("load_id", loadIdSchema)
-                , ("goal", goalIdSchema)
-                ,
-                  ( "variables"
-                  , describedSchema variableDescription $
-                      SchemaArray (schema $ SchemaString Nothing)
-                  )
-                , ("timeout", timeoutSchema editBudget)
-                ]
-                ["load_id", "goal", "variables"]
-        )
-          { toolDefinitionAnnotations = Just caseSplitAnnotations
-          }
+    { toolDescription = caseSplitDescription
     , toolCall = toolHandle editBudget caseSplit renderResponse
     }
- where
-  caseSplitAnnotations :: ToolAnnotations
-  caseSplitAnnotations =
-    defaultToolAnnotations
-      { toolReadOnlyHint = Just False
-      , toolDestructiveHint = Just True
-      , toolIdempotentHint = Just False
-      , toolOpenWorldHint = Just False
-      }
 
-  caseSplitDescription :: Text
-  caseSplitDescription =
-    "Split an open goal into cases, replacing the clause containing the goal with one clause per case. Pass the pattern variables to split on, or the empty list to introduce the clause's remaining arguments. A variable not currently in scope is revealed as a visible pattern rather than split on. The replacement is written to the file, and a reload follows, which issues a new load ID and fresh goal ID assignments, so the goal IDs in this request are no longer valid afterwards. If the call runs out of time after the replacement is written but before the reload finishes, the file on disk has changed without having been checked, and the other tools refuse to work against the earlier load until you call `load` again."
+caseSplitDescription :: Description
+caseSplitDescription =
+  Description
+    { descriptionName = "case_split"
+    , descriptionSummary =
+        "Split an open goal into cases, replacing the clause containing the goal with one clause per case. Pass the pattern variables to split on, or the empty list to introduce the clause's remaining arguments. A variable not currently in scope is revealed as a visible pattern rather than split on. The replacement is written to the file, and a reload follows, which issues a new load ID and fresh goal ID assignments, so the goal IDs in this request are no longer valid afterwards. If the call runs out of time after the replacement is written but before the reload finishes, the file on disk has changed without having been checked, and the other tools refuse to work against the earlier load until you call `load` again."
+    , descriptionParameters =
+        [ loadIdField
+        , goalIdField
+        , parameter
+            "variables"
+            "The pattern variables to split on, by name. An empty list instead introduces the clause's remaining arguments."
+            (ShapeArray ShapeString)
+        , timeoutField (budgetDefault editBudget)
+        ]
+    , descriptionAnswers =
+        [ Variant
+            "completed"
+            "the outcome, then the reload that followed"
+            [ field "goal" ShapeInteger
+            , field "outcome" (ShapeSum "OUTCOME" caseSplitOutcomes)
+            , field "reload" Load.loadShape
+            ]
+        ]
+    , descriptionRefusals = loadIdRefusals
+    , descriptionEffect = Edits
+    }
 
-  variableDescription :: Text
-  variableDescription =
-    "The pattern variables to split on, by name. An empty list instead introduces the clause's remaining arguments."
+caseSplitOutcomes :: [Variant]
+caseSplitOutcomes =
+  [ Variant
+      "applied"
+      "the clause was replaced by the clauses listed"
+      [ field "span" (ShapeNamed "SPAN")
+      , field "variant" (ShapeEnum ["function", "extended_lambda"])
+      , field "layout" (ShapeEnum ["one_per_line", "inline"])
+      , field "clauses" (ShapeArray ShapeString)
+      , field "collapses_where" ShapeBoolean
+      ]
+  , Variant
+      "unknown_goal"
+      "no such goal in the current load, so nothing was written"
+      []
+  , Variant
+      "failed"
+      "Agda could not split the goal, so nothing was written"
+      [field "error" (ShapeNamed "ERROR")]
+  , Variant
+      "file_changed"
+      "the file on disk no longer matches the source Agda checked, so nothing was written"
+      []
+  , Variant
+      "source_unreadable"
+      "the file could not be read, so nothing was written"
+      [field "detail" ShapeString]
+  , Variant
+      "write_failed"
+      "the file could not be written, so it is unchanged"
+      [field "detail" ShapeString]
+  ]
 
 data Request = Request
   { caseSplitRequestLoadId :: LoadId

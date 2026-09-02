@@ -13,14 +13,6 @@ import Agda.Syntax.Common (InteractionId (..))
 import Data.Aeson (FromJSON (..), ToJSON (..), withObject, (.:), (.=))
 import Data.Text (Text)
 import Data.Text qualified as Text
-import MCP.Server (
-  SchemaType (..),
-  ToolAnnotations (..),
-  ToolDefinition (..),
-  defaultToolAnnotations,
-  mkToolDefinition,
-  schema,
- )
 
 import AgdaMCP.Interaction (
   Error,
@@ -28,6 +20,19 @@ import AgdaMCP.Interaction (
   GoalReport (..),
  )
 import AgdaMCP.Interaction.Goal qualified as Interaction.Goal
+import AgdaMCP.Tools.Description (
+  Description (..),
+  Effect (..),
+  Shape (..),
+  Variant (..),
+  field,
+  goalIdField,
+  loadIdField,
+  normalizationField,
+  normalizationShape,
+  timeoutField,
+  unknownGoal,
+ )
 import AgdaMCP.Tools.Json (
   encodeContextEntry,
   encodeError,
@@ -39,16 +44,11 @@ import AgdaMCP.Tools.Json (
 import AgdaMCP.Tools.Load (
   LoadRefusal,
   encodeLoadRefusal,
+  loadRefusals,
   renderLoadRefusal,
   requireCheckedLoad,
  )
 import AgdaMCP.Tools.LoadId (LoadId)
-import AgdaMCP.Tools.MCP (
-  goalIdSchema,
-  loadIdSchema,
-  normalizationSchema,
-  timeoutSchema,
- )
 import AgdaMCP.Tools.Render (
   blocks,
   indent,
@@ -61,6 +61,7 @@ import AgdaMCP.Tools.Render (
  )
 import AgdaMCP.Tools.State (ToolM, liftInteraction)
 import AgdaMCP.Tools.Tool (
+  Budget (..),
   Tool (..),
   inspectBudget,
   parseNormalizationField,
@@ -71,34 +72,38 @@ import AgdaMCP.Tools.Tool (
 goalTool :: Tool
 goalTool =
   Tool
-    { toolDescription = error "not implemented"
-    , toolDefinition =
-        ( mkToolDefinition "goal" goalDescription $
-            schema $
-              SchemaObject
-                [ ("load_id", loadIdSchema)
-                , ("goal", goalIdSchema)
-                , ("normalization", normalizationSchema)
-                , ("timeout", timeoutSchema inspectBudget)
-                ]
-                ["load_id", "goal"]
-        )
-          { toolDefinitionAnnotations = Just goalAnnotations
-          }
+    { toolDescription = goalDescription
     , toolCall = toolHandle inspectBudget goal renderResponse
     }
- where
-  goalAnnotations :: ToolAnnotations
-  goalAnnotations =
-    defaultToolAnnotations
-      { toolReadOnlyHint = Just True
-      , toolIdempotentHint = Just True
-      , toolOpenWorldHint = Just False
-      }
 
-  goalDescription :: Text
-  goalDescription =
-    "Inspect an open goal in the currently loaded Agda file without modifying anything. Reports the goal's type, its local context, its cubical boundary when the goal has one, and any unsolved constraints mentioning the goal. Types are rendered at the requested normalization. To try an expression at a goal, use check or infer instead."
+goalDescription :: Description
+goalDescription =
+  Description
+    { descriptionName = "goal"
+    , descriptionSummary =
+        "Inspect an open goal in the currently loaded Agda file without modifying anything. Reports the goal's type, its local context, its cubical boundary when the goal has one, and any unsolved constraints mentioning the goal. Types are rendered at the requested normalization. To try an expression at a goal, use check or infer instead."
+    , descriptionParameters =
+        [ loadIdField
+        , goalIdField
+        , normalizationField
+        , timeoutField (budgetDefault inspectBudget)
+        ]
+    , descriptionAnswers =
+        [ Variant
+            "goal"
+            "the goal's type, context, boundary and constraints"
+            [ field "goal" ShapeInteger
+            , field "normalization" normalizationShape
+            , field "shape" (ShapeNamed "SHAPE")
+            , field "context" (ShapeArray (ShapeNamed "ENTRY"))
+            , field "boundary" (ShapeArray ShapeString)
+            , field "constraints" (ShapeArray ShapeString)
+            ]
+        , Variant "failed" "Agda rejected the query" [field "error" (ShapeNamed "ERROR")]
+        ]
+    , descriptionRefusals = loadRefusals <> [unknownGoal]
+    , descriptionEffect = Inspects
+    }
 
 data Request = Request
   { goalRequestLoadId :: LoadId

@@ -14,32 +14,31 @@ import Data.Aeson (FromJSON (..), ToJSON (..), withObject, (.:), (.=))
 import Data.Aeson.Types qualified as Aeson
 import Data.Text (Text)
 import Data.Text qualified as Text
-import MCP.Server (
-  SchemaType (..),
-  ToolAnnotations (..),
-  ToolDefinition (..),
-  defaultToolAnnotations,
-  describedSchema,
-  mkToolDefinition,
-  schema,
- )
 
 import AgdaMCP.Interaction (Error, GoalError (..))
 import AgdaMCP.Interaction.GoalCheck qualified as Interaction.GoalCheck
+import AgdaMCP.Tools.Description (
+  Description (..),
+  Effect (..),
+  Shape (..),
+  Variant (..),
+  field,
+  goalIdField,
+  loadIdField,
+  normalizationField,
+  parameter,
+  timeoutField,
+  unknownGoal,
+ )
 import AgdaMCP.Tools.Json (encodeError, encodeGoalId, encodeUnknownGoal, kinded)
 import AgdaMCP.Tools.Load (
   LoadRefusal,
   encodeLoadRefusal,
+  loadRefusals,
   renderLoadRefusal,
   requireCheckedLoad,
  )
 import AgdaMCP.Tools.LoadId (LoadId)
-import AgdaMCP.Tools.MCP (
-  goalIdSchema,
-  loadIdSchema,
-  normalizationSchema,
-  timeoutSchema,
- )
 import AgdaMCP.Tools.Render (
   blocks,
   indent,
@@ -50,6 +49,7 @@ import AgdaMCP.Tools.Render (
  )
 import AgdaMCP.Tools.State (ToolM, liftInteraction)
 import AgdaMCP.Tools.Tool (
+  Budget (..),
   Tool (..),
   inspectBudget,
   parseNormalizationField,
@@ -59,43 +59,40 @@ import AgdaMCP.Tools.Tool (
 checkTool :: Tool
 checkTool =
   Tool
-    { toolDescription = error "not implemented"
-    , toolDefinition =
-        ( mkToolDefinition "check" checkDescription $
-            schema $
-              SchemaObject
-                [ ("load_id", loadIdSchema)
-                , ("goal", goalIdSchema)
-                , ("normalization", normalizationSchema)
-                ,
-                  ( "expression"
-                  , describedSchema expressionDescription $ SchemaString Nothing
-                  )
-                , ("timeout", timeoutSchema inspectBudget)
-                ]
-                ["load_id", "goal", "expression"]
-        )
-          { toolDefinitionAnnotations = Just checkAnnotations
-          }
+    { toolDescription = checkDescription
     , toolCall = toolHandle inspectBudget check renderResponse
     }
- where
-  checkAnnotations :: ToolAnnotations
-  checkAnnotations =
-    defaultToolAnnotations
-      { toolReadOnlyHint = Just True
-      , toolIdempotentHint = Just True
-      , toolOpenWorldHint = Just False
-      }
 
-  checkDescription :: Text
-  checkDescription =
-    "Check an expression against the type of an open goal. Nothing is modified, so use this as a dry run before give. The response states whether the expression checks, and on success reports the elaboration under \"Elaborates to:\". A failure is a normal result rather than a tool error. When the expression does not check, use infer to see its inferred type. The expression is parsed and checked in the goal's scope, so its errors carry positions relative to the expression, not the file. The elaboration is rendered at the requested normalization. Several read-only calls may use the same load ID at the same time. To just inspect the goal, use goal instead."
-  -- TODO: Several read-only calls may use the same load ID at the same time.
-
-  expressionDescription :: Text
-  expressionDescription =
-    "The Agda expression to check against the goal."
+checkDescription :: Description
+checkDescription =
+  Description
+    { descriptionName = "check"
+    , descriptionSummary =
+        -- TODO: Several read-only calls may use the same load ID at the same time.
+        "Check an expression against the type of an open goal. Nothing is modified, so use this as a dry run before give. The response states whether the expression checks, and on success reports the elaboration under \"Elaborates to:\". A failure is a normal result rather than a tool error. When the expression does not check, use infer to see its inferred type. The expression is parsed and checked in the goal's scope, so its errors carry positions relative to the expression, not the file. The elaboration is rendered at the requested normalization. Several read-only calls may use the same load ID at the same time. To just inspect the goal, use goal instead."
+    , descriptionParameters =
+        [ loadIdField
+        , goalIdField
+        , normalizationField
+        , parameter
+            "expression"
+            "The Agda expression to check against the goal."
+            ShapeString
+        , timeoutField (budgetDefault inspectBudget)
+        ]
+    , descriptionAnswers =
+        [ Variant
+            "checks"
+            "the expression checks; its elaboration follows"
+            [field "goal" ShapeInteger, field "elaborated" ShapeString]
+        , Variant
+            "failed"
+            "the expression does not check"
+            [field "goal" ShapeInteger, field "error" (ShapeNamed "ERROR")]
+        ]
+    , descriptionRefusals = loadRefusals <> [unknownGoal]
+    , descriptionEffect = Inspects
+    }
 
 data Request = Request
   { checkRequestLoadId :: LoadId

@@ -12,6 +12,8 @@ module AgdaMCP.Tools.Load (
   renderLoadRefusal,
   encodeLoadRefusal,
   renderResponse,
+  loadShape,
+  loadRefusals,
 ) where
 
 import Agda.Interaction.Base (Rewrite (..))
@@ -30,15 +32,6 @@ import Data.Aeson (
  )
 import Data.Text (Text)
 import Data.Text qualified as Text
-import MCP.Server (
-  SchemaType (..),
-  ToolAnnotations (..),
-  ToolDefinition (..),
-  defaultToolAnnotations,
-  describedSchema,
-  mkToolDefinition,
-  schema,
- )
 
 import AgdaMCP.Interaction (
   ContextEntry,
@@ -52,6 +45,17 @@ import AgdaMCP.Interaction (
  )
 import AgdaMCP.Interaction.Context qualified as Context
 import AgdaMCP.Interaction.Load qualified as Interaction.Load
+import AgdaMCP.Tools.Description (
+  Description (..),
+  Effect (..),
+  Shape (..),
+  Variant (..),
+  field,
+  loadIdRefusals,
+  parameter,
+  sourceRefusals,
+  timeoutField,
+ )
 import AgdaMCP.Tools.Json (
   encodeContextEntry,
   encodeError,
@@ -74,9 +78,6 @@ import AgdaMCP.Tools.LoadId (
   renderLoadIdRefusal,
   requireCurrentLoad,
  )
-import AgdaMCP.Tools.MCP (
-  timeoutSchema,
- )
 import AgdaMCP.Tools.Render (
   blocks,
   indent,
@@ -91,6 +92,7 @@ import AgdaMCP.Tools.Render (
 import AgdaMCP.Tools.Source (SourceRefusal, readChecked)
 import AgdaMCP.Tools.State (ToolM, ToolState (..), liftInteraction)
 import AgdaMCP.Tools.Tool (
+  Budget (..),
   Tool (..),
   loadBudget,
   toolHandle,
@@ -99,35 +101,55 @@ import AgdaMCP.Tools.Tool (
 loadTool :: Tool
 loadTool =
   Tool
-    { toolDescription = error "not implemented"
-    , toolDefinition =
-        ( mkToolDefinition "load" loadDescription $
-            schema $
-              SchemaObject
-                [ ("path", describedSchema pathDescription $ SchemaString Nothing)
-                , ("timeout", timeoutSchema loadBudget)
-                ]
-                ["path"]
-        )
-          { toolDefinitionAnnotations = Just loadAnnotations
-          }
+    { toolDescription = loadDescription
     , toolCall = toolHandle loadBudget load $ Right . renderResponse
     }
- where
-  loadAnnotations :: ToolAnnotations
-  loadAnnotations =
-    defaultToolAnnotations
-      { toolReadOnlyHint = Just True
-      , toolOpenWorldHint = Just False
-      }
 
-  loadDescription :: Text
-  loadDescription =
-    "Load and type-check an Agda source file. On success, reports open goals (each with their local context), unsolved hidden metavariables, warnings, and non-fatal errors. On failure, reports the error message and associated warnings. Agda keeps only one file loaded at a time: each load replaces the one before it and makes fresh goal ID assignments. A successful load returns a load ID for the state it produced. Other tools require that load ID to confirm the request refers to that state, and refuse an earlier one rather than misread it."
+loadDescription :: Description
+loadDescription =
+  Description
+    { descriptionName = "load"
+    , descriptionSummary =
+        "Load and type-check an Agda source file. On success, reports open goals (each with their local context), unsolved hidden metavariables, warnings, and non-fatal errors. On failure, reports the error message and associated warnings. Agda keeps only one file loaded at a time: each load replaces the one before it and makes fresh goal ID assignments. A successful load returns a load ID for the state it produced. Other tools require that load ID to confirm the request refers to that state, and refuse an earlier one rather than misread it."
+    , descriptionParameters =
+        [ parameter
+            "path"
+            "Path to an Agda source file (.agda, but also literate formats such as .lagda.md, .lagda.tex, .lagda.typ, etc). Relative paths are resolved against the server process's working directory, so prefer an absolute path when that directory may be ambiguous."
+            ShapeString
+        , timeoutField (budgetDefault loadBudget)
+        ]
+    , descriptionAnswers = loadAnswers
+    , descriptionRefusals = []
+    , descriptionEffect = Loads
+    }
 
-  pathDescription :: Text
-  pathDescription =
-    "Path to an Agda source file (.agda, but also literate formats such as .lagda.md, .lagda.tex, .lagda.typ, etc). Relative paths are resolved against the server process's working directory, so prefer an absolute path when that directory may be ambiguous."
+loadAnswers :: [Variant]
+loadAnswers =
+  [ Variant
+      "loaded"
+      "the file type-checked; its goals, hidden metavariables, warnings and non-fatal errors follow"
+      [ field "load_id" ShapeString
+      , field "path" ShapeString
+      , field "goals" (ShapeArray (ShapeNamed "GOAL"))
+      , field "hidden_metavariables" (ShapeArray (ShapeNamed "HIDDEN"))
+      , field "warnings" (ShapeArray (ShapeNamed "WARNING"))
+      , field "non_fatal_errors" (ShapeArray (ShapeNamed "WARNING"))
+      ]
+  , Variant "failed" "Agda rejected the file" [field "error" (ShapeNamed "ERROR")]
+  , Variant "file_changed" "the file changed on disk while it was being checked" []
+  ]
+
+{- | The load answers as the nested sum give and case-split report their
+reload under.
+-}
+loadShape :: Shape
+loadShape = ShapeSum "LOAD" loadAnswers
+
+{- | The refusals of a tool that requires a checked load: the load ID's, then
+the source's, in the order `requireCheckedLoad` makes them.
+-}
+loadRefusals :: [Variant]
+loadRefusals = loadIdRefusals <> sourceRefusals
 
 data Request = Request {loadRequestPath :: FilePath}
   deriving (Eq, Show)

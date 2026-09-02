@@ -14,13 +14,18 @@ module AgdaMCP.Tools.Render (
   renderSourceRefusal,
   renderReadOnlyTimeout,
   renderEditingTimeout,
+  normalizations,
+  renderNormalization,
   blocks,
   section,
   indent,
 ) where
 
+import Agda.Interaction.Base (Rewrite (..))
 import Agda.Syntax.Common (InteractionId (..))
 import Control.Monad (guard)
+import Data.Map (Map)
+import Data.Map qualified as Map
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -161,6 +166,24 @@ renderEditingTimeout seconds =
        \to work against the earlier load until you call `load` again. Load the \
        \file to see where it stands, and retry with a larger `timeout` if the \
        \work needs longer."
+
+-- | The normalization levels by the names both front ends accept.
+normalizations :: Map Text Rewrite
+normalizations =
+  Map.fromList
+    [ ("asis", AsIs)
+    , ("instantiated", Instantiated)
+    , ("headnormal", HeadNormal)
+    , ("simplified", Simplified)
+    , ("normalized", Normalised)
+    ]
+
+renderNormalization :: Rewrite -> Text
+renderNormalization AsIs = "asis"
+renderNormalization Instantiated = "instantiated"
+renderNormalization HeadNormal = "headnormal"
+renderNormalization Simplified = "simplified"
+renderNormalization Normalised = "normalized"
 
 renderSeconds :: Int -> Text
 renderSeconds 1 = "1 second"

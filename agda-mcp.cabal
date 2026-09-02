@@ -55,7 +55,6 @@ library
     AgdaMCP.Tools
     AgdaMCP.Tools.Description
     AgdaMCP.Tools.Tool
-    AgdaMCP.Tools.MCP
     AgdaMCP.Tools.LoadId
     AgdaMCP.Tools.Json
     AgdaMCP.Tools.Render
