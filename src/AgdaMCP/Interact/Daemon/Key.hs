@@ -13,6 +13,7 @@ module AgdaMCP.Interact.Daemon.Key (
   runtimeDirectoryFor,
   Paths (..),
   keyPaths,
+  preparePaths,
 ) where
 
 import Control.Exception (IOException, try)
@@ -47,8 +48,8 @@ data Key = Key
   holding an @.agda-lib@ file, or the working directory itself.
   -}
   , keyFlags :: AgdaFlags
-  {- ^ With @--library-file@ made absolute, since it is read relative to
-  the working directory in contrast to other options.
+  {- ^ With @--library-file@ made absolute and canonical, since it is read
+  relative to the working directory in contrast to other options.
   -}
   }
   deriving (Eq, Show)
@@ -74,15 +75,15 @@ findProjectRoot directory = do
             parent = takeDirectory candidate
   walk start
 
--- | The key for a given working directory and set of command flags.
+{- | The key for a given working directory and set of command flags. The
+library file is canonicalized, not merely made absolute, so that two spellings
+of one file from two working directories address one daemon.
+-}
 newKey :: FilePath -> AgdaFlags -> IO Key
 newKey directory flags = do
   root <- findProjectRoot directory
-  pure
-    Key
-      { keyRoot = root
-      , keyFlags = flags {libraryFile = absolute <$> libraryFile flags}
-      }
+  library <- traverse (canonicalizePath . absolute) (libraryFile flags)
+  pure Key {keyRoot = root, keyFlags = flags {libraryFile = library}}
  where
   absolute path
     | isAbsolute path = path
@@ -155,3 +156,10 @@ keyPaths runtime key =
     }
  where
   directory = runtime </> Text.unpack (keyHash key)
+
+-- | The key's paths under this user's runtime directory, with their directory created.
+preparePaths :: Key -> IO Paths
+preparePaths key = do
+  runtime <- runtimeDirectory
+  createDirectoryIfMissing True $ runtime </> Text.unpack (keyHash key)
+  pure $ keyPaths runtime key
