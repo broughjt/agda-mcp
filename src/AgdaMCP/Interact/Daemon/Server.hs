@@ -10,7 +10,7 @@ module AgdaMCP.Interact.Daemon.Server (
 
 import Agda.Version (version)
 import Control.Concurrent (forkIO, threadDelay)
-import Control.Concurrent.Async (link, withAsync)
+import Control.Concurrent.Async (cancel, link, withAsync)
 import Control.Concurrent.MVar (
   MVar,
   newEmptyMVar,
@@ -132,12 +132,16 @@ serve daemon stateVariable = do
               , inFlight = inFlight
               , lastActivity = lastActivity
               }
-      withThread (acceptLoop session listener) $
+      withAsync (acceptLoop session listener) $ \acceptor ->
         withThread (idleWatch session) $ do
+          link acceptor
           daemonReady daemon
           takeMVar stopRequested
           -- Stop taking connections before the in-flight ones drain, so a
-          -- late client finds no socket rather than an unanswered one.
+          -- late client finds no socket rather than an unanswered one. The
+          -- acceptor goes first: closing the listener under it would end it
+          -- with an error, and it is linked.
+          cancel acceptor
           close listener
           removeIfPresent $ socketPath paths
           atomically $ readTVar inFlight >>= check . (== 0)
