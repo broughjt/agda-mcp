@@ -312,6 +312,25 @@ helpTests =
         case parse ["--help"] of
           Helped text -> assertContainsProse (firstSentence overview) text
           other -> assertFailure $ "expected help, got " <> show other
+    , testCase "the top-level help spells case-split as the shell does" $
+        case parse ["--help"] of
+          Helped text -> do
+            assertLacks "case_split" text
+            assertContainsProse "fill them with `give` and `case-split`." text
+          other -> assertFailure $ "expected help, got " <> show other
+    , testCase "give's and case-split's help spell case-split as the shell does" $
+        mapM_
+          ( \verb -> case parse [verb, "--help"] of
+              Helped text -> assertLacks "case_split" text
+              other -> assertFailure $ "expected help for " <> verb <> ", got " <> show other
+          )
+          ["give", "case-split"]
+    , testCase "goal's help keeps its field and kind names" $
+        case parse ["goal", "--help"] of
+          Helped text -> do
+            assertContains "\"current_load_id\"" text
+            assertContains "\"kind\": \"stale_load_id\"" text
+          other -> assertFailure $ "expected help, got " <> show other
     , testCase "the top-level help shows the JSON envelope" $
         case parse ["--help"] of
           Helped text -> assertContains "{\"ok\": B, \"value\": V}" text
