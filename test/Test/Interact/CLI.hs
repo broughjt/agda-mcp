@@ -220,9 +220,24 @@ globalTests =
               , invocationIdleTimeout = 10
               , invocationFormat = FormatJson
               }
-    , testCase "json after the verb is rejected" $
+    , testCase "json after the verb selects JSON output" $
+        parse ["status", "--json"]
+          @?= Parsed (invocation Status) {invocationFormat = FormatJson}
+    , testCase "json in both positions selects JSON output" $
+        parse ["--json", "load", "/x/X.agda", "--json"]
+          @?= Parsed
+            (invocation (Invoke "load" (Map.fromList [("path", Aeson.String "/x/X.agda")])))
+              { invocationFormat = FormatJson
+              }
+    , testCase "a verb without json prints text" $
+        parse ["load", "/x/X.agda"]
+          @?= Parsed
+            (invocation (Invoke "load" (Map.fromList [("path", Aeson.String "/x/X.agda")])))
+              { invocationFormat = FormatText
+              }
+    , testCase "json after daemon is rejected" $
         expectRejected $
-          parse ["status", "--json"]
+          parse ["daemon", "--json"]
     , testCase "Agda flags after the verb are rejected" $
         expectRejected $
           parse ["status", "-i", "src"]
@@ -269,6 +284,17 @@ helpTests =
     , testCase "the top-level help names the json flag" $
         case parse ["--help"] of
           Helped text -> assertContains "--json" text
+          other -> assertFailure $ "expected help, got " <> show other
+    , testCase "every answering verb's help names the json flag" $
+        mapM_
+          ( \verb -> case parse [verb, "--help"] of
+              Helped text -> assertContains "--json" text
+              other -> assertFailure $ "expected help for " <> verb <> ", got " <> show other
+          )
+          ["load", "goal", "check", "infer", "give", "case-split", "stop", "status"]
+    , testCase "daemon's help does not name the json flag" $
+        case parse ["daemon", "--help"] of
+          Helped text -> assertLacks "--json" text
           other -> assertFailure $ "expected help, got " <> show other
     , testCase "give's help says interrupting the client does not cancel the edit" $
         case parse ["give", "--help"] of
@@ -398,6 +424,12 @@ assertContains needle haystack =
   assertBool
     (show needle <> " not found in " <> show haystack)
     (needle `Text.isInfixOf` haystack)
+
+assertLacks :: Text -> Text -> IO ()
+assertLacks needle haystack =
+  assertBool
+    (show needle <> " found in " <> show haystack)
+    (not $ needle `Text.isInfixOf` haystack)
 
 -- | Containment up to line wrapping.
 assertContainsProse :: Text -> Text -> IO ()
