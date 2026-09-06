@@ -291,7 +291,6 @@ namedShapes =
         [ field "id" ShapeInteger
         , field "span" (ShapeNamed "SPAN")
         , field "shape" (ShapeNamed "SHAPE")
-        , field "context" (ShapeArray (ShapeNamed "ENTRY"))
         ]
     )
   ]

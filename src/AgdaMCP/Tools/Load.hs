@@ -266,12 +266,12 @@ renderResponse (ResponseOk report) =
   blocks $
     [ Text.intercalate
         "\n"
-        [ verb <> countGoals (length $ loadReportGoals report)
+        [ verb <> countGoals (length goals)
         , "Load ID: " <> renderLoadId (loadReportId report)
         , "File: " <> Text.pack (loadReportPath report)
         ]
     ]
-      <> map renderGoal (loadReportGoals report)
+      <> [Text.intercalate "\n" (map renderGoal goals) | not (null goals)]
       <> section
         "Unsolved metavariables:"
         (map renderHiddenMetavariable $ loadReportHiddenMetavariables report)
@@ -280,6 +280,7 @@ renderResponse (ResponseOk report) =
         "Non-fatal errors:"
         (map renderNonFatalError $ loadReportNonFatalErrors report)
  where
+  goals = loadReportGoals report
   -- Non-fatal errors change the verb, but metavariable and warning sections do
   -- not alter what "succeeded" means.
   verb
@@ -300,11 +301,11 @@ countGoals n = Text.pack (show n) <> " goals"
 
 renderGoal :: Goal -> Text
 renderGoal goal =
-  Text.intercalate
-    "\n"
-    [ renderGoalId (goalId goal) <> " at " <> renderSpan (goalSpan goal)
-    , indent $ "⊢ " <> renderShape (goalShape goal)
-    ]
+  renderGoalId (goalId goal)
+    <> " at "
+    <> renderSpan (goalSpan goal)
+    <> " : "
+    <> renderShape (goalShape goal)
 
 renderHiddenMetavariable :: HiddenMetavariable -> Text
 renderHiddenMetavariable metavariable =
@@ -342,7 +343,6 @@ encodeGoal goal =
     [ "id" .= encodeGoalId (goalId goal)
     , "span" .= encodeSpan (goalSpan goal)
     , "shape" .= encodeShape (goalShape goal)
-    , "context" .= ([] :: [Value])
     ]
 
 encodeLoadRefusal :: LoadRefusal -> Value
