@@ -73,6 +73,7 @@ import AgdaMCP.Tools.LoadId (
  )
 import AgdaMCP.Tools.Render (
   blocks,
+  hanging,
   indent,
   renderGoalId,
   renderShape,
@@ -301,19 +302,19 @@ countGoals n = Text.pack (show n) <> " goals"
 
 renderGoal :: Goal -> Text
 renderGoal goal =
-  renderGoalId (goalId goal)
-    <> " at "
-    <> renderSpan (goalSpan goal)
-    <> " : "
-    <> renderShape (goalShape goal)
+  hanging
+    (renderGoalId (goalId goal) <> " at " <> renderSpan (goalSpan goal) <> " : ")
+    (renderShape (goalShape goal))
 
 renderHiddenMetavariable :: HiddenMetavariable -> Text
 renderHiddenMetavariable metavariable =
   indent $
-    hiddenMetavariableName metavariable
-      <> maybe "" ((" at " <>) . renderSpan) (hiddenMetavariableSpan metavariable)
-      <> " : "
-      <> renderShape (hiddenMetavariableShape metavariable)
+    hanging
+      ( hiddenMetavariableName metavariable
+          <> maybe "" ((" at " <>) . renderSpan) (hiddenMetavariableSpan metavariable)
+          <> " : "
+      )
+      (renderShape (hiddenMetavariableShape metavariable))
 
 renderNonFatalError :: NonFatalError -> Text
 renderNonFatalError (NonFatalError (_, message)) =

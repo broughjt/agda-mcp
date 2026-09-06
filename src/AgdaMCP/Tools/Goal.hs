@@ -51,6 +51,7 @@ import AgdaMCP.Tools.Load (
 import AgdaMCP.Tools.LoadId (LoadId)
 import AgdaMCP.Tools.Render (
   blocks,
+  hanging,
   indent,
   renderAgdaError,
   renderContextEntry,
@@ -172,7 +173,7 @@ renderGoalReport rewrite goalId report =
         header
           -- We reverse context entries so they are listed innermost-first.
           : map (indent . renderContextEntry) (reverse $ goalReportContext report)
-            <> [indent $ "⊢ " <> renderShape (goalReportShape report)]
+            <> [indent $ hanging "⊢ " $ renderShape (goalReportShape report)]
     ]
       <> section "Boundary:" (map indent $ goalReportBoundary report)
       <> section "Constraints:" (map indent $ goalReportConstraints report)

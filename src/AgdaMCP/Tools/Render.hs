@@ -19,6 +19,7 @@ module AgdaMCP.Tools.Render (
   blocks,
   section,
   indent,
+  hanging,
 ) where
 
 import Agda.Interaction.Base (Rewrite (..))
@@ -70,9 +71,11 @@ renderContextEntry :: ContextEntry -> Text
 renderContextEntry entry =
   case contextEntryLetValue entry of
     Nothing -> typed
-    Just value -> typed <> "\n" <> name <> " = " <> value
+    Just value -> typed <> "\n" <> hanging (name <> " = ") value
  where
-  typed = nameWithMaybeCohesion <> " : " <> contextEntryType entry <> attributeGroup
+  typed =
+    hanging (nameWithMaybeCohesion <> " : ") (contextEntryType entry)
+      <> attributeGroup
   nameWithMaybeCohesion = maybe name (<> (" " <> name)) $ contextEntryCohesion entry
   name
     | not (contextEntryOriginalInScope entry) = contextEntryReifiedName entry
@@ -201,3 +204,13 @@ section title items = [title <> "\n" <> blocks items]
 -- | Every line, so multi-line payloads keep their own internal indentation.
 indent :: Text -> Text
 indent = Text.intercalate "\n" . map ("  " <>) . Text.splitOn "\n"
+
+{- | The prefix followed by the body, with each of the body's later lines
+padded to start under the column where its first line started. The padding is
+one space per code point of the prefix, and is added to whatever leading
+spaces the line already carries.
+-}
+hanging :: Text -> Text -> Text
+hanging prefix body =
+  prefix
+    <> Text.replace "\n" ("\n" <> Text.replicate (Text.length prefix) " ") body
