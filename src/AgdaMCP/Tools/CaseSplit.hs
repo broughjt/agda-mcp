@@ -95,7 +95,7 @@ caseSplitDescription =
   Description
     { descriptionName = "case_split"
     , descriptionSummary =
-        "Split an open goal into cases, replacing the clause containing the goal with one clause per case. Pass the pattern variables to split on, or the empty list to introduce the clause's remaining arguments. A variable not currently in scope is revealed as a visible pattern rather than split on. The replacement is written to the file, and a reload follows, which issues a new load ID and fresh goal ID assignments, so the goal IDs in this request are no longer valid afterwards. If the call runs out of time after the replacement is written but before the reload finishes, the file on disk has changed without having been checked, and the other tools refuse to work against the earlier load until you call `load` again."
+        "Split an open goal into cases, replacing the clause containing the goal with one clause per case. Pass the pattern variables to split on, or the empty list to introduce the clause's remaining arguments. A variable not currently in scope is revealed as a visible pattern rather than split on. The replacement is written to the file, and a reload follows, which issues a new load ID and fresh goal ID assignments, so the goal IDs in this request are no longer valid afterwards. Do not run other calls against the same load ID while this one runs; they are refused as stale once it finishes. If the call runs out of time after the replacement is written but before the reload finishes, the file on disk has changed without having been checked, and the other tools refuse to work against the earlier load until you call `load` again."
     , descriptionParameters =
         [ loadIdField
         , goalIdField

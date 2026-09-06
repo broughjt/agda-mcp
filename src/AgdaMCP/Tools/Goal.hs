@@ -82,7 +82,7 @@ goalDescription =
   Description
     { descriptionName = "goal"
     , descriptionSummary =
-        "Inspect an open goal in the currently loaded Agda file without modifying anything. Reports the goal's type, its local context, its cubical boundary when the goal has one, and any unsolved constraints mentioning the goal. Types are rendered at the requested normalization. To try an expression at a goal, use check or infer instead."
+        "Inspect an open goal in the currently loaded Agda file without modifying anything. Reports the goal's type, its local context, its cubical boundary when the goal has one, and any unsolved constraints mentioning the goal. Types are rendered at the requested normalization. Several read-only calls may use the same load ID at the same time. To try an expression at a goal, use check or infer instead."
     , descriptionParameters =
         [ loadIdField
         , goalIdField

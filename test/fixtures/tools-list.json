@@ -5,7 +5,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Load and type-check an Agda source file. On success, reports open goals (each with their local context), unsolved hidden metavariables, warnings, and non-fatal errors. On failure, reports the error message and associated warnings. Agda keeps only one file loaded at a time: each load replaces the one before it and makes fresh goal ID assignments. A successful load returns a load ID for the state it produced. Other tools require that load ID to confirm the request refers to that state, and refuse an earlier one rather than misread it.",
+      "description": "Load and type-check an Agda source file. On success, reports each open goal with its type, then unsolved hidden metavariables, warnings, and non-fatal errors. A goal's local context comes from `goal`. On failure, reports the error message and associated warnings. Agda keeps only one file loaded at a time: each load replaces the one before it and makes fresh goal ID assignments. A successful load returns a load ID for the state it produced. Other tools require that load ID to confirm the request refers to that state, and refuse an earlier one rather than misread it. Several read-only calls may use the same load ID at the same time.",
       "inputSchema": {
         "properties": {
           "path": {
@@ -30,7 +30,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Inspect an open goal in the currently loaded Agda file without modifying anything. Reports the goal's type, its local context, its cubical boundary when the goal has one, and any unsolved constraints mentioning the goal. Types are rendered at the requested normalization. To try an expression at a goal, use check or infer instead.",
+      "description": "Inspect an open goal in the currently loaded Agda file without modifying anything. Reports the goal's type, its local context, its cubical boundary when the goal has one, and any unsolved constraints mentioning the goal. Types are rendered at the requested normalization. Several read-only calls may use the same load ID at the same time. To try an expression at a goal, use check or infer instead.",
       "inputSchema": {
         "properties": {
           "goal": {
@@ -42,7 +42,7 @@
             "type": "string"
           },
           "normalization": {
-            "description": "How much to normalize reported types. Defaults to `simplified`, which is what Agda's interactive goal display shows, but which does not unfold definitions. `normalized` unfolds definitions all the way, while `asis` reports types exactly as written.",
+            "description": "How much to normalize what is reported. `asis` reports terms as Agda holds them, without reduction. `instantiated` substitutes solved metavariables and does nothing else. `headnormal` reduces the head only. `simplified`, the default, is what Agda's interactive goal display shows: it unfolds a definition only where one of its clauses matches a constructor or literal, which is enough to expand an instance-resolved numeric literal into the instance's definition. `normalized` unfolds everything, and on cubical definitions may not finish within the timeout.",
             "enum": [
               "asis",
               "headnormal",
@@ -87,7 +87,7 @@
             "type": "string"
           },
           "normalization": {
-            "description": "How much to normalize reported types. Defaults to `simplified`, which is what Agda's interactive goal display shows, but which does not unfold definitions. `normalized` unfolds definitions all the way, while `asis` reports types exactly as written.",
+            "description": "How much to normalize what is reported. `asis` reports terms as Agda holds them, without reduction. `instantiated` substitutes solved metavariables and does nothing else. `headnormal` reduces the head only. `simplified`, the default, is what Agda's interactive goal display shows: it unfolds a definition only where one of its clauses matches a constructor or literal, which is enough to expand an instance-resolved numeric literal into the instance's definition. `normalized` unfolds everything, and on cubical definitions may not finish within the timeout.",
             "enum": [
               "asis",
               "headnormal",
@@ -133,7 +133,7 @@
             "type": "string"
           },
           "normalization": {
-            "description": "How much to normalize reported types. Defaults to `simplified`, which is what Agda's interactive goal display shows, but which does not unfold definitions. `normalized` unfolds definitions all the way, while `asis` reports types exactly as written.",
+            "description": "How much to normalize what is reported. `asis` reports terms as Agda holds them, without reduction. `instantiated` substitutes solved metavariables and does nothing else. `headnormal` reduces the head only. `simplified`, the default, is what Agda's interactive goal display shows: it unfolds a definition only where one of its clauses matches a constructor or literal, which is enough to expand an instance-resolved numeric literal into the instance's definition. `normalized` unfolds everything, and on cubical definitions may not finish within the timeout.",
             "enum": [
               "asis",
               "headnormal",
@@ -164,7 +164,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Fill open goals in the currently loaded Agda file by writing expressions into them. The batch is all-or-nothing and executed in order. If one item is rejected, the rest are skipped and no edits are written. Before writing, the server checks that the file on disk still matches the source Agda checked, and refuses everything if it changed. Except when the load ID is refused, every outcome is followed by a reload that issues a new load ID and fresh goal ID assignments, so the goal IDs in this request are no longer valid afterwards. What is written may be Agda's rendering of the expression rather than the submitted text, so the response shows what went in. Files are written back as UTF-8 with LF line endings. If the call runs out of time after the edits are written but before the reload finishes, the file on disk has changed without having been checked, and the other tools refuse to work against the earlier load until you call `load` again.",
+      "description": "Fill open goals in the currently loaded Agda file by writing expressions into them. An expression may span several lines and is written as given, so a multi-line `≡⟨ ⟩` chain lands as one. A goal that is a clause's whole right-hand side takes an expression, not patterns: to bind arguments on the left of the `=` instead of under a `λ`, call `case_split` on the goal with no variables first, then fill the goal it leaves. The batch is all-or-nothing and executed in order. If one item is rejected, the rest are skipped and no edits are written. Before writing, the server checks that the file on disk still matches the source Agda checked, and refuses everything if it changed. Except when the load ID is refused, every outcome is followed by a reload that issues a new load ID and fresh goal ID assignments, so the goal IDs in this request are no longer valid afterwards. The reload numbers every goal by its position in the file, so the subgoals a `refine` leaves are found by position, in the order of the items that produced them. Do not run other calls against the same load ID while this one runs; they are refused as stale once it finishes. What is written may be Agda's rendering of the expression rather than the submitted text, so the response shows what went in. Files are written back as UTF-8 with LF line endings. If the call runs out of time after the edits are written but before the reload finishes, the file on disk has changed without having been checked, and the other tools refuse to work against the earlier load until you call `load` again.",
       "inputSchema": {
         "properties": {
           "gives": {
@@ -220,7 +220,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Split an open goal into cases, replacing the clause containing the goal with one clause per case. Pass the pattern variables to split on, or the empty list to introduce the clause's remaining arguments. A variable not currently in scope is revealed as a visible pattern rather than split on. The replacement is written to the file, and a reload follows, which issues a new load ID and fresh goal ID assignments, so the goal IDs in this request are no longer valid afterwards. If the call runs out of time after the replacement is written but before the reload finishes, the file on disk has changed without having been checked, and the other tools refuse to work against the earlier load until you call `load` again.",
+      "description": "Split an open goal into cases, replacing the clause containing the goal with one clause per case. Pass the pattern variables to split on, or the empty list to introduce the clause's remaining arguments. A variable not currently in scope is revealed as a visible pattern rather than split on. The replacement is written to the file, and a reload follows, which issues a new load ID and fresh goal ID assignments, so the goal IDs in this request are no longer valid afterwards. Do not run other calls against the same load ID while this one runs; they are refused as stale once it finishes. If the call runs out of time after the replacement is written but before the reload finishes, the file on disk has changed without having been checked, and the other tools refuse to work against the earlier load until you call `load` again.",
       "inputSchema": {
         "properties": {
           "goal": {

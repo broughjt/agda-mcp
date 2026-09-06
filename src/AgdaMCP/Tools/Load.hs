@@ -103,7 +103,7 @@ loadDescription =
   Description
     { descriptionName = "load"
     , descriptionSummary =
-        "Load and type-check an Agda source file. On success, reports open goals (each with their local context), unsolved hidden metavariables, warnings, and non-fatal errors. On failure, reports the error message and associated warnings. Agda keeps only one file loaded at a time: each load replaces the one before it and makes fresh goal ID assignments. A successful load returns a load ID for the state it produced. Other tools require that load ID to confirm the request refers to that state, and refuse an earlier one rather than misread it."
+        "Load and type-check an Agda source file. On success, reports each open goal with its type, then unsolved hidden metavariables, warnings, and non-fatal errors. A goal's local context comes from `goal`. On failure, reports the error message and associated warnings. Agda keeps only one file loaded at a time: each load replaces the one before it and makes fresh goal ID assignments. A successful load returns a load ID for the state it produced. Other tools require that load ID to confirm the request refers to that state, and refuse an earlier one rather than misread it. Several read-only calls may use the same load ID at the same time."
     , descriptionParameters =
         [ parameter
             "path"

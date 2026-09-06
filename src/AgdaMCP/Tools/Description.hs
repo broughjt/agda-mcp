@@ -147,7 +147,7 @@ normalizationField :: Field
 normalizationField =
   ( parameter
       "normalization"
-      "How much to normalize reported types. Defaults to `simplified`, which is what Agda's interactive goal display shows, but which does not unfold definitions. `normalized` unfolds definitions all the way, while `asis` reports types exactly as written."
+      "How much to normalize what is reported. `asis` reports terms as Agda holds them, without reduction. `instantiated` substitutes solved metavariables and does nothing else. `headnormal` reduces the head only. `simplified`, the default, is what Agda's interactive goal display shows: it unfolds a definition only where one of its clauses matches a constructor or literal, which is enough to expand an instance-resolved numeric literal into the instance's definition. `normalized` unfolds everything, and on cubical definitions may not finish within the timeout."
       normalizationShape
   )
     { fieldRequired = False
