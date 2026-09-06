@@ -73,6 +73,7 @@ import AgdaMCP.Interact.Help (
  )
 import AgdaMCP.Options (AgdaFlags, flagsParser)
 import AgdaMCP.Tools (
+  allTools,
   caseSplitTool,
   checkTool,
   giveTool,
@@ -154,7 +155,7 @@ information directory =
     (helper <*> invocationParser directory)
     ( fullDesc
         <> header (programName <> " - drive an Agda session from the shell")
-        <> progDesc (Text.unpack overview)
+        <> progDesc (Text.unpack $ shellNames overview)
         <> footerDoc (Just $ unwrapped topFooter)
     )
 
@@ -164,6 +165,18 @@ helper = helperWith $ long "help" <> short 'h' <> help "show this help text"
 -- | Lines rendered as they are, since the output shapes must not wrap.
 unwrapped :: Text -> Doc
 unwrapped = vsep . map pretty . Text.lines
+
+-- | Description text with each tool name spelled as its verb.
+shellNames :: Text -> Text
+shellNames text =
+  foldr
+    (\name -> Text.replace name (Text.replace "_" "-" name))
+    text
+    [ name
+    | tool <- allTools
+    , let name = descriptionName (toolDescription tool)
+    , Text.any (== '_') name
+    ]
 
 invocationParser :: FilePath -> Parser Invocation
 invocationParser directory =
@@ -229,12 +242,12 @@ verbParser directory =
     command name $
       info
         (helper <*> answering (parser (toolDescription tool)))
-        ( progDesc (Text.unpack $ descriptionSummary $ toolDescription tool)
+        ( progDesc (Text.unpack $ shellNames $ descriptionSummary $ toolDescription tool)
             <> footerDoc
               ( Just $
                   unwrapped $
                     Text.unlines (notes <> [""])
-                      <> outputSection (toolDescription tool)
+                      <> shellNames (outputSection (toolDescription tool))
               )
         )
   verb name summary parser =
@@ -332,7 +345,7 @@ invoke name fields =
 
 parameterHelp :: Text -> Description -> Mod f a
 parameterHelp name description =
-  help $ Text.unpack $ parameterDescription name description
+  help $ Text.unpack $ shellNames $ parameterDescription name description
 
 loadIdArgument :: Description -> Parser (Text, Maybe Value)
 loadIdArgument description =
