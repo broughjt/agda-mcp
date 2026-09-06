@@ -167,7 +167,9 @@ unwrapped = vsep . map pretty . Text.lines
 
 invocationParser :: FilePath -> Parser Invocation
 invocationParser directory =
-  Invocation
+  ( \flags idleTimeout global (verb, mode) ->
+      Invocation flags idleTimeout (verb $ global FormatText) mode
+  )
     <$> flagsParser
     <*> option
       duration
@@ -177,13 +179,18 @@ invocationParser directory =
           <> help
             "how long the daemon stays up without a request, as 30s, 90m or 2h; honoured by daemon, and passed along by any other verb that starts one (default 2h)"
       )
-    <*> flag
-      FormatText
-      FormatJson
-      ( long "json"
-          <> help "print the answer as {\"ok\": B, \"value\": V} on stdout instead of prose"
-      )
+    <*> jsonFlag
     <*> verbParser directory
+
+-- | @--json@, accepted before the verb and after any verb that prints an answer.
+jsonFlag :: Parser (Format -> Format)
+jsonFlag =
+  flag
+    id
+    (const FormatJson)
+    ( long "json"
+        <> help "print the answer as {\"ok\": B, \"value\": V} on stdout instead of prose"
+    )
 
 -- | An integer with a unit: @s@, @m@ or @h@.
 duration :: ReadM Int
@@ -194,7 +201,8 @@ duration = eitherReader $ \text ->
           Right $ read digits * multiplier
     _ -> Left "expected a duration with a unit, such as 30s, 90m or 2h"
 
-verbParser :: FilePath -> Parser Mode
+-- | The verb, with the adjustment its own @--json@ makes to the format.
+verbParser :: FilePath -> Parser (Format -> Format, Mode)
 verbParser directory =
   subparser $
     metavar "VERB"
@@ -207,20 +215,20 @@ verbParser directory =
       <> verb
         "daemon"
         "Run the daemon in the foreground, serving this directory's project under the Agda flags given. The other verbs start one of these themselves when none is listening."
-        (pure RunDaemon)
+        (pure (id, RunDaemon))
       <> verb
         "stop"
         "Ask the daemon to exit once its in-flight request finishes."
-        (pure Stop)
+        (answering $ pure Stop)
       <> verb
         "status"
         "Report what the daemon has loaded, if anything."
-        (pure Status)
+        (answering $ pure Status)
  where
   toolVerb name tool notes parser =
     command name $
       info
-        (helper <*> parser (toolDescription tool))
+        (helper <*> answering (parser (toolDescription tool)))
         ( progDesc (Text.unpack $ descriptionSummary $ toolDescription tool)
             <> footerDoc
               ( Just $
@@ -231,6 +239,7 @@ verbParser directory =
         )
   verb name summary parser =
     command name $ info (helper <*> parser) (progDesc summary)
+  answering parser = flip (,) <$> parser <*> jsonFlag
 
   dashNote name =
     "An expression beginning with a dash must follow a double dash: "
