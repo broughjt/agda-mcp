@@ -257,6 +257,20 @@ renderResponseTests =
             ( rendered
                 [ "?0 (simplified)"
                 , "  ⊢ A"
+                , "      → B"
+                ]
+            )
+    , testCase "a goal type that spans lines continues under its start" $
+        renderResponse
+          ( ResponseOk
+              0
+              Simplified
+              emptyReport {goalReportShape = GoalOfType "A\n→ B"}
+          )
+          @?= Right
+            ( rendered
+                [ "?0 (simplified)"
+                , "  ⊢ A"
                 , "    → B"
                 ]
             )
@@ -435,7 +449,95 @@ renderResponseTests =
             ( rendered
                 [ "?0 (simplified)"
                 , "  f : A"
-                , "    → B (instance)"
+                , "        → B (instance)"
+                , "  ⊢ ℕ"
+                ]
+            )
+    , testCase "a context type that spans lines continues under its start" $
+        renderResponse
+          ( ResponseOk
+              0
+              Simplified
+              emptyReport {goalReportContext = [contextEntry "f" "A\n→ B"]}
+          )
+          @?= Right
+            ( rendered
+                [ "?0 (simplified)"
+                , "  f : A"
+                , "      → B"
+                , "  ⊢ ℕ"
+                ]
+            )
+    , testCase "a wrapped type continues under the name and its cohesion" $
+        renderResponse
+          ( ResponseOk
+              0
+              Simplified
+              emptyReport
+                { goalReportContext =
+                    [(contextEntry "c" "A\n→ B") {contextEntryCohesion = Just "@♭"}]
+                }
+          )
+          @?= Right
+            ( rendered
+                [ "?0 (simplified)"
+                , "  @♭ c : A"
+                , "         → B"
+                , "  ⊢ ℕ"
+                ]
+            )
+    , testCase "a wrapped type continues under both names of a shadowed binding" $
+        renderResponse
+          ( ResponseOk
+              0
+              Simplified
+              emptyReport
+                { goalReportContext =
+                    [(contextEntry "x" "A\n→ B") {contextEntryReifiedName = "x₁"}]
+                }
+          )
+          @?= Right
+            ( rendered
+                [ "?0 (simplified)"
+                , "  x = x₁ : A"
+                , "           → B"
+                , "  ⊢ ℕ"
+                ]
+            )
+    , testCase "binder attributes follow the last line of a wrapped type" $
+        renderResponse
+          ( ResponseOk
+              0
+              Simplified
+              emptyReport
+                { goalReportContext =
+                    [(contextEntry "f" "A\n→ B") {contextEntryIsInstance = True}]
+                }
+          )
+          @?= Right
+            ( rendered
+                [ "?0 (simplified)"
+                , "  f : A"
+                , "      → B (instance)"
+                , "  ⊢ ℕ"
+                ]
+            )
+    , testCase "a let value that spans lines continues under its start" $
+        renderResponse
+          ( ResponseOk
+              0
+              Simplified
+              emptyReport
+                { goalReportContext =
+                    [(contextEntry "doubled" "ℕ") {contextEntryLetValue = Just "m\n+ m"}]
+                }
+          )
+          @?= Right
+            ( rendered
+                [ "?0 (simplified)"
+                , "  doubled : ℕ"
+                , "  doubled = m"
+                , "            + m"
                 , "  ⊢ ℕ"
                 ]
             )

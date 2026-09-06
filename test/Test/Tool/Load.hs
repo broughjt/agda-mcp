@@ -240,7 +240,51 @@ renderResponseTests =
             , "File: /tmp/Example.agda"
             , ""
             , "?0 at 30:8-13 : A"
-            , "  → B"
+            , "                  → B"
+            ]
+    , testCase "a goal type that spans lines continues under its start" $
+        renderResponse
+          ( ResponseOk
+              report
+                { loadReportGoals =
+                    [ Goal
+                        { goalId = 0
+                        , goalSpan = Span (Position 0 30 8) (Position 0 30 13)
+                        , goalShape = GoalOfType "A\n→ B"
+                        }
+                    ]
+                }
+          )
+          @?= rendered
+            [ "Load succeeded: 1 goal"
+            , "Load ID: L17-k7x2"
+            , "File: /tmp/Example.agda"
+            , ""
+            , "?0 at 30:8-13 : A"
+            , "                → B"
+            ]
+    , testCase "a hidden metavariable type that spans lines continues under its start" $
+        renderResponse
+          ( ResponseOk
+              report
+                { loadReportHiddenMetavariables =
+                    [ HiddenMetavariable
+                        { hiddenMetavariableName = "_12"
+                        , hiddenMetavariableSpan =
+                            Just (Span (Position 0 9 5) (Position 0 9 6))
+                        , hiddenMetavariableShape = GoalOfType "A\n→ B"
+                        }
+                    ]
+                }
+          )
+          @?= rendered
+            [ "Load succeeded: no goals"
+            , "Load ID: L17-k7x2"
+            , "File: /tmp/Example.agda"
+            , ""
+            , "Unsolved metavariables:"
+            , "  _12 at 9:5-6 : A"
+            , "                 → B"
             ]
     , testCase "unsolved hidden metavariables are reported in their own section" $
         renderResponse
