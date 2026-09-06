@@ -48,7 +48,6 @@ distributivity warm =
           Load.loadReportId report @?= loadId 1
           Load.loadReportPath report @?= path
           goals report @?= [(0, GoalOfType "_*_ DistributesOverʳ _+_")]
-          contexts report @?= [[]]
           onlyGoals report
 
       -- `Simplified` does not unfold a goal type stated as a definition.
@@ -95,13 +94,22 @@ distributivity warm =
           Load.loadReportId report @?= loadId 2
           Load.loadReportPath report @?= path
           goals report @?= [(0, GoalOfType "(y + z) * x ≡ y * x + z * x")]
-          -- TODO: Revisit when writing load response renderer
-          -- Outermost first, the reverse of what Agda's own buffer displays.
-          -- The binders the split generated are written to the file before
-          -- the resync reads them back, so they arrive in scope under their
-          -- own names.
-          contexts report @?= [[natural "x", natural "y", natural "z"]]
           onlyGoals report
+
+      -- The binders the split generated are written to the file before the
+      -- resync reads them back, so they arrive in scope under their own names.
+      do
+        report <-
+          Goal.goal
+            Goal.Request
+              { Goal.goalRequestLoadId = loadId 2
+              , Goal.goalRequestGoalId = 0
+              , Goal.goalRequestNormalization = Simplified
+              }
+            >>= liftIO . expectGoalOk "the goal the split introduced"
+        liftIO $ do
+          goalReportShape report @?= GoalOfType "(y + z) * x ≡ y * x + z * x"
+          bindings report @?= [natural "x", natural "y", natural "z"]
 
       do
         refused <-
@@ -134,10 +142,6 @@ distributivity warm =
           goals report
             @?= [ (0, GoalOfType "(zero + z) * x ≡ zero * x + z * x")
                 , (1, GoalOfType "(suc y + z) * x ≡ suc y * x + z * x")
-                ]
-          contexts report
-            @?= [ [natural "x", natural "z"]
-                , [natural "x", natural "y", natural "z"]
                 ]
           onlyGoals report
         pure report
@@ -190,7 +194,6 @@ distributivity warm =
           Load.loadReportId report @?= loadId 4
           Load.loadReportPath report @?= path
           goals report @?= goals afterSplit
-          contexts report @?= contexts afterSplit
           onlyGoals report
 
       do
@@ -308,10 +311,7 @@ distributivity warm =
 -- Helpers
 
 goals :: Load.LoadReport -> [(InteractionId, GoalShape)]
-goals = map (\(g, _) -> (goalId g, goalShape g)) . Load.loadReportGoals
-
-contexts :: Load.LoadReport -> [[Binding]]
-contexts = map (map binding . snd) . Load.loadReportGoals
+goals = map (\g -> (goalId g, goalShape g)) . Load.loadReportGoals
 
 bindings :: GoalReport -> [Binding]
 bindings = map binding . goalReportContext

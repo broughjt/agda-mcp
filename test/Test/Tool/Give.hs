@@ -381,8 +381,7 @@ renderResponseTests =
                         , "Load ID: L5-k7x2"
                         , "File: /tmp/Example.agda"
                         , ""
-                        , "?0 at 14:16-17"
-                        , "  ⊢ ℕ"
+                        , "?0 at 14:16-17 : ℕ"
                         ]
                     )
     , testCase "a reload that failed is reported as the load tool reports it" $
@@ -670,7 +669,7 @@ expectCompleted label other =
   assertFailure $ label <> ": expected ResponseCompleted, got " <> show other
 
 goals :: Load.LoadReport -> [(InteractionId, GoalShape)]
-goals = map (\(g, _) -> (goalId g, goalShape g)) . Load.loadReportGoals
+goals = map (\g -> (goalId g, goalShape g)) . Load.loadReportGoals
 
 goalShapes :: Load.LoadReport -> [GoalShape]
 goalShapes = map snd . goals
@@ -750,14 +749,11 @@ reloadWithGoal =
   Load.ResponseOk
     reloadReport
       { Load.loadReportGoals =
-          [
-            ( Goal
-                { goalId = 0
-                , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
-                , goalShape = GoalOfType "ℕ"
-                }
-            , []
-            )
+          [ Goal
+              { goalId = 0
+              , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
+              , goalShape = GoalOfType "ℕ"
+              }
           ]
       }
 

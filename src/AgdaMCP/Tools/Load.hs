@@ -16,9 +16,6 @@ module AgdaMCP.Tools.Load (
   loadRefusals,
 ) where
 
-import Agda.Interaction.Base (Rewrite (..))
-import Agda.Syntax.Common (InteractionId)
-import Control.Exception (Exception, throwIO)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (gets, modify)
 import Data.Aeson (
@@ -34,16 +31,13 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 
 import AgdaMCP.Interaction (
-  ContextEntry,
   Error (..),
   Goal (..),
-  GoalError,
   HiddenMetavariable (..),
   MetasReport (..),
   NonFatalError (..),
   Warning,
  )
-import AgdaMCP.Interaction.Context qualified as Context
 import AgdaMCP.Interaction.Load qualified as Interaction.Load
 import AgdaMCP.Tools.Description (
   Description (..),
@@ -57,7 +51,6 @@ import AgdaMCP.Tools.Description (
   timeoutField,
  )
 import AgdaMCP.Tools.Json (
-  encodeContextEntry,
   encodeError,
   encodeGoalId,
   encodeHiddenMetavariable,
@@ -81,7 +74,6 @@ import AgdaMCP.Tools.LoadId (
 import AgdaMCP.Tools.Render (
   blocks,
   indent,
-  renderContextEntry,
   renderGoalId,
   renderShape,
   renderSourceRefusal,
@@ -163,7 +155,7 @@ data Response
 data LoadReport = LoadReport
   { loadReportId :: LoadId
   , loadReportPath :: FilePath
-  , loadReportGoals :: [(Goal, [ContextEntry])]
+  , loadReportGoals :: [Goal]
   , loadReportHiddenMetavariables :: [HiddenMetavariable]
   , loadReportWarnings :: [Warning]
   , loadReportNonFatalErrors :: [NonFatalError]
@@ -184,35 +176,19 @@ load (Request path) = do
           }
   case response of
     Interaction.Load.ResponseOk file metasReport -> do
-      goals <- traverse withContext $ metasReportGoals metasReport
       loadId <- issueLoadId file
       pure $
         ResponseOk
           LoadReport
             { loadReportId = loadId
             , loadReportPath = Interaction.Load.loadedFilePath file
-            , loadReportGoals = goals
+            , loadReportGoals = metasReportGoals metasReport
             , loadReportHiddenMetavariables = metasReportHiddenMetavariables metasReport
             , loadReportWarnings = metasReportWarnings metasReport
             , loadReportNonFatalErrors = metasReportNonFatalErrors metasReport
             }
     Interaction.Load.ResponseError e -> ResponseError e <$ clearCurrentLoad
     Interaction.Load.ResponseStale -> ResponseStale <$ clearCurrentLoad
- where
-  -- Agda's load command does not report contexts, so we call the context
-  -- wrapper for each reported goal.
-  withContext :: Goal -> ToolM (Goal, [ContextEntry])
-  withContext goal =
-    liftInteraction
-      ( Context.context
-          Context.Request
-            { Context.requestNormalization = AsIs
-            , Context.requestGoalId = goalId goal
-            }
-      )
-      >>= either
-        (liftIO . throwIO . LoadContextUnavailable (goalId goal))
-        (pure . (,) goal)
 
 {- | Validate the load id, perform an action against the file that load left
 behind, then reload it.
@@ -278,14 +254,6 @@ clearCurrentLoad = modify $ \state ->
         (toolLoadGeneration state) {currentLoad = Nothing}
     }
 
--- Bug: a goal reported by the load that just completed failed to resolve its
--- context. The goal ids come from the same interaction-point table the context
--- query reads, so this means our mental model of Agda is wrong.
-data LoadContextUnavailable = LoadContextUnavailable InteractionId GoalError
-  deriving (Show)
-
-instance Exception LoadContextUnavailable
-
 -- Request parsing
 
 instance FromJSON Request where
@@ -303,7 +271,7 @@ renderResponse (ResponseOk report) =
         , "File: " <> Text.pack (loadReportPath report)
         ]
     ]
-      <> map (uncurry renderGoal) (loadReportGoals report)
+      <> map renderGoal (loadReportGoals report)
       <> section
         "Unsolved metavariables:"
         (map renderHiddenMetavariable $ loadReportHiddenMetavariables report)
@@ -330,15 +298,13 @@ countGoals 0 = "no goals"
 countGoals 1 = "1 goal"
 countGoals n = Text.pack (show n) <> " goals"
 
-renderGoal :: Goal -> [ContextEntry] -> Text
-renderGoal goal entries =
-  Text.intercalate "\n" $
-    renderGoalId (goalId goal)
-      <> " at "
-      <> renderSpan (goalSpan goal)
-      -- We reverse context entries so they are listed innermost-first.
-      : map (indent . renderContextEntry) (reverse entries)
-        <> [indent $ "⊢ " <> renderShape (goalShape goal)]
+renderGoal :: Goal -> Text
+renderGoal goal =
+  Text.intercalate
+    "\n"
+    [ renderGoalId (goalId goal) <> " at " <> renderSpan (goalSpan goal)
+    , indent $ "⊢ " <> renderShape (goalShape goal)
+    ]
 
 renderHiddenMetavariable :: HiddenMetavariable -> Text
 renderHiddenMetavariable metavariable =
@@ -360,7 +326,7 @@ instance ToJSON Response where
       "loaded"
       [ "load_id" .= renderLoadId (loadReportId report)
       , "path" .= loadReportPath report
-      , "goals" .= map (uncurry encodeGoal) (loadReportGoals report)
+      , "goals" .= map encodeGoal (loadReportGoals report)
       , "hidden_metavariables"
           .= map encodeHiddenMetavariable (loadReportHiddenMetavariables report)
       , "warnings" .= map encodeWarning (loadReportWarnings report)
@@ -370,13 +336,13 @@ instance ToJSON Response where
   toJSON (ResponseError e) = kinded "failed" ["error" .= encodeError e]
   toJSON ResponseStale = kinded "file_changed" []
 
-encodeGoal :: Goal -> [ContextEntry] -> Value
-encodeGoal goal entries =
+encodeGoal :: Goal -> Value
+encodeGoal goal =
   object
     [ "id" .= encodeGoalId (goalId goal)
     , "span" .= encodeSpan (goalSpan goal)
     , "shape" .= encodeShape (goalShape goal)
-    , "context" .= map encodeContextEntry entries
+    , "context" .= ([] :: [Value])
     ]
 
 encodeLoadRefusal :: LoadRefusal -> Value

@@ -365,8 +365,7 @@ renderResponseTests =
                 , "Load ID: L5-k7x2"
                 , "File: /tmp/Example.agda"
                 , ""
-                , "?0 at 14:16-17"
-                , "  ⊢ ℕ"
+                , "?0 at 14:16-17 : ℕ"
                 ]
             )
     , -- A split is the first tool that can write a file which then fails to
@@ -666,7 +665,7 @@ expectApplied (OutcomeApplied edit) = pure edit
 expectApplied other = assertFailure $ "expected a split, got " <> show other
 
 goalShapes :: Load.LoadReport -> [GoalShape]
-goalShapes = map (goalShape . fst) . Load.loadReportGoals
+goalShapes = map goalShape . Load.loadReportGoals
 
 contentsShouldBe :: FilePath -> Text -> IO ()
 contentsShouldBe path expected = do
@@ -751,14 +750,11 @@ reloadWithGoal =
   Load.ResponseOk
     reloadReport
       { Load.loadReportGoals =
-          [
-            ( Goal
-                { goalId = 0
-                , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
-                , goalShape = GoalOfType "ℕ"
-                }
-            , []
-            )
+          [ Goal
+              { goalId = 0
+              , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
+              , goalShape = GoalOfType "ℕ"
+              }
           ]
       }
 

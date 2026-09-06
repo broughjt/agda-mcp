@@ -12,7 +12,6 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 
 import AgdaMCP.Interaction (
-  ContextEntry (..),
   Error (..),
   Goal (..),
   GoalShape (..),
@@ -115,14 +114,11 @@ renderResponseTests =
           ( ResponseOk
               report
                 { loadReportGoals =
-                    [
-                      ( Goal
-                          { goalId = 0
-                          , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
-                          , goalShape = GoalOfType "ℕ"
-                          }
-                      , []
-                      )
+                    [ Goal
+                        { goalId = 0
+                        , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
+                        , goalShape = GoalOfType "ℕ"
+                        }
                     ]
                 }
           )
@@ -131,30 +127,23 @@ renderResponseTests =
             , "Load ID: L17-k7x2"
             , "File: /tmp/Example.agda"
             , ""
-            , "?0 at 14:16-17"
-            , "  ⊢ ℕ"
+            , "?0 at 14:16-17 : ℕ"
             ]
-    , testCase "each goal is reported with its context above its type" $
+    , testCase "each goal is one line and they form one block" $
         renderResponse
           ( ResponseOk
               report
                 { loadReportGoals =
-                    [
-                      ( Goal
-                          { goalId = 0
-                          , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
-                          , goalShape = GoalOfType "ℕ"
-                          }
-                      , [contextEntry "x" "ℕ"]
-                      )
-                    ,
-                      ( Goal
-                          { goalId = 1
-                          , goalSpan = Span (Position 0 20 5) (Position 0 20 6)
-                          , goalShape = GoalOfType "ℕ"
-                          }
-                      , []
-                      )
+                    [ Goal
+                        { goalId = 0
+                        , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
+                        , goalShape = GoalOfType "(y + z) * x ≡ y * x + z * x"
+                        }
+                    , Goal
+                        { goalId = 1
+                        , goalSpan = Span (Position 0 20 5) (Position 0 20 6)
+                        , goalShape = GoalOfType "ℕ"
+                        }
                     ]
                 }
           )
@@ -163,62 +152,24 @@ renderResponseTests =
             , "Load ID: L17-k7x2"
             , "File: /tmp/Example.agda"
             , ""
-            , "?0 at 14:16-17"
-            , "  x : ℕ"
-            , "  ⊢ ℕ"
-            , ""
-            , "?1 at 20:5-6"
-            , "  ⊢ ℕ"
-            ]
-    , testCase "context entries are reported innermost-first" $
-        renderResponse
-          ( ResponseOk
-              report
-                { loadReportGoals =
-                    [
-                      ( Goal
-                          { goalId = 0
-                          , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
-                          , goalShape =
-                              GoalOfType "(y + z) * x ≡ y * x + z * x"
-                          }
-                      , [contextEntry "x" "ℕ", contextEntry "y" "ℕ", contextEntry "z" "ℕ"]
-                      )
-                    ]
-                }
-          )
-          @?= rendered
-            [ "Load succeeded: 1 goal"
-            , "Load ID: L17-k7x2"
-            , "File: /tmp/Example.agda"
-            , ""
-            , "?0 at 14:16-17"
-            , "  z : ℕ"
-            , "  y : ℕ"
-            , "  x : ℕ"
-            , "  ⊢ (y + z) * x ≡ y * x + z * x"
+            , "?0 at 14:16-17 : (y + z) * x ≡ y * x + z * x"
+            , "?1 at 20:5-6 : ℕ"
             ]
     , testCase "goals keep their own ids in the order they are given" $
         renderResponse
           ( ResponseOk
               report
                 { loadReportGoals =
-                    [
-                      ( Goal
-                          { goalId = 1
-                          , goalSpan = Span (Position 0 5 10) (Position 0 5 11)
-                          , goalShape = GoalOfType "ℕ"
-                          }
-                      , []
-                      )
-                    ,
-                      ( Goal
-                          { goalId = 0
-                          , goalSpan = Span (Position 0 9 3) (Position 0 9 4)
-                          , goalShape = GoalOfType "ℕ"
-                          }
-                      , []
-                      )
+                    [ Goal
+                        { goalId = 1
+                        , goalSpan = Span (Position 0 5 10) (Position 0 5 11)
+                        , goalShape = GoalOfType "ℕ"
+                        }
+                    , Goal
+                        { goalId = 0
+                        , goalSpan = Span (Position 0 9 3) (Position 0 9 4)
+                        , goalShape = GoalOfType "ℕ"
+                        }
                     ]
                 }
           )
@@ -227,25 +178,19 @@ renderResponseTests =
             , "Load ID: L17-k7x2"
             , "File: /tmp/Example.agda"
             , ""
-            , "?1 at 5:10-11"
-            , "  ⊢ ℕ"
-            , ""
-            , "?0 at 9:3-4"
-            , "  ⊢ ℕ"
+            , "?1 at 5:10-11 : ℕ"
+            , "?0 at 9:3-4 : ℕ"
             ]
     , testCase "a goal that spans lines reports both of them" $
         renderResponse
           ( ResponseOk
               report
                 { loadReportGoals =
-                    [
-                      ( Goal
-                          { goalId = 0
-                          , goalSpan = Span (Position 0 14 16) (Position 0 16 4)
-                          , goalShape = GoalOfType "ℕ"
-                          }
-                      , []
-                      )
+                    [ Goal
+                        { goalId = 0
+                        , goalSpan = Span (Position 0 14 16) (Position 0 16 4)
+                        , goalShape = GoalOfType "ℕ"
+                        }
                     ]
                 }
           )
@@ -254,22 +199,18 @@ renderResponseTests =
             , "Load ID: L17-k7x2"
             , "File: /tmp/Example.agda"
             , ""
-            , "?0 at 14:16-16:4"
-            , "  ⊢ ℕ"
+            , "?0 at 14:16-16:4 : ℕ"
             ]
     , testCase "a goal that is a sort says so" $
         renderResponse
           ( ResponseOk
               report
                 { loadReportGoals =
-                    [
-                      ( Goal
-                          { goalId = 0
-                          , goalSpan = Span (Position 0 3 8) (Position 0 3 9)
-                          , goalShape = GoalSort
-                          }
-                      , []
-                      )
+                    [ Goal
+                        { goalId = 0
+                        , goalSpan = Span (Position 0 3 8) (Position 0 3 9)
+                        , goalShape = GoalSort
+                        }
                     ]
                 }
           )
@@ -278,22 +219,18 @@ renderResponseTests =
             , "Load ID: L17-k7x2"
             , "File: /tmp/Example.agda"
             , ""
-            , "?0 at 3:8-9"
-            , "  ⊢ Sort"
+            , "?0 at 3:8-9 : Sort"
             ]
     , testCase "a goal type that spans lines keeps Agda's own indentation" $
         renderResponse
           ( ResponseOk
               report
                 { loadReportGoals =
-                    [
-                      ( Goal
-                          { goalId = 0
-                          , goalSpan = Span (Position 0 30 8) (Position 0 30 13)
-                          , goalShape = GoalOfType "A\n  → B"
-                          }
-                      , []
-                      )
+                    [ Goal
+                        { goalId = 0
+                        , goalSpan = Span (Position 0 30 8) (Position 0 30 13)
+                        , goalShape = GoalOfType "A\n  → B"
+                        }
                     ]
                 }
           )
@@ -302,260 +239,8 @@ renderResponseTests =
             , "Load ID: L17-k7x2"
             , "File: /tmp/Example.agda"
             , ""
-            , "?0 at 30:8-13"
-            , "  ⊢ A"
-            , "    → B"
-            ]
-    , testCase "a shadowed binding is reported under both of its names" $
-        renderResponse
-          ( ResponseOk
-              report
-                { loadReportGoals =
-                    [
-                      ( Goal
-                          { goalId = 0
-                          , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
-                          , goalShape = GoalOfType "ℕ"
-                          }
-                      , [(contextEntry "x" "ℕ") {contextEntryReifiedName = "x₁"}]
-                      )
-                    ]
-                }
-          )
-          @?= rendered
-            [ "Load succeeded: 1 goal"
-            , "Load ID: L17-k7x2"
-            , "File: /tmp/Example.agda"
-            , ""
-            , "?0 at 14:16-17"
-            , "  x = x₁ : ℕ"
-            , "  ⊢ ℕ"
-            ]
-    , testCase "a shadowed binding that has left scope says so" $
-        renderResponse
-          ( ResponseOk
-              report
-                { loadReportGoals =
-                    [
-                      ( Goal
-                          { goalId = 0
-                          , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
-                          , goalShape = GoalOfType "ℕ"
-                          }
-                      ,
-                        [ (contextEntry "x" "ℕ")
-                            { contextEntryReifiedName = "x₁"
-                            , contextEntryReifiedInScope = False
-                            }
-                        ]
-                      )
-                    ]
-                }
-          )
-          @?= rendered
-            [ "Load succeeded: 1 goal"
-            , "Load ID: L17-k7x2"
-            , "File: /tmp/Example.agda"
-            , ""
-            , "?0 at 14:16-17"
-            , "  x = x₁ : ℕ (not in scope)"
-            , "  ⊢ ℕ"
-            ]
-    , testCase "a binder out of scope is reported under its reified name" $
-        renderResponse
-          ( ResponseOk
-              report
-                { loadReportGoals =
-                    [
-                      ( Goal
-                          { goalId = 0
-                          , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
-                          , goalShape = GoalOfType "ℕ"
-                          }
-                      ,
-                        [ (contextEntry "x" "ℕ")
-                            { contextEntryReifiedName = "x₁"
-                            , contextEntryOriginalInScope = False
-                            }
-                        ]
-                      )
-                    ]
-                }
-          )
-          @?= rendered
-            [ "Load succeeded: 1 goal"
-            , "Load ID: L17-k7x2"
-            , "File: /tmp/Example.agda"
-            , ""
-            , "?0 at 14:16-17"
-            , "  x₁ : ℕ"
-            , "  ⊢ ℕ"
-            ]
-    , testCase "two anonymous binders are told apart by their reified names" $
-        renderResponse
-          ( ResponseOk
-              report
-                { loadReportGoals =
-                    [
-                      ( Goal
-                          { goalId = 0
-                          , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
-                          , goalShape = GoalOfType "ℕ"
-                          }
-                      ,
-                        [ (contextEntry "x" "ℕ")
-                            { contextEntryOriginalInScope = False
-                            , contextEntryReifiedInScope = False
-                            }
-                        , (contextEntry "x" "ℕ")
-                            { contextEntryReifiedName = "x₁"
-                            , contextEntryOriginalInScope = False
-                            , contextEntryReifiedInScope = False
-                            }
-                        ]
-                      )
-                    ]
-                }
-          )
-          @?= rendered
-            [ "Load succeeded: 1 goal"
-            , "Load ID: L17-k7x2"
-            , "File: /tmp/Example.agda"
-            , ""
-            , "?0 at 14:16-17"
-            , "  x₁ : ℕ (not in scope)"
-            , "  x : ℕ (not in scope)"
-            , "  ⊢ ℕ"
-            ]
-    , testCase "a let binding is reported with its value" $
-        renderResponse
-          ( ResponseOk
-              report
-                { loadReportGoals =
-                    [
-                      ( Goal
-                          { goalId = 0
-                          , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
-                          , goalShape = GoalOfType "ℕ"
-                          }
-                      ,
-                        [ contextEntry "m" "ℕ"
-                        , (contextEntry "doubled" "ℕ")
-                            { contextEntryLetValue = Just "m + m"
-                            }
-                        ]
-                      )
-                    ]
-                }
-          )
-          @?= rendered
-            [ "Load succeeded: 1 goal"
-            , "Load ID: L17-k7x2"
-            , "File: /tmp/Example.agda"
-            , ""
-            , "?0 at 14:16-17"
-            , "  doubled : ℕ"
-            , "  doubled = m + m"
-            , "  m : ℕ"
-            , "  ⊢ ℕ"
-            ]
-    , testCase "binder attributes are reported beside the binding" $
-        renderResponse
-          ( ResponseOk
-              report
-                { loadReportGoals =
-                    [
-                      ( Goal
-                          { goalId = 0
-                          , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
-                          , goalShape = GoalOfType "ℕ"
-                          }
-                      ,
-                        [ (contextEntry "eq" "n ≡ n") {contextEntryIsInstance = True}
-                        , (contextEntry "n" "ℕ") {contextEntryErased = True}
-                        , (contextEntry "i" "ℕ") {contextEntryRelevance = Just "irrelevant"}
-                        , (contextEntry "c" "ℕ") {contextEntryCohesion = Just "@♭"}
-                        , (contextEntry "p" "ℕ") {contextEntryPolarity = Just "unused"}
-                        ]
-                      )
-                    ]
-                }
-          )
-          @?= rendered
-            [ "Load succeeded: 1 goal"
-            , "Load ID: L17-k7x2"
-            , "File: /tmp/Example.agda"
-            , ""
-            , "?0 at 14:16-17"
-            , "  p : ℕ (unused)"
-            , "  @♭ c : ℕ"
-            , "  i : ℕ (irrelevant)"
-            , "  n : ℕ (erased)"
-            , "  eq : n ≡ n (instance)"
-            , "  ⊢ ℕ"
-            ]
-    , testCase "a binding carrying several attributes lists them in one group" $
-        renderResponse
-          ( ResponseOk
-              report
-                { loadReportGoals =
-                    [
-                      ( Goal
-                          { goalId = 0
-                          , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
-                          , goalShape = GoalOfType "ℕ"
-                          }
-                      ,
-                        [ (contextEntry "x" "A")
-                            { contextEntryReifiedName = "x₁"
-                            , contextEntryReifiedInScope = False
-                            , contextEntryIsInstance = True
-                            , contextEntryCohesion = Just "@♭"
-                            , contextEntryPolarity = Just "positive"
-                            , contextEntryErased = True
-                            , contextEntryRelevance = Just "irrelevant"
-                            }
-                        ]
-                      )
-                    ]
-                }
-          )
-          @?= rendered
-            [ "Load succeeded: 1 goal"
-            , "Load ID: L17-k7x2"
-            , "File: /tmp/Example.agda"
-            , ""
-            , "?0 at 14:16-17"
-            , "  @♭ x = x₁ : A (not in scope, erased, irrelevant, positive, instance)"
-            , "  ⊢ ℕ"
-            ]
-    , testCase "a context type that spans lines keeps Agda's own indentation" $
-        renderResponse
-          ( ResponseOk
-              report
-                { loadReportGoals =
-                    [
-                      ( Goal
-                          { goalId = 0
-                          , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
-                          , goalShape = GoalOfType "ℕ"
-                          }
-                      ,
-                        [ (contextEntry "f" "A\n  → B") {contextEntryIsInstance = True}
-                        ]
-                      )
-                    ]
-                }
-          )
-          @?= rendered
-            [ "Load succeeded: 1 goal"
-            , "Load ID: L17-k7x2"
-            , "File: /tmp/Example.agda"
-            , ""
-            , "?0 at 14:16-17"
-            , "  f : A"
-            , "    → B (instance)"
-            , "  ⊢ ℕ"
+            , "?0 at 30:8-13 : A"
+            , "  → B"
             ]
     , testCase "unsolved hidden metavariables are reported in their own section" $
         renderResponse
@@ -639,7 +324,7 @@ renderResponseTests =
           ( ResponseOk
               report
                 { loadReportPath = Corpus.fixtureFile "Constrained.agda"
-                , loadReportGoals = [(Corpus.constrainedGoal, [])]
+                , loadReportGoals = [Corpus.constrainedGoal]
                 , loadReportNonFatalErrors = [Corpus.unsolvedConstraints]
                 }
           )
@@ -648,8 +333,7 @@ renderResponseTests =
             , "Load ID: L17-k7x2"
             , "File: /fixture/Constrained.agda"
             , ""
-            , "?0 at 12:17-18"
-            , "  ⊢ ℕ"
+            , "?0 at 12:17-18 : ℕ"
             , ""
             , "Non-fatal errors:"
             , "  error: [UnsolvedConstraints]"
@@ -706,14 +390,11 @@ renderResponseTests =
           ( ResponseOk
               report
                 { loadReportGoals =
-                    [
-                      ( Goal
-                          { goalId = 0
-                          , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
-                          , goalShape = GoalOfType "ℕ"
-                          }
-                      , [contextEntry "x" "ℕ"]
-                      )
+                    [ Goal
+                        { goalId = 0
+                        , goalSpan = Span (Position 0 14 16) (Position 0 14 17)
+                        , goalShape = GoalOfType "ℕ"
+                        }
                     ]
                 , loadReportHiddenMetavariables =
                     [ HiddenMetavariable
@@ -740,9 +421,7 @@ renderResponseTests =
             , "Load ID: L17-k7x2"
             , "File: /tmp/Example.agda"
             , ""
-            , "?0 at 14:16-17"
-            , "  x : ℕ"
-            , "  ⊢ ℕ"
+            , "?0 at 14:16-17 : ℕ"
             , ""
             , "Unsolved metavariables:"
             , "  _12 : ℕ"
@@ -802,14 +481,11 @@ toJSONTests =
           ( ResponseOk
               report
                 { loadReportGoals =
-                    [
-                      ( Goal
-                          { goalId = 0
-                          , goalSpan = Span (Position 0 14 16) (Position 1 14 17)
-                          , goalShape = GoalOfType "ℕ"
-                          }
-                      , [contextEntry "x" "ℕ"]
-                      )
+                    [ Goal
+                        { goalId = 0
+                        , goalSpan = Span (Position 0 14 16) (Position 1 14 17)
+                        , goalShape = GoalOfType "ℕ"
+                        }
                     ]
                 , loadReportHiddenMetavariables =
                     [ HiddenMetavariable
@@ -844,7 +520,6 @@ toJSONTests =
                                    [ "kind" Aeson..= Aeson.String "of_type"
                                    , "type" Aeson..= Aeson.String "ℕ"
                                    ]
-                             , "context" Aeson..= [entryValue "x" "ℕ"]
                              ]
                          ]
             , "hidden_metavariables"
@@ -911,22 +586,6 @@ spanValue start end =
       , "column" Aeson..= column
       ]
 
-entryValue :: Text -> Text -> Aeson.Value
-entryValue name ty =
-  Aeson.object
-    [ "original_name" Aeson..= name
-    , "reified_name" Aeson..= name
-    , "original_in_scope" Aeson..= True
-    , "reified_in_scope" Aeson..= True
-    , "type" Aeson..= ty
-    , "let_value" Aeson..= Aeson.Null
-    , "is_instance" Aeson..= False
-    , "cohesion" Aeson..= Aeson.Null
-    , "polarity" Aeson..= Aeson.Null
-    , "erased" Aeson..= False
-    , "relevance" Aeson..= Aeson.Null
-    ]
-
 rendered :: [Text] -> Text
 rendered = Text.intercalate "\n"
 
@@ -939,20 +598,4 @@ report =
     , loadReportHiddenMetavariables = []
     , loadReportWarnings = []
     , loadReportNonFatalErrors = []
-    }
-
-contextEntry :: Text -> Text -> ContextEntry
-contextEntry name ty =
-  ContextEntry
-    { contextEntryOriginalName = name
-    , contextEntryReifiedName = name
-    , contextEntryOriginalInScope = True
-    , contextEntryReifiedInScope = True
-    , contextEntryType = ty
-    , contextEntryLetValue = Nothing
-    , contextEntryIsInstance = False
-    , contextEntryCohesion = Nothing
-    , contextEntryPolarity = Nothing
-    , contextEntryErased = False
-    , contextEntryRelevance = Nothing
     }

@@ -260,7 +260,7 @@ renderResponseTests =
                 , "    → B"
                 ]
             )
-    , testCase "context entries render as load renders them" $
+    , testCase "a shadowed binding is reported under both of its names" $
         renderResponse
           ( ResponseOk
               0
@@ -274,6 +274,168 @@ renderResponseTests =
             ( rendered
                 [ "?0 (simplified)"
                 , "  x = x₁ : ℕ"
+                , "  ⊢ ℕ"
+                ]
+            )
+    , testCase "a shadowed binding that has left scope says so" $
+        renderResponse
+          ( ResponseOk
+              0
+              Simplified
+              emptyReport
+                { goalReportContext =
+                    [ (contextEntry "x" "ℕ")
+                        { contextEntryReifiedName = "x₁"
+                        , contextEntryReifiedInScope = False
+                        }
+                    ]
+                }
+          )
+          @?= Right
+            ( rendered
+                [ "?0 (simplified)"
+                , "  x = x₁ : ℕ (not in scope)"
+                , "  ⊢ ℕ"
+                ]
+            )
+    , testCase "a binder out of scope is reported under its reified name" $
+        renderResponse
+          ( ResponseOk
+              0
+              Simplified
+              emptyReport
+                { goalReportContext =
+                    [ (contextEntry "x" "ℕ")
+                        { contextEntryReifiedName = "x₁"
+                        , contextEntryOriginalInScope = False
+                        }
+                    ]
+                }
+          )
+          @?= Right
+            ( rendered
+                [ "?0 (simplified)"
+                , "  x₁ : ℕ"
+                , "  ⊢ ℕ"
+                ]
+            )
+    , testCase "two anonymous binders are told apart by their reified names" $
+        renderResponse
+          ( ResponseOk
+              0
+              Simplified
+              emptyReport
+                { goalReportContext =
+                    [ (contextEntry "x" "ℕ")
+                        { contextEntryOriginalInScope = False
+                        , contextEntryReifiedInScope = False
+                        }
+                    , (contextEntry "x" "ℕ")
+                        { contextEntryReifiedName = "x₁"
+                        , contextEntryOriginalInScope = False
+                        , contextEntryReifiedInScope = False
+                        }
+                    ]
+                }
+          )
+          @?= Right
+            ( rendered
+                [ "?0 (simplified)"
+                , "  x₁ : ℕ (not in scope)"
+                , "  x : ℕ (not in scope)"
+                , "  ⊢ ℕ"
+                ]
+            )
+    , testCase "a let binding is reported with its value" $
+        renderResponse
+          ( ResponseOk
+              0
+              Simplified
+              emptyReport
+                { goalReportContext =
+                    [ contextEntry "m" "ℕ"
+                    , (contextEntry "doubled" "ℕ")
+                        { contextEntryLetValue = Just "m + m"
+                        }
+                    ]
+                }
+          )
+          @?= Right
+            ( rendered
+                [ "?0 (simplified)"
+                , "  doubled : ℕ"
+                , "  doubled = m + m"
+                , "  m : ℕ"
+                , "  ⊢ ℕ"
+                ]
+            )
+    , testCase "binder attributes are reported beside the binding" $
+        renderResponse
+          ( ResponseOk
+              0
+              Simplified
+              emptyReport
+                { goalReportContext =
+                    [ (contextEntry "eq" "n ≡ n") {contextEntryIsInstance = True}
+                    , (contextEntry "n" "ℕ") {contextEntryErased = True}
+                    , (contextEntry "i" "ℕ") {contextEntryRelevance = Just "irrelevant"}
+                    , (contextEntry "c" "ℕ") {contextEntryCohesion = Just "@♭"}
+                    , (contextEntry "p" "ℕ") {contextEntryPolarity = Just "unused"}
+                    ]
+                }
+          )
+          @?= Right
+            ( rendered
+                [ "?0 (simplified)"
+                , "  p : ℕ (unused)"
+                , "  @♭ c : ℕ"
+                , "  i : ℕ (irrelevant)"
+                , "  n : ℕ (erased)"
+                , "  eq : n ≡ n (instance)"
+                , "  ⊢ ℕ"
+                ]
+            )
+    , testCase "a binding carrying several attributes lists them in one group" $
+        renderResponse
+          ( ResponseOk
+              0
+              Simplified
+              emptyReport
+                { goalReportContext =
+                    [ (contextEntry "x" "A")
+                        { contextEntryReifiedName = "x₁"
+                        , contextEntryReifiedInScope = False
+                        , contextEntryIsInstance = True
+                        , contextEntryCohesion = Just "@♭"
+                        , contextEntryPolarity = Just "positive"
+                        , contextEntryErased = True
+                        , contextEntryRelevance = Just "irrelevant"
+                        }
+                    ]
+                }
+          )
+          @?= Right
+            ( rendered
+                [ "?0 (simplified)"
+                , "  @♭ x = x₁ : A (not in scope, erased, irrelevant, positive, instance)"
+                , "  ⊢ ℕ"
+                ]
+            )
+    , testCase "a context type that spans lines keeps Agda's own indentation" $
+        renderResponse
+          ( ResponseOk
+              0
+              Simplified
+              emptyReport
+                { goalReportContext =
+                    [(contextEntry "f" "A\n  → B") {contextEntryIsInstance = True}]
+                }
+          )
+          @?= Right
+            ( rendered
+                [ "?0 (simplified)"
+                , "  f : A"
+                , "    → B (instance)"
                 , "  ⊢ ℕ"
                 ]
             )
@@ -500,7 +662,7 @@ sessionTests warm =
             Load.load Load.Request {Load.loadRequestPath = path}
               >>= liftIO . expectLoadOk "load"
           liftIO $
-            map (goalId . fst) (Load.loadReportGoals loaded) @?= [0]
+            map goalId (Load.loadReportGoals loaded) @?= [0]
           response <-
             Goal.goal
               Goal.Request
