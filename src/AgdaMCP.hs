@@ -14,6 +14,7 @@ import MCP.Server (
   Error (..),
   McpServerHandlers (..),
   McpServerInfo (..),
+  Outcome (..),
   ToolDefinition (..),
   noHandlers,
  )
@@ -59,5 +60,5 @@ handlers stateVariable =
   call _ name arguments =
     maybe
       (pure $ Left $ UnknownTool name)
-      (\tool -> toolRun tool stateVariable arguments)
+      (\tool -> fmap Complete <$> toolRun tool stateVariable arguments)
       (Map.lookup name byName)

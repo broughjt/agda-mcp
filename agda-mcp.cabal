@@ -65,7 +65,7 @@ library
       atomic-write,
       base >= 4.18 && < 5,
       containers,
-      mcp-server >= 0.2 && < 0.3,
+      mcp-server >= 0.3.0.1 && < 0.4,
       mtl,
       optparse-applicative,
       text
@@ -122,7 +122,7 @@ executable agda-mcp
   build-depends:
       agda-mcp,
       base >= 4.18 && < 5,
-      mcp-server >= 0.2 && < 0.3,
+      mcp-server >= 0.3.0.1 && < 0.4,
       text,
   default-language: GHC2021
   ghc-options:

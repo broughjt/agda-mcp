@@ -12,25 +12,25 @@
       system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        # nixpkgs ships mcp-server 0.1, but we need the 0.2 API.
-        mcpServerSrc = pkgs.fetchFromGitHub {
-          owner = "drshade";
-          repo = "haskell-mcp-server";
-          rev = "32e51481d408135b567e6c2b7c645e030ce7403a";
-          hash = "sha256-H3QMz45Fmf4BAJUgFdUzv8ByTJD9polzXLaVYYwAB/M=";
-        };
+        hackage =
+          self: pkg: ver: sha256:
+          self.callHackageDirect { inherit pkg ver sha256; };
         haskellPackages = pkgs.haskellPackages.override {
-          overrides = self: _: {
-            mcp-server = self.callCabal2nix "mcp-server" mcpServerSrc { };
+          overrides = self: super: {
+            # nixpkgs ships mcp-server 0.1, but we need the 0.3 API.
+            mcp-server = hackage self "mcp-server" "0.3.0.1" "sha256-SFPX03m6UhuyQfnoxiiRSegZp7tkhZ0zeS/GGJtC1U4=" {
+              # mcp-server needs crypton >= 1.1.4; nixpkgs ships 1.0.6.
+              crypton = hackage self "crypton" "2.2.6" "sha256-Ll/UXRpvON64iincSgzFkcIA9CK9EeAygcjveYTlVoU=" { };
+            };
+            # warp's `x509` flag pulls in crypton-x509, which needs crypton < 1.1
+            # and so would put a second crypton beside mcp-server's. We do not
+            # serve HTTPS.
+            warp = pkgs.haskell.lib.disableCabalFlag super.warp "x509";
             # mcp-server's HTTP transport uses `hOrigin`, which nixpkgs'
             # http-types 0.12.4 predates. We do not serve HTTP, but the module
             # is still part of the library and has to compile.
             http-types = pkgs.haskell.lib.dontCheck (
-              self.callHackageDirect {
-                pkg = "http-types";
-                ver = "0.12.6";
-                sha256 = "sha256-bGrVUTZnP1NFVwR0apgNLolKPW3cJdVW4jSBSlV7srg=";
-              } { }
+              hackage self "http-types" "0.12.6" "sha256-bGrVUTZnP1NFVwR0apgNLolKPW3cJdVW4jSBSlV7srg=" { }
             );
           };
         };
