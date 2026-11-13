@@ -13,12 +13,15 @@ import Agda.Interaction.Base (CurrentFile (..), theCurrentFile)
 import Agda.Interaction.Response (Response)
 import Agda.TypeChecking.Monad (
   PersistentTCState (..),
+  SessionState (..),
   TCM,
   TCState (..),
+  getInteractionOutputCallback,
   initEnv,
   runTCM,
   setInteractionOutputCallback,
  )
+import Agda.Utils.Atomic (newAtomic, readAtomic)
 import Agda.Utils.FileName (filePath)
 import Control.Monad.State (gets)
 
@@ -30,15 +33,21 @@ import AgdaMCP.Interaction.Internal (
 interactionTCState :: InteractionState -> TCState
 interactionTCState (InteractionState tcState _ _) = tcState
 
-withWarmPersistentState :: TCState -> InteractionState -> InteractionState
-withWarmPersistentState warm (InteractionState tcState commandState slot) =
-  InteractionState tcState {stPersistentState = persistent} commandState slot
- where
-  persistent =
-    (stPersistentState warm)
-      { stInteractionOutputCallback =
-          stInteractionOutputCallback (stPersistentState tcState)
-      }
+withWarmPersistentState :: TCState -> InteractionState -> IO InteractionState
+withWarmPersistentState warm (InteractionState tcState commandState slot) = do
+  warmSession <- readAtomic $ stPersistentSession $ stPersistentState warm
+  ownSession <- readAtomic $ stPersistentSession $ stPersistentState tcState
+  -- The session state is mutable and shared by every copy of a TCState, so
+  -- each session gets its own copy of the warm one, keeping its own callback.
+  session <-
+    newAtomic
+      warmSession
+        { stSessionInteractionOutputCallback =
+            stSessionInteractionOutputCallback ownSession
+        }
+  let persistent = (stPersistentState warm) {stPersistentSession = session}
+  pure $
+    InteractionState tcState {stPersistentState = persistent} commandState slot
 
 currentFile :: InteractionM (Maybe FilePath)
 currentFile =
@@ -48,9 +57,9 @@ currentFile =
 observeResponses ::
   (Response -> TCM ()) -> InteractionState -> IO InteractionState
 observeResponses observe (InteractionState tcState commandState slot) = do
-  let installed = stInteractionOutputCallback (stPersistentState tcState)
   ((), tcState') <-
-    runTCM initEnv tcState $
+    runTCM initEnv tcState $ do
+      installed <- getInteractionOutputCallback
       setInteractionOutputCallback $
         \response -> installed response >> observe response
   pure $ InteractionState tcState' commandState slot

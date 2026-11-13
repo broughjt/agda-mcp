@@ -50,6 +50,8 @@ import Agda.Syntax.Position (
   getRange,
   iEnd,
   iStart,
+  posCol,
+  posLine,
   rangeFile,
   rangeToInterval,
  )

@@ -53,8 +53,9 @@ warmInteractionState =
             "The test warm-up fixture failed to load: " <> show other
 
 warmedSession :: IO TCState -> CommandLineOptions -> IO InteractionState
-warmedSession warm options =
-  withWarmPersistentState <$> warm <*> newInteractionState options
+warmedSession warm options = do
+  warmed <- warm
+  newInteractionState options >>= withWarmPersistentState warmed
 
 withFixtureSession ::
   IO TCState -> FilePath -> (FilePath -> InteractionM a) -> IO a
