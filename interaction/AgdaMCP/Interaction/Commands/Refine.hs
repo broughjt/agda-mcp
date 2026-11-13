@@ -13,11 +13,8 @@ import Control.Monad.State (get)
 import Data.Bifunctor (bimap)
 import Data.Text (Text)
 
-import AgdaMCP.Interaction.Commands.Give (
-  Response,
-  giveGen',
-  withResolvedHole,
- )
+import AgdaMCP.Interaction.Commands.Give (Response)
+import AgdaMCP.Interaction.GiveFamily (giveGen', withResolvedHole)
 import AgdaMCP.Interaction.Internal (
   GiveSlot,
   InteractionM,

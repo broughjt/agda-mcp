@@ -29,6 +29,7 @@ library interaction
     AgdaMCP.Interaction.Testing
   other-modules:
     AgdaMCP.Interaction.Extract
+    AgdaMCP.Interaction.GiveFamily
     AgdaMCP.Interaction.Internal
     AgdaMCP.Interaction.Model
   build-depends:

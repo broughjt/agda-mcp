@@ -21,8 +21,7 @@ import Control.Monad.State (lift)
 import Data.Text (Text)
 import Data.Text qualified as Text
 
-import AgdaMCP.Interaction.Commands.Goal (extractGoalReport)
-import AgdaMCP.Interaction.Extract (classifyInteractionError)
+import AgdaMCP.Interaction.Extract (classifyInteractionError, extractGoalReport)
 import AgdaMCP.Interaction.Internal (InteractionM, catchTCErr, runCommandM)
 import AgdaMCP.Interaction.Model (
   GoalError (..),

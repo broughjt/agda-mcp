@@ -2,41 +2,14 @@ module AgdaMCP.Interaction.Commands.Context (
   Request (..),
   Response,
   context,
-  extractContext,
 ) where
 
 import Agda.Interaction.Base (Rewrite)
-import Agda.Interaction.BasicOps (getResponseContext)
 import Agda.Interaction.Command (CommandM, liftLocalState)
-import Agda.Interaction.Response (ResponseContextEntry (..))
-import Agda.Syntax.Abstract.Pretty (prettyATop)
-import Agda.Syntax.Common (
-  Arg (..),
-  InteractionId,
-  ModalPolarity (..),
-  Modality,
-  getCohesion,
-  getModalPolarity,
-  getQuantity,
-  getRelevance,
-  inverseComposeRelevance,
-  isInstance,
-  isRelevant,
-  modPolarityAnn,
-  moreQuantity,
- )
-import Agda.Syntax.Common.Pretty (prettyShow, render)
-import Agda.Syntax.Concrete.Name (NameInScope (..), isInScope)
-import Agda.TypeChecking.Errors (verbalize)
-import Agda.TypeChecking.Monad (
-  TCM,
-  currentModality,
-  withInteractionId,
- )
+import Agda.Syntax.Common (InteractionId)
 import Control.Monad.State (lift)
-import Data.Text qualified as Text
 
-import AgdaMCP.Interaction.Extract (classifyInteractionError)
+import AgdaMCP.Interaction.Extract (classifyInteractionError, extractContext)
 import AgdaMCP.Interaction.Internal (InteractionM, catchTCErr, runCommandM)
 import AgdaMCP.Interaction.Model (
   ContextEntry (..),
@@ -65,66 +38,3 @@ contextInternal (Request normalization goalId) =
   -- @GoalFailed@.
   (Right <$> liftLocalState (extractContext normalization goalId))
     `catchTCErr` (fmap Left . lift . classifyInteractionError GoalUnknownId GoalFailed)
-
-{- | Extraction mirroring @prettyResponseContext@ (EmacsTop.hs:324-373). Also
-see the comment above @ContextEntry@.
--}
-extractContext :: Rewrite -> InteractionId -> TCM [ContextEntry]
-extractContext normalization goalId = withInteractionId goalId $ do
-  entries <- getResponseContext normalization goalId
-  goalModality <- currentModality
-  traverse (extractContextEntry goalModality) entries
-
-extractContextEntry :: Modality -> ResponseContextEntry -> TCM ContextEntry
-extractContextEntry
-  goalModality
-  ( ResponseContextEntry
-      originalName
-      reifiedName
-      (Arg info ty)
-      letValue
-      reifiedInScope
-    ) = do
-    typeDoc <- prettyATop ty
-    letValueDoc <- traverse prettyATop letValue
-    pure
-      ContextEntry
-        { contextEntryOriginalName = Text.pack $ prettyShow originalName
-        , contextEntryReifiedName = Text.pack $ prettyShow reifiedName
-        , contextEntryOriginalInScope = isInScope originalName == InScope
-        , contextEntryReifiedInScope = reifiedInScope == InScope
-        , contextEntryType = Text.pack $ render typeDoc
-        , contextEntryLetValue = Text.pack . render <$> letValueDoc
-        , -- Exactly as @prettyResponseContext@ does it
-          contextEntryIsInstance = isInstance info
-        , contextEntryCohesion = cohesion
-        , contextEntryPolarity = polarity
-        , -- Exactly as @prettyResponseContext@ does it
-          contextEntryErased =
-            not $ getQuantity info `moreQuantity` getQuantity goalModality
-        , contextEntryRelevance = relevance
-        }
-   where
-    -- Emacs renders cohesion with @prettyShow@. The default @Continuous@
-    -- @prettyShow@'s as empty (Syntax/Common.hs:1881-1884), which we detect
-    -- with @null@ and extract as @Nothing@.
-    cohesion :: Maybe Text.Text
-    cohesion =
-      let c = prettyShow $ getCohesion info
-       in if null c then Nothing else Just $ Text.pack c
-
-    polarity :: Maybe Text.Text
-    polarity =
-      -- Exactly as @prettyResponseContext@ does it
-      let p = modPolarityAnn $ getModalPolarity info
-       in if p == MixedPolarity
-            then Nothing
-            else Just $ Text.pack $ verbalize p
-
-    relevance :: Maybe Text.Text
-    relevance =
-      -- Exactly as @prettyResponseContext@ does it
-      let r = getRelevance goalModality `inverseComposeRelevance` getRelevance info
-       in if isRelevant r
-            then Nothing
-            else Just $ Text.pack $ verbalize r

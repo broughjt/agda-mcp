@@ -17,12 +17,12 @@ import Data.Bifunctor (bimap)
 import Data.Text (Text)
 import Data.Text qualified as Text
 
-import AgdaMCP.Interaction.Commands.Give (
+import AgdaMCP.Interaction.Extract (extractError)
+import AgdaMCP.Interaction.GiveFamily (
   expectComputed,
   giveGen',
   withResolvedHole,
  )
-import AgdaMCP.Interaction.Extract (extractError)
 import AgdaMCP.Interaction.Internal (
   GiveSlot,
   InteractionM,

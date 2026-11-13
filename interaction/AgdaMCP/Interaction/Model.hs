@@ -42,7 +42,7 @@ data Goal = Goal
   deriving (Eq, Show)
 
 {- | A goal or hidden metavariable is either has a type or is a sort. See the
-comment above @extractGoal@ in "AgdaMCP.Interaction.Commands.Metas" for why these are the
+comment above @extractGoal@ in "AgdaMCP.Interaction.Extract" for why these are the
 only two possibilities.
 -}
 data GoalShape
