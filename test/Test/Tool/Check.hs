@@ -149,8 +149,11 @@ renderResponseTests =
             ( rendered
                 [ "The expression does not check at ?0:"
                 , ""
-                , "  1.1-3: error: [UnequalTerms]"
-                , "  ⊤ !=< ℕ"
+                , "  1.1-3: error: [UnequalTypes]"
+                , "  The type"
+                , "    ⊤"
+                , "  is not a subtype of"
+                , "    ℕ"
                 , "  when checking that the expression tt has type ℕ"
                 ]
             )
@@ -177,8 +180,11 @@ renderResponseTests =
             ( rendered
                 [ "The expression does not check at ?0:"
                 , ""
-                , "  1.1-3: error: [UnequalTerms]"
-                , "  ⊤ !=< ℕ"
+                , "  1.1-3: error: [UnequalTypes]"
+                , "  The type"
+                , "    ⊤"
+                , "  is not a subtype of"
+                , "    ℕ"
                 , "  when checking that the expression tt has type ℕ"
                 , ""
                 , "Warnings:"
@@ -289,8 +295,11 @@ parseError = "1.5: error: [ParseError]\n<EOF><ERROR> ..."
 ttCheckError :: Text
 ttCheckError =
   rendered
-    [ "1.1-3: error: [UnequalTerms]"
-    , "⊤ !=< ℕ"
+    [ "1.1-3: error: [UnequalTypes]"
+    , "The type"
+    , "  ⊤"
+    , "is not a subtype of"
+    , "  ℕ"
     , "when checking that the expression tt has type ℕ"
     ]
 

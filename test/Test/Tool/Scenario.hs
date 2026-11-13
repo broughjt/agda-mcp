@@ -177,7 +177,11 @@ distributivity warm =
                     path
                     e
                     [ "FIXTURE:16.28-59: error: [UnequalTerms]"
-                    , "x != x + y * x of type ℕ"
+                    , "The terms"
+                    , "  x"
+                    , "and"
+                    , "  x + y * x"
+                    , "are not equal at type ℕ"
                     , "when checking that the inferred type of an application"
                     , "  x + (y + z) * x ≡ x + _y_12"
                     , "matches the expected type"
@@ -211,7 +215,11 @@ distributivity warm =
               path
               e
               [ "1.1-32: error: [UnequalTerms]"
-              , "x != x + y * x of type ℕ"
+              , "The terms"
+              , "  x"
+              , "and"
+              , "  x + y * x"
+              , "are not equal at type ℕ"
               , "when checking that the inferred type of an application"
               , "  x + (y + z) * x ≡ x + _y_15"
               , "matches the expected type"

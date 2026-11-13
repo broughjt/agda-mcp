@@ -102,8 +102,11 @@ typeError =
   Error
     { errorMessage =
         message
-          [ "/fixture/TypeError.agda:6.9-10: error: [UnequalTerms]"
-          , "Set !=< ℕ"
+          [ "/fixture/TypeError.agda:6.9-10: error: [UnequalTypes]"
+          , "The type"
+          , "  Set"
+          , "is not a subtype of"
+          , "  ℕ"
           , "when checking that the expression ℕ has type ℕ"
           ]
     , errorPathSpan =
@@ -138,8 +141,11 @@ warningThenError =
   Error
     { errorMessage =
         message
-          [ "/fixture/WarningThenError.agda:11.9-10: error: [UnequalTerms]"
-          , "Set !=< ℕ"
+          [ "/fixture/WarningThenError.agda:11.9-10: error: [UnequalTypes]"
+          , "The type"
+          , "  Set"
+          , "is not a subtype of"
+          , "  ℕ"
           , "when checking that the expression ℕ has type ℕ"
           ]
     , errorPathSpan =

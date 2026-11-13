@@ -818,8 +818,8 @@ inferCheckTests warm =
               >>= liftIO . expectGoalFailure "check"
           liftIO $
             assertBool
-              ("check: expected \"UnequalTerms\" within " <> show (errorMessage e))
-              ("UnequalTerms" `Text.isInfixOf` errorMessage e)
+              ("check: expected \"UnequalTypes\" within " <> show (errorMessage e))
+              ("UnequalTypes" `Text.isInfixOf` errorMessage e)
     , testCase "an unannotated lambda infers a type over fresh metavariables" $
         withFixtureSession warm "test/fixtures/InferCheck.agda" $ \path -> do
           void $
@@ -1096,10 +1096,10 @@ giveFamilyTests warm =
               >>= liftIO . expectGiveFailure "ill-typed give"
           liftIO $
             assertBool
-              ( "ill-typed give: expected \"UnequalTerms\" within "
+              ( "ill-typed give: expected \"UnequalTypes\" within "
                   <> show (errorMessage e)
               )
-              ("UnequalTerms" `Text.isInfixOf` errorMessage e)
+              ("UnequalTypes" `Text.isInfixOf` errorMessage e)
 
           retried <-
             give
@@ -1132,10 +1132,10 @@ giveTests warm =
               >>= liftIO . expectGiveFailure "ill-typed"
           liftIO $
             assertBool
-              ( "ill-typed: expected \"UnequalTerms\" within "
+              ( "ill-typed: expected \"UnequalTypes\" within "
                   <> show (errorMessage illTyped)
               )
-              ("UnequalTerms" `Text.isInfixOf` errorMessage illTyped)
+              ("UnequalTypes" `Text.isInfixOf` errorMessage illTyped)
 
           outOfScope <-
             give

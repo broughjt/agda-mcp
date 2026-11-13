@@ -253,8 +253,11 @@ renderResponseTests =
             ( rendered $
                 [ "Rejected at ?1 (item 2 of 2). No edits were written."
                 , ""
-                , "  /fixture/TypeError.agda:6.9-10: error: [UnequalTerms]"
-                , "  Set !=< ℕ"
+                , "  /fixture/TypeError.agda:6.9-10: error: [UnequalTypes]"
+                , "  The type"
+                , "    Set"
+                , "  is not a subtype of"
+                , "    ℕ"
                 , "  when checking that the expression ℕ has type ℕ"
                 , ""
                 ]
@@ -387,8 +390,11 @@ renderResponseTests =
                         , ""
                         , "Load failed:"
                         , ""
-                        , "  /fixture/TypeError.agda:6.9-10: error: [UnequalTerms]"
-                        , "  Set !=< ℕ"
+                        , "  /fixture/TypeError.agda:6.9-10: error: [UnequalTypes]"
+                        , "  The type"
+                        , "    Set"
+                        , "  is not a subtype of"
+                        , "    ℕ"
                         , "  when checking that the expression ℕ has type ℕ"
                         ]
                     )
@@ -471,8 +477,8 @@ sessionTests warm =
                 case refusalReason refusal of
                   RefusedError e ->
                     assertBool
-                      ("expected \"UnequalTerms\" within " <> show (errorMessage e))
-                      ("UnequalTerms" `Text.isInfixOf` errorMessage e)
+                      ("expected \"UnequalTypes\" within " <> show (errorMessage e))
+                      ("UnequalTypes" `Text.isInfixOf` errorMessage e)
                   other -> assertFailure $ "unexpected reason: " <> show other
               other -> assertFailure $ "unexpected outcome: " <> show other
             contentsShouldBe path contents

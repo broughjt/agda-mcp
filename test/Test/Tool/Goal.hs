@@ -164,8 +164,11 @@ renderResponseTests =
             ( rendered
                 [ "Goal query failed:"
                 , ""
-                , "  /fixture/TypeError.agda:6.9-10: error: [UnequalTerms]"
-                , "  Set !=< ℕ"
+                , "  /fixture/TypeError.agda:6.9-10: error: [UnequalTypes]"
+                , "  The type"
+                , "    Set"
+                , "  is not a subtype of"
+                , "    ℕ"
                 , "  when checking that the expression ℕ has type ℕ"
                 ]
             )
@@ -175,8 +178,11 @@ renderResponseTests =
             ( rendered
                 [ "Goal query failed:"
                 , ""
-                , "  /fixture/WarningThenError.agda:11.9-10: error: [UnequalTerms]"
-                , "  Set !=< ℕ"
+                , "  /fixture/WarningThenError.agda:11.9-10: error: [UnequalTypes]"
+                , "  The type"
+                , "    Set"
+                , "  is not a subtype of"
+                , "    ℕ"
                 , "  when checking that the expression ℕ has type ℕ"
                 , ""
                 , "Warnings:"

@@ -715,8 +715,11 @@ renderResponseTests =
           @?= rendered
             [ "Load failed:"
             , ""
-            , "  /fixture/TypeError.agda:6.9-10: error: [UnequalTerms]"
-            , "  Set !=< ℕ"
+            , "  /fixture/TypeError.agda:6.9-10: error: [UnequalTypes]"
+            , "  The type"
+            , "    Set"
+            , "  is not a subtype of"
+            , "    ℕ"
             , "  when checking that the expression ℕ has type ℕ"
             ]
     , testCase "a failed load reports the warnings raised before the error" $
@@ -724,8 +727,11 @@ renderResponseTests =
           @?= rendered
             [ "Load failed:"
             , ""
-            , "  /fixture/WarningThenError.agda:11.9-10: error: [UnequalTerms]"
-            , "  Set !=< ℕ"
+            , "  /fixture/WarningThenError.agda:11.9-10: error: [UnequalTypes]"
+            , "  The type"
+            , "    Set"
+            , "  is not a subtype of"
+            , "    ℕ"
             , "  when checking that the expression ℕ has type ℕ"
             , ""
             , "Warnings:"
