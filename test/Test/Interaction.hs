@@ -52,33 +52,33 @@ import AgdaMCP.Interaction (
   Warning (..),
   spanText,
  )
-import AgdaMCP.Interaction.Context (context)
-import AgdaMCP.Interaction.Context qualified as Context
-import AgdaMCP.Interaction.ElaborateGive (elaborateGive)
-import AgdaMCP.Interaction.ElaborateGive qualified as ElaborateGive
-import AgdaMCP.Interaction.Give (give)
-import AgdaMCP.Interaction.Give qualified as Give
-import AgdaMCP.Interaction.Goal (goal)
-import AgdaMCP.Interaction.Goal qualified as Goal
-import AgdaMCP.Interaction.GoalCheck (goalCheck)
-import AgdaMCP.Interaction.GoalCheck qualified as GoalCheck
-import AgdaMCP.Interaction.GoalInfer (Have (..), goalInfer)
-import AgdaMCP.Interaction.GoalInfer qualified as GoalInfer
-import AgdaMCP.Interaction.Intro (intro)
-import AgdaMCP.Interaction.Intro qualified as Intro
-import AgdaMCP.Interaction.Load (LoadedFile (..), load)
-import AgdaMCP.Interaction.Load qualified as Load
-import AgdaMCP.Interaction.MakeCase (
+import AgdaMCP.Interaction.Commands.Context (context)
+import AgdaMCP.Interaction.Commands.Context qualified as Context
+import AgdaMCP.Interaction.Commands.ElaborateGive (elaborateGive)
+import AgdaMCP.Interaction.Commands.ElaborateGive qualified as ElaborateGive
+import AgdaMCP.Interaction.Commands.Give (give)
+import AgdaMCP.Interaction.Commands.Give qualified as Give
+import AgdaMCP.Interaction.Commands.Goal (goal)
+import AgdaMCP.Interaction.Commands.Goal qualified as Goal
+import AgdaMCP.Interaction.Commands.GoalCheck (goalCheck)
+import AgdaMCP.Interaction.Commands.GoalCheck qualified as GoalCheck
+import AgdaMCP.Interaction.Commands.GoalInfer (Have (..), goalInfer)
+import AgdaMCP.Interaction.Commands.GoalInfer qualified as GoalInfer
+import AgdaMCP.Interaction.Commands.Intro (intro)
+import AgdaMCP.Interaction.Commands.Intro qualified as Intro
+import AgdaMCP.Interaction.Commands.Load (LoadedFile (..), load)
+import AgdaMCP.Interaction.Commands.Load qualified as Load
+import AgdaMCP.Interaction.Commands.MakeCase (
   MakeCaseError (..),
   MakeCaseReport (..),
   MakeCaseVariant (..),
   makeCase,
  )
-import AgdaMCP.Interaction.MakeCase qualified as MakeCase
-import AgdaMCP.Interaction.Metas (metas)
-import AgdaMCP.Interaction.Metas qualified as Metas
-import AgdaMCP.Interaction.Refine (refine)
-import AgdaMCP.Interaction.Refine qualified as Refine
+import AgdaMCP.Interaction.Commands.MakeCase qualified as MakeCase
+import AgdaMCP.Interaction.Commands.Metas (metas)
+import AgdaMCP.Interaction.Commands.Metas qualified as Metas
+import AgdaMCP.Interaction.Commands.Refine (refine)
+import AgdaMCP.Interaction.Commands.Refine qualified as Refine
 import AgdaMCP.Interaction.Testing (currentFile, observeResponses)
 import Test.Corpus qualified as Corpus
 import Test.Harness (

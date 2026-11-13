@@ -27,7 +27,7 @@ import AgdaMCP.Interaction (
   GoalError (..),
   GoalReport (..),
  )
-import AgdaMCP.Interaction.Goal qualified as Interaction.Goal
+import AgdaMCP.Interaction.Commands.Goal qualified as Interaction.Goal
 import AgdaMCP.Tools.Load (
   LoadRefusal,
   renderLoadRefusal,

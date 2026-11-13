@@ -43,8 +43,8 @@ command wrappers.
 
 The constructor is deliberately hidden to ensure that callers cannot manipulate
 Agda state outside of calling the command wrappers exposed here
-(e.g. `AgdaMCP.Interaction.Load.load`, `AgdaMCP.Interaction.Give.give`,
-`AgdaMCP.Interaction.MakeCase.makeCase`, etc.).
+(e.g. `AgdaMCP.Interaction.Commands.Load.load`, `AgdaMCP.Interaction.Commands.Give.give`,
+`AgdaMCP.Interaction.Commands.MakeCase.makeCase`, etc.).
 -}
 data InteractionState = InteractionState TCState CommandState GiveSlot
 

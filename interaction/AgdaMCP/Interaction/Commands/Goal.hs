@@ -1,4 +1,4 @@
-module AgdaMCP.Interaction.Goal (
+module AgdaMCP.Interaction.Commands.Goal (
   Request (..),
   Response,
   goal,
@@ -23,7 +23,7 @@ import Control.Monad.State (lift)
 import Data.Text (Text)
 import Data.Text qualified as Text
 
-import AgdaMCP.Interaction.Context (extractContext)
+import AgdaMCP.Interaction.Commands.Context (extractContext)
 import AgdaMCP.Interaction.Extract (classifyInteractionError)
 import AgdaMCP.Interaction.Internal (InteractionM, catchTCErr, runCommandM)
 import AgdaMCP.Interaction.Model (

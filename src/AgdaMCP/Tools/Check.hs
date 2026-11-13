@@ -25,7 +25,7 @@ import MCP.Server (
  )
 
 import AgdaMCP.Interaction (Error, GoalError (..))
-import AgdaMCP.Interaction.GoalCheck qualified as Interaction.GoalCheck
+import AgdaMCP.Interaction.Commands.GoalCheck qualified as Interaction.GoalCheck
 import AgdaMCP.Tools.Load (
   LoadRefusal,
   renderLoadRefusal,

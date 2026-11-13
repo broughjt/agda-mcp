@@ -1,4 +1,4 @@
-module AgdaMCP.Interaction.ElaborateGive (
+module AgdaMCP.Interaction.Commands.ElaborateGive (
   Request (..),
   Response,
   elaborateGive,
@@ -13,7 +13,7 @@ import Control.Monad.State (get)
 import Data.Bifunctor (bimap)
 import Data.Text (Text)
 
-import AgdaMCP.Interaction.Give (
+import AgdaMCP.Interaction.Commands.Give (
   expectComputed,
   giveGen',
   withResolvedHole,

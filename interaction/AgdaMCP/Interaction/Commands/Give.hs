@@ -1,4 +1,4 @@
-module AgdaMCP.Interaction.Give (
+module AgdaMCP.Interaction.Commands.Give (
   Request (..),
   Response,
   give,
@@ -100,7 +100,7 @@ resolveHole goalId =
 extractHoleSpan :: InteractionId -> Range -> CommandM Span
 extractHoleSpan goalId =
   -- An interaction point carrying no range means our model of Agda is wrong, the
-  -- same claim @AgdaMCP.Interaction.Metas.extractGoal@ makes about goals.
+  -- same claim @AgdaMCP.Interaction.Commands.Metas.extractGoal@ makes about goals.
   maybe (liftIO $ throwIO $ HoleNoRange goalId) pure . rangeSpan
 
 {- | Run Agda's @give_gen@ and (hackily) recover its payload via the capturing

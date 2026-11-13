@@ -1,4 +1,4 @@
-module AgdaMCP.Interaction.MakeCase (
+module AgdaMCP.Interaction.Commands.MakeCase (
   Request (..),
   Split (..),
   Response,

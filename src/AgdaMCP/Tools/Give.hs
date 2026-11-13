@@ -48,8 +48,8 @@ import AgdaMCP.Interaction (
   GiveError (..),
   Span,
  )
-import AgdaMCP.Interaction.Give qualified as Interaction.Give
-import AgdaMCP.Interaction.Refine qualified as Interaction.Refine
+import AgdaMCP.Interaction.Commands.Give qualified as Interaction.Give
+import AgdaMCP.Interaction.Commands.Refine qualified as Interaction.Refine
 import AgdaMCP.Tools.Load qualified as Load
 import AgdaMCP.Tools.LoadId (
   CurrentLoad (..),

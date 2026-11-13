@@ -28,7 +28,7 @@ import AgdaMCP.Interaction (
   InteractionState,
   newInteractionState,
  )
-import AgdaMCP.Interaction.Load qualified as Load
+import AgdaMCP.Interaction.Commands.Load qualified as Load
 import AgdaMCP.Interaction.Testing (
   interactionTCState,
   withWarmPersistentState,

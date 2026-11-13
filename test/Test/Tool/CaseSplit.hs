@@ -30,7 +30,7 @@ import AgdaMCP.Interaction (
   Span (..),
   Warning (..),
  )
-import AgdaMCP.Interaction.MakeCase (MakeCaseVariant (..))
+import AgdaMCP.Interaction.Commands.MakeCase (MakeCaseVariant (..))
 import AgdaMCP.Tools.CaseSplit (
   ClauseLayout (..),
   Edit (..),

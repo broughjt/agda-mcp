@@ -15,7 +15,7 @@ import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 import Test.Tool.Harness (withFixtureToolSession)
 
 import AgdaMCP.Interaction (Error (..), Warning (..))
-import AgdaMCP.Interaction.GoalInfer (Have (..))
+import AgdaMCP.Interaction.Commands.GoalInfer (Have (..))
 import AgdaMCP.Tools.Infer (
   InferReport (..),
   Request (..),

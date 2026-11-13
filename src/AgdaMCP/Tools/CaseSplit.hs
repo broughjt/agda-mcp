@@ -34,13 +34,13 @@ import MCP.Server (
  )
 
 import AgdaMCP.Interaction (Error (..), Position (..), Span (..))
-import AgdaMCP.Interaction.MakeCase (
+import AgdaMCP.Interaction.Commands.MakeCase (
   MakeCaseError (..),
   MakeCaseReport (..),
   MakeCaseVariant,
   Split (..),
  )
-import AgdaMCP.Interaction.MakeCase qualified as Interaction.MakeCase
+import AgdaMCP.Interaction.Commands.MakeCase qualified as Interaction.MakeCase
 import AgdaMCP.Tools.Load qualified as Load
 import AgdaMCP.Tools.LoadId (
   CurrentLoad (..),

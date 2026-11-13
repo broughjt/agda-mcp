@@ -1,4 +1,4 @@
-module AgdaMCP.Interaction.Refine (
+module AgdaMCP.Interaction.Commands.Refine (
   Request (..),
   Response,
   refine,
@@ -13,7 +13,7 @@ import Control.Monad.State (get)
 import Data.Bifunctor (bimap)
 import Data.Text (Text)
 
-import AgdaMCP.Interaction.Give (
+import AgdaMCP.Interaction.Commands.Give (
   Response,
   giveGen',
   withResolvedHole,

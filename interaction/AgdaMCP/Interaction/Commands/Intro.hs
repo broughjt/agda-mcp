@@ -1,4 +1,4 @@
-module AgdaMCP.Interaction.Intro (
+module AgdaMCP.Interaction.Commands.Intro (
   Request (..),
   Response,
   intro,
@@ -17,12 +17,12 @@ import Data.Bifunctor (bimap)
 import Data.Text (Text)
 import Data.Text qualified as Text
 
-import AgdaMCP.Interaction.Extract (extractError)
-import AgdaMCP.Interaction.Give (
+import AgdaMCP.Interaction.Commands.Give (
   expectComputed,
   giveGen',
   withResolvedHole,
  )
+import AgdaMCP.Interaction.Extract (extractError)
 import AgdaMCP.Interaction.Internal (
   GiveSlot,
   InteractionM,

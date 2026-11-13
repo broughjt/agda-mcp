@@ -1,4 +1,4 @@
-module AgdaMCP.Interaction.Context (
+module AgdaMCP.Interaction.Commands.Context (
   Request (..),
   Response,
   context,

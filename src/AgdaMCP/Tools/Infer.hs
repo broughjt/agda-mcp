@@ -26,8 +26,8 @@ import MCP.Server (
  )
 
 import AgdaMCP.Interaction (Error, GoalError (..), GoalReport (..))
-import AgdaMCP.Interaction.GoalInfer (Have (..))
-import AgdaMCP.Interaction.GoalInfer qualified as Interaction.GoalInfer
+import AgdaMCP.Interaction.Commands.GoalInfer (Have (..))
+import AgdaMCP.Interaction.Commands.GoalInfer qualified as Interaction.GoalInfer
 import AgdaMCP.Tools.Load (
   LoadRefusal,
   renderLoadRefusal,

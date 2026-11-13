@@ -41,8 +41,8 @@ import AgdaMCP.Interaction (
   NonFatalError (..),
   Warning,
  )
-import AgdaMCP.Interaction.Context qualified as Context
-import AgdaMCP.Interaction.Load qualified as Interaction.Load
+import AgdaMCP.Interaction.Commands.Context qualified as Context
+import AgdaMCP.Interaction.Commands.Load qualified as Interaction.Load
 import AgdaMCP.Tools.LoadId (
   CurrentLoad (..),
   LoadGeneration (..),

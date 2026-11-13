@@ -19,8 +19,8 @@ import AgdaMCP.Interaction (
   GoalReport (..),
   GoalShape (..),
  )
-import AgdaMCP.Interaction.GoalInfer (Have (..))
-import AgdaMCP.Interaction.MakeCase (MakeCaseVariant (..))
+import AgdaMCP.Interaction.Commands.GoalInfer (Have (..))
+import AgdaMCP.Interaction.Commands.MakeCase (MakeCaseVariant (..))
 import AgdaMCP.Tools.CaseSplit qualified as CaseSplit
 import AgdaMCP.Tools.Check qualified as Check
 import AgdaMCP.Tools.Give qualified as Give

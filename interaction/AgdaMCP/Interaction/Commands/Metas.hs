@@ -1,4 +1,4 @@
-module AgdaMCP.Interaction.Metas (
+module AgdaMCP.Interaction.Commands.Metas (
   Request (..),
   Response,
   metas,

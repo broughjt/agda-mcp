@@ -15,17 +15,17 @@ library interaction
   hs-source-dirs: interaction
   exposed-modules:
     AgdaMCP.Interaction
-    AgdaMCP.Interaction.Context
-    AgdaMCP.Interaction.ElaborateGive
-    AgdaMCP.Interaction.Give
-    AgdaMCP.Interaction.Goal
-    AgdaMCP.Interaction.GoalCheck
-    AgdaMCP.Interaction.GoalInfer
-    AgdaMCP.Interaction.Intro
-    AgdaMCP.Interaction.Load
-    AgdaMCP.Interaction.MakeCase
-    AgdaMCP.Interaction.Metas
-    AgdaMCP.Interaction.Refine
+    AgdaMCP.Interaction.Commands.Context
+    AgdaMCP.Interaction.Commands.ElaborateGive
+    AgdaMCP.Interaction.Commands.Give
+    AgdaMCP.Interaction.Commands.Goal
+    AgdaMCP.Interaction.Commands.GoalCheck
+    AgdaMCP.Interaction.Commands.GoalInfer
+    AgdaMCP.Interaction.Commands.Intro
+    AgdaMCP.Interaction.Commands.Load
+    AgdaMCP.Interaction.Commands.MakeCase
+    AgdaMCP.Interaction.Commands.Metas
+    AgdaMCP.Interaction.Commands.Refine
     AgdaMCP.Interaction.Testing
   other-modules:
     AgdaMCP.Interaction.Extract

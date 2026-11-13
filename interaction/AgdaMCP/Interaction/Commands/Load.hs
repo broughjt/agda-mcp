@@ -1,4 +1,4 @@
-module AgdaMCP.Interaction.Load (
+module AgdaMCP.Interaction.Commands.Load (
   load,
   Request (..),
   Response (..),
@@ -28,9 +28,9 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (gets, lift, modify)
 import Data.Text qualified as Text
 
+import AgdaMCP.Interaction.Commands.Metas (extractMetas)
 import AgdaMCP.Interaction.Extract (extractError)
 import AgdaMCP.Interaction.Internal (InteractionM, catchTCErr, runCommandM)
-import AgdaMCP.Interaction.Metas (extractMetas)
 import AgdaMCP.Interaction.Model (
   Error,
   MetasReport,
