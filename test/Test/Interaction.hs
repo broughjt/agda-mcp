@@ -8,7 +8,8 @@ import Agda.Interaction.Base (
  )
 import Agda.Interaction.Response (InteractionOutputCallback, Response_boot (..))
 import Agda.Syntax.Common (InteractionId)
-import Agda.TypeChecking.Monad (TCState)
+import Agda.Syntax.Common.Pretty (prettyShow)
+import Agda.TypeChecking.Monad (SessionState (..), TCState)
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (runStateT)
@@ -16,6 +17,7 @@ import Data.Char (isDigit)
 import Data.Functor (void)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List.NonEmpty (NonEmpty (..))
+import Data.Map qualified as Map
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -79,7 +81,11 @@ import AgdaMCP.Interaction.Commands.Metas (metas)
 import AgdaMCP.Interaction.Commands.Metas qualified as Metas
 import AgdaMCP.Interaction.Commands.Refine (refine)
 import AgdaMCP.Interaction.Commands.Refine qualified as Refine
-import AgdaMCP.Interaction.Testing (currentFile, observeResponses)
+import AgdaMCP.Interaction.Testing (
+  currentFile,
+  interactionSession,
+  observeResponses,
+ )
 import Test.Corpus qualified as Corpus
 import Test.Harness (
   warmInteractionState,
@@ -125,6 +131,26 @@ loadTests warm =
         metasReportHiddenMetavariables report @?= []
         metasReportWarnings report @?= []
         metasReportNonFatalErrors report @?= []
+    , testCase "a command leaves the state it ran from unchanged" $
+        withStagedFiles ["test/fixtures/HoleNatural.agda"] $ \directory options -> do
+          before <- warmedSession warm options
+          let modules =
+                fmap (map prettyShow . Map.keys . stSessionModuleToSourceId)
+                  . interactionSession
+          known <- modules before
+          (response, after) <-
+            runStateT
+              ( load
+                  Load.Request
+                    { Load.requestPath = directory </> "HoleNatural.agda"
+                    , Load.requestArguments = []
+                    }
+              )
+              before
+          void $ expectLoadOk "load" response
+          modules after >>= assertBool "HoleNatural is registered" . elem "HoleNatural"
+          modules before
+            >>= assertBool "the original state's session is unchanged" . (== known)
     , testCase "load a file with three holes" $ do
         response <-
           withFixtureSession warm "test/fixtures/GroupProperties.agda" $ \path ->

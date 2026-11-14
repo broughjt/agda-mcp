@@ -4,6 +4,7 @@ Nothing but the test suite should import this module.
 -}
 module AgdaMCP.Interaction.Testing (
   interactionTCState,
+  interactionSession,
   withWarmPersistentState,
   currentFile,
   observeResponses,
@@ -32,6 +33,10 @@ import AgdaMCP.Interaction.Internal (
 
 interactionTCState :: InteractionState -> TCState
 interactionTCState (InteractionState tcState _ _) = tcState
+
+interactionSession :: InteractionState -> IO SessionState
+interactionSession =
+  readAtomic . stPersistentSession . stPersistentState . interactionTCState
 
 withWarmPersistentState :: TCState -> InteractionState -> IO InteractionState
 withWarmPersistentState warm (InteractionState tcState commandState slot) = do
