@@ -23,14 +23,16 @@ import Agda.Interaction.Response (
  )
 import Agda.Syntax.Common (InteractionId)
 import Agda.TypeChecking.Monad (
+  PersistentTCState (..),
   TCErr (..),
   TCM,
-  TCState,
+  TCState (..),
   initEnv,
   initStateIO,
   runTCM,
   setInteractionOutputCallback,
  )
+import Agda.Utils.Atomic (newAtomic, readAtomic)
 import Control.Concurrent.STM (newTChanIO, newTVarIO)
 import Control.Monad.Error.Class (catchError, throwError)
 import Control.Monad.IO.Class (liftIO)
@@ -94,9 +96,17 @@ runCommandM action =
   -- The tricky part is that @TCM@ is actually not a state monad, but instead
   -- uses an @IORef TCState@. The @runTCM@ form creates a new @IORef@ in each
   -- call so that we can treat the state as a value outside that scope.
+  --
+  -- Since Agda 2.9.0 the session state is a mutable variable shared by every
+  -- copy of a @TCState@, so each command runs on a fresh copy of it, keeping
+  -- the state it ran from unchanged.
   StateT $ \(InteractionState tcState commandState slot) -> do
+    let persistent = stPersistentState tcState
+    session <- newAtomic =<< readAtomic (stPersistentSession persistent)
+    let tcState0 =
+          tcState {stPersistentState = persistent {stPersistentSession = session}}
     ((result, commandState'), tcState') <-
-      runTCM initEnv tcState $ runStateT action commandState
+      runTCM initEnv tcState0 $ runStateT action commandState
     pure (result, InteractionState tcState' commandState' slot)
 
 -- @PatternErr@ is exempt, since it is used for an Agda-internal backtracking
