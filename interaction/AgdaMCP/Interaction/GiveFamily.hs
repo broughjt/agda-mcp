@@ -129,12 +129,11 @@ giveGen' force giveRefine goalId range expression = do
         -- mental model of Agda is wrong, so we should die loudly,
         _ -> liftIO $ throwIO $ NoGiveAction goalId
 
--- @give_gen@ only keeps the user's own text for give and refine (@literally@,
--- InteractionTop.hs), so intro and elaborate-give always report a
--- @Give_String@. Their callers have nothing to do with a @GiveVerbatim@--intro
--- is handed no text to keep, and elaborating exists precisely to replace what
--- the caller wrote. If Agda ever produces it anyway our understand of
--- @give_gen@ is wrong, so die loudly.
+-- The @give_gen@ helper only keeps the user's text verbatim for give and refine
+-- (@literally@, InteractionTop.hs). In contrast, intro and elaborate-give
+-- always return a @Give_String@. If Agda ever produces @Give_Paren@ or
+-- @Give_NoParen@ for the intro or elaborate-give commands, our understanding of
+-- @give_gen@ is wrong, in which case we should die loudly.
 expectComputed :: InteractionId -> GiveAction -> CommandM Text
 expectComputed _ (GiveComputed text) = pure text
 expectComputed goalId giveAction@(GiveVerbatim _) =
