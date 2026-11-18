@@ -113,10 +113,12 @@ giveGen' force giveRefine goalId range expression = do
   outcome <-
     (Right <$> give_gen force goalId range (Text.unpack expression) giveRefine)
       `catchTCErr` (fmap Left . lift . extractError)
-  -- @catchTCErr@ turns every @TCErr@ but @PatternErr@ into a @Left@, so this
-  -- runs on both outcomes. Any exception that skips it also escapes
-  -- @runCommandM@, which discards this command's copy of the session, callback
-  -- included.
+  -- The @catchTCErr@ above catches every @TCErr@ except @PatternErr@ and
+  -- converts it to a @Left@. Any other exception not caught by @catchTCErr@
+  -- also escapes @runCommandM@ because a throw causes the successor state not
+  -- to be returned, and hence the callback is discarded together with all the
+  -- other state. In summary, we've covered our bases on making sure this
+  -- doesn't leak.
   lift $ setInteractionOutputCallback installed
   case outcome of
     Left e -> pure $ Left e
