@@ -29,7 +29,7 @@ goal = runCommandM . goalInternal
 
 goalInternal :: Request -> CommandM Response
 goalInternal (Request normalization goalId) =
-  -- @interpret Cmd_goal_type_context@ (InteractionTop.hs:724-725) with
+  -- @interpret Cmd_goal_type_context@ (InteractionTop.hs) with
   -- @GoalOnly@. Like the context command we run the query under
   -- @liftLocalState@ since a display command should not modify @TCState@.
   (Right <$> liftLocalState (extractGoalReport normalization goalId))

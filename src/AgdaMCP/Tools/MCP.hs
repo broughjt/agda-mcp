@@ -156,7 +156,7 @@ parseNormalization =
 
 Agda's Emacs mode defaults to simplify for goal-display commands. Commands
 like @Cmd_goal_type_context@ and friends are declared with
-@agda2-maybe-normalised@ (agda2-mode.el:1228-1235), whose no-prefix-argument
+@agda2-maybe-normalised@ (agda2-mode.el), whose no-prefix-argument
 level is `Simplified`.
 -}
 parseNormalizationField :: Aeson.Object -> Aeson.Parser Rewrite

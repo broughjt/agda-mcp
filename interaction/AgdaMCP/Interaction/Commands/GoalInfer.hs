@@ -36,7 +36,7 @@ expression.
 -}
 type Response = Either GoalError (GoalReport, Have)
 
-{- | The "Have:" part of the goal display (EmacsTop.hs:235-237), consisting of
+{- | The "Have:" part of the goal display (EmacsTop.hs), consisting of
 the inferred type of the user's expression and its actual boundary faces.
 -}
 data Have = Have
@@ -51,7 +51,7 @@ goalInfer = runCommandM . goalInferInternal
 goalInferInternal :: Request -> CommandM Response
 goalInferInternal (Request normalization goalId expression) =
   ( do
-      -- @interpret Cmd_goal_type_context_infer@ (InteractionTop.hs:727-738),
+      -- @interpret Cmd_goal_type_context_infer@ (InteractionTop.hs),
       -- with the blank-expression fallback to @Cmd_goal_type_context@
       -- purposefully left out. The idea is that this wrapper always infers, and
       -- we can leave policy decisions about what to do with an empty
@@ -61,7 +61,7 @@ goalInferInternal (Request normalization goalId expression) =
           parsed <- parseExprIn goalId noRange (Text.unpack expression)
           typeAndFacesInMeta goalId normalization parsed
       -- Rendered at display scope (no @withInteractionId@), matching EmacsTop's
-      -- @auxDoc@ (:235-237): @prettyATop@ the type, plain @pretty@ each face.
+      -- @auxDoc@: @prettyATop@ the type, plain @pretty@ each face.
       have <-
         liftLocalState $ do
           typeDoc <- prettyATop inferredType

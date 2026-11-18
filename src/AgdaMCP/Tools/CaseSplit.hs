@@ -209,7 +209,7 @@ caseSplit (Request loadId goalId variables) =
 {- | Which layout the clauses replacing this span should use.
 
 Emacs decides by scanning backwards from the hole for a @;@ or an opening brace
-(`agda2-make-case-action-extendlam`, agda2-mode.el:930-953). We have the span,
+(`agda2-make-case-action-extendlam`, agda2-mode.el). We have the span,
 so the same question is just whether it starts at its line's first
 non-whitespace column. That covers ordinary function clauses, @λ where@ and
 @λ { }@ alike, so @MakeCaseVariant@ does not drive layout.

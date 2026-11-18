@@ -36,7 +36,7 @@ import AgdaMCP.Interaction.Model (
  )
 
 {- | Intro takes no user expression, since @introTactic@ proposes the
-candidate(s) (InteractionTop.hs:653-660).
+candidate(s) (InteractionTop.hs).
 -}
 data Request = Request
   { requestPatternLambda :: Bool
@@ -59,7 +59,7 @@ introInternal slot (Request patternLambda goalId) =
 introInHole ::
   GiveSlot -> Bool -> InteractionId -> Range -> Span -> CommandM Response
 introInHole slot patternLambda goalId range holeSpan =
-  -- Follows @interpret Cmd_intro@ (InteractionTop.hs:653-660). @introTactic@
+  -- Follows @interpret Cmd_intro@ (InteractionTop.hs). @introTactic@
   -- runs outside @withInteractionId@ and the give runs inside it. Mirror the
   -- split exactly.
   ( do

@@ -68,7 +68,7 @@ newInteractionState options = do
   ((), tcState') <-
     runTCM initEnv tcState $ setInteractionOutputCallback $ captureGiveAction slot
   -- Clear @optAbsoluteIncludePaths@ the same way that @repl@ does
-  -- (AgdaTop.hs:44-46). As far as I understand, clearing this causes library
+  -- (AgdaTop.hs). As far as I understand, clearing this causes library
   -- resolution to run for new loads and prevents the use of stale absolute
   -- paths.
   let commandState =

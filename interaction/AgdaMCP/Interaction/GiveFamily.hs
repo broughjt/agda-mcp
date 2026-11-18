@@ -51,7 +51,7 @@ family does before running.
 @Left@ is a bogus id, and it is the only way this lookup can fail in a way a
 caller can act on. @getInteractionRange@ is @ipRange <.>
 lookupInteractionPoint@, whose one error is @NoSuchInteractionPoint@
-(MetaVars.hs:635-640). Any other @TCErr@ means our model of Agda is wrong, so we
+(MetaVars.hs). Any other @TCErr@ means our model of Agda is wrong, so we
 die loudly.
 -}
 resolveHole :: InteractionId -> CommandM (Either InteractionId Range)
@@ -76,7 +76,7 @@ callback (see @AgdaMCP.Interaction.Internal.captureGiveAction@).
 
 This is a shared driver for give/refine/intro/elaborate-give, mirroring how all
 of Agda's give-family @interpret@ clauses forward to @give_gen@
-(InteractionTop.hs:948-1033). The goal id is the request point, used to
+(InteractionTop.hs). The goal id is the request point, used to
 sanity-check the id in the captured action, and its range comes from
 @resolveHole@. A caller that resolved the hole first has already ruled out an
 unknown id, so a @TCErr@ here is the command itself failing.
@@ -107,7 +107,7 @@ giveGen' slot force giveRefine goalId range expression =
     `catchTCErr` (fmap Left . lift . extractError)
 
 -- @give_gen@ only keeps the user's own text for give and refine (@literally@,
--- InteractionTop.hs:1011), so intro and elaborate-give always report a
+-- InteractionTop.hs), so intro and elaborate-give always report a
 -- @Give_String@. Their callers have nothing to do with a @GiveVerbatim@--intro
 -- is handed no text to keep, and elaborating exists precisely to replace what
 -- the caller wrote. If Agda ever produces it anyway our understand of

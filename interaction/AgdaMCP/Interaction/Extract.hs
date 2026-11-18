@@ -182,7 +182,7 @@ rangePathSpan r = (,) <$> rangePath r <*> rangeSpan r
 
 -- Context
 
-{- | Extraction mirroring @prettyResponseContext@ (EmacsTop.hs:324-373). Also
+{- | Extraction mirroring @prettyResponseContext@ (EmacsTop.hs). Also
 see the comment above @ContextEntry@.
 -}
 extractContext :: Rewrite -> InteractionId -> TCM [ContextEntry]
@@ -222,7 +222,7 @@ extractContextEntry
         }
    where
     -- Emacs renders cohesion with @prettyShow@. The default @Continuous@
-    -- @prettyShow@'s as empty (Syntax/Common.hs:1881-1884), which we detect
+    -- @prettyShow@'s as empty (Syntax/Common.hs), which we detect
     -- with @null@ and extract as @Nothing@.
     cohesion :: Maybe Text.Text
     cohesion =
@@ -248,8 +248,8 @@ extractContextEntry
 -- Goals
 
 {- | Following the body of @cmd_goal_type_context_and@
-(InteractionTop.hs:1063-1067) plus the goal shape both frontends re-query at
-render time (EmacsTop.hs:227, JSONTop.hs:395). Shared as a helper for the
+(InteractionTop.hs) plus the goal shape both frontends re-query at
+render time (EmacsTop.hs, JSONTop.hs). Shared as a helper for the
 infer and check wrappers.
 -}
 extractGoalReport :: Rewrite -> InteractionId -> TCM GoalReport
@@ -257,12 +257,12 @@ extractGoalReport normalization goalId = do
   context <- extractContext normalization goalId
   shape <- extractGoalShape normalization goalId
   -- @getIPBoundary@ returns the wanted faces. Both frontends render each face
-  -- with @pretty@ (EmacsTop.hs:228-232, JSONTop.hs:398 uses @encodePretty =
+  -- with @pretty@ (EmacsTop.hs, JSONTop.hs uses @encodePretty =
   -- encodeShow . pretty@). Empty when the goal is non-cubical.
   boundary <-
     map (Text.pack . render . pretty) <$> getIPBoundary normalization goalId
   -- Constraints mentioning this goal's metavariable. Emacs renders these with
-  -- @prettyTCM@ (EmacsTop.hs:245) while JSON uses @pretty@. Apparently the the
+  -- @prettyTCM@ (EmacsTop.hs) while JSON uses @pretty@. Apparently the the
   -- two can differ; we follow Emacs.
   constraints <-
     lookupInteractionId goalId
@@ -270,7 +270,7 @@ extractGoalReport normalization goalId = do
       >>= traverse (fmap (Text.pack . render) . prettyTCM)
   pure $ GoalReport shape boundary context constraints
 
--- | Obtain the goal shape mirroring @prettyTypeOfMeta@ (EmacsTop.hs:378-382)
+-- | Obtain the goal shape mirroring @prettyTypeOfMeta@ (EmacsTop.hs)
 extractGoalShape :: Rewrite -> InteractionId -> TCM GoalShape
 extractGoalShape normalization goalId = do
   form <- typeOfMeta normalization goalId
@@ -297,7 +297,7 @@ instance Exception GoalBug
 
 extractMetas :: Rewrite -> TCM MetasReport
 extractMetas normalization = do
-  -- The body of @interpret (Cmd_metas norm)@ (InteractionTop.hs:508-510) is a
+  -- The body of @interpret (Cmd_metas norm)@ (InteractionTop.hs) is a
   -- @getGoals'@ query plus a @getWarningsAndNonFatalErrors@ query, handed to
   -- @display_info@ as @Info_AllGoalsWarnings@. We do the two queries and then
   -- render the payload. See @extractMetas@.
@@ -305,12 +305,12 @@ extractMetas normalization = do
   -- We avoid the implicit load performed by @runInteraction@, leaving that to
   -- the tool layer. It's also worth noting that we don't collect interaction
   -- point data, since @updateInteractionPointsAfter Cmd_metas{}@ evaluates to
-  -- false (InteractionTop.hs:430).
+  -- false (InteractionTop.hs).
 
   -- @typesOfVisibleMetas@ uses @getInteractionIdsAndMetas@, which obtains the
   -- goals in creation order. We sort by position instead, which is what
   -- @sortInteractionPoints@ does for @theCurrentFile`@s interaction points
-  -- (InteractionTop.hs:1046).
+  -- (InteractionTop.hs).
   goals <-
     sortOn (positionOffset . spanStart . goalSpan)
       <$> (typesOfVisibleMetas normalization >>= traverse extractGoal)
@@ -325,8 +325,8 @@ extractMetas normalization = do
     getWarningsAndNonFatalErrors
   -- Both frontends run the warnings and non-fatal error sets through
   -- @filterTCWarnings@ before rendering them. Emacs uses @prettyTCWarnings'@
-  -- (Pretty/Warning.hs:770), while the JSON frontend explicitly
-  -- (JSONTop.hs:305-311).
+  -- (Pretty/Warning.hs), while the JSON frontend explicitly
+  -- (JSONTop.hs).
   warnings' <- filterTCWarnings warnings >>= traverse extractWarning
   nonFatalErrors' <-
     filterTCWarnings nonFatalErrors >>= traverse extractNonFatalError
@@ -334,7 +334,7 @@ extractMetas normalization = do
 
 -- Goals and hidden metavariables use only two of @OutputConstraint`@s
 -- constructors. The goals response list is built exclusively by @typeOfMetaMI@
--- (BasicOps.hs:889-921), which does cases on @Judgement`@s two
+-- (BasicOps.hs), which does cases on @Judgement`@s two
 -- constructors. `HasType` becomes @OfType@ and @IsSort@ becomes @JustSort@. The
 -- remaining @OutputConstraint@ constructors are used when reifying constraints
 -- (@Cmd_constraints@, the @Cmd_goal_type_context*@ family of commands), never
@@ -342,8 +342,8 @@ extractMetas normalization = do
 extractGoal :: OutputConstraint Expr InteractionId -> TCM Goal
 extractGoal constraint = do
   -- The relevant Agda code for goal extraction is @showGoals@
-  -- (Interaction/BasicOps.hs:830-843) for the Emacs frontend and @encodeTCM@
-  -- for the JSON frontend (JSONTop.hs:305-310).
+  -- (Interaction/BasicOps.hs) for the Emacs frontend and @encodeTCM@
+  -- for the JSON frontend (JSONTop.hs).
   (goalId, goalShape) <- extractVisibleMetavariable constraint
   -- We claim that after a load, @getInteractionRange@ won't fail and that the
   -- range won't be @NoRange@. If this is wrong, our mental model of Agda needs
@@ -416,7 +416,7 @@ extractHiddenMetavariable constraint =
   toHiddenMetavariable metavariable shape = do
     name <-
       Text.pack . render
-        -- The same as @showA'@ in @showGoals@ (Interaction/BasicOps.hs:838-843)
+        -- The same as @showA'@ in @showGoals@ (Interaction/BasicOps.hs)
         <$> (withMetaId (nmid metavariable) $ prettyATop metavariable)
     maybeSpan <- rangeSpan <$> getMetaRange (nmid metavariable)
     pure $ HiddenMetavariable name maybeSpan shape

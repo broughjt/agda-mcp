@@ -56,7 +56,7 @@ renderShape :: GoalShape -> Text
 renderShape (GoalOfType t) = t
 renderShape GoalSort = "Sort"
 
-{- | Follows @prettyResponseContext@ (EmacsTop.hs:324-373), minus its @align 10@
+{- | Follows @prettyResponseContext@ (EmacsTop.hs), minus its @align 10@
 padding. We render cohesion as a prefix, the three-form name rule, one
 comma-separated attribute group in Agda's order appended after the type, and
 a let value on its own line.

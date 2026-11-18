@@ -53,7 +53,7 @@ import Data.Text (Text)
 --
 -- On the other hand, if the file modification times do not match, the current file and interaction point state is not updated. The responses for the success case are still emitted (except for @Resp_InteractionPoints@, which fails the file-is-still-current check in @runInteraction@), but they won't contain very much useful information. To detect this path we read back Agda's decision instead of repeating the check. See the comment in @load@ for details.
 --
--- Finally, if an error occurs anywhere in the bodies of @cmd_load'@ or @interpret Cmd_metas@, it is thrown as a @TCErr@ exception and caught in @handleCommand@. See the discussion in app/Main.hs about this function, but the TL;DR is that I'm pretty confident that it suffices to just @catchTCErr@ locally in our wrapper for load. The one thing we have to look after is the branch in @runInteraction@'s @onFail@ (InteractionTop.hs:285-286), which makes sure to set @theCurrentFile@ to @Nothing@ on top of the state resets performed by the @MonadError@ implementations for @CommandM@ and @TCM@.
+-- Finally, if an error occurs anywhere in the bodies of @cmd_load'@ or @interpret Cmd_metas@, it is thrown as a @TCErr@ exception and caught in @handleCommand@. See the discussion in app/Main.hs about this function, but the TL;DR is that I'm pretty confident that it suffices to just @catchTCErr@ locally in our wrapper for load. The one thing we have to look after is the branch in @runInteraction@'s @onFail@ (InteractionTop.hs), which makes sure to set @theCurrentFile@ to @Nothing@ on top of the state resets performed by the @MonadError@ implementations for @CommandM@ and @TCM@.
 
 -- @Cmd_load@ takes a path to load and a list of command-line arguments to apply.
 data Request = Request {requestPath :: FilePath, requestArguments :: [Text]}
@@ -98,8 +98,8 @@ loadInternal (Request path arguments) = do
  where
   handler :: TCErr -> CommandM (Either Error (Maybe CurrentFile))
   handler e = do
-    -- Even though @cmd_load'@ clears @theCurrentFile@ during its setup
-    -- (:851-853), the automatic state rollback in the @StateT@ and @TCM@
+    -- Even though @cmd_load'@ clears @theCurrentFile@ during its setup,
+    -- the automatic state rollback in the @StateT@ and @TCM@
     -- @MonadError@ instances would restore the previously loaded file when the
     -- load throws. The @onFail@ clause in @runInteraction@ sets it back to
     -- @Nothing@. We match this behavior here.
@@ -109,7 +109,7 @@ loadInternal (Request path arguments) = do
 extractLoadedFile :: CurrentFile -> CommandM LoadedFile
 extractLoadedFile current =
   -- @visitModule@ records the interface even when the module has warnings such
-  -- as open holes (Imports.hs:467; warnings only skip @storeDecodedModule@), so
+  -- as open holes (Imports.hs; warnings only skip @storeDecodedModule@), so
   -- the module we have just loaded always has one. If it does not, our mental
   -- model of Agda is wrong.
   lift (getVisitedModule $ currentFileModule current)

@@ -57,7 +57,7 @@ data HiddenMetavariable = HiddenMetavariable
   }
   deriving (Eq, Show)
 
--- Agda hands this to @display_info@ as @Info_AllGoalsWarnings@ (InteractionTop.hs:508-510).
+-- Agda hands this to @display_info@ as @Info_AllGoalsWarnings@ (InteractionTop.hs).
 
 -- | The payload of @Cmd_metas@.
 data MetasReport = MetasReport
@@ -72,11 +72,11 @@ data MetasReport = MetasReport
 
 {- Relevant Agda code:
 
-  * @ResponseContextEntry@ Interaction/Response/Base.hs:147-153
-  * @ArgInfo@ Syntax/Common.hs:2464-2472
-  * the @Info_Context@ of @lispifyDisplayInfo@ Interaction/EmacsTop.hs:196-198
-  * @prettyResponseContext@ Interaction/EmacsTop.hs:324-373
-  * @encodeTCM@ for @ResponseContextEntry@ Interaction/JSONTop.hs:96-102
+  * @ResponseContextEntry@ Interaction/Response/Base.hs
+  * @ArgInfo@ Syntax/Common.hs
+  * the @Info_Context@ of @lispifyDisplayInfo@ Interaction/EmacsTop.hs
+  * @prettyResponseContext@ Interaction/EmacsTop.hs
+  * @encodeTCM@ for @ResponseContextEntry@ Interaction/JSONTop.hs
 
 The Emacs frontend uses the original name, the reified name, and whether the
 original name is in scope to render the binding, in one of three forms:
@@ -160,10 +160,10 @@ data ContextEntry = ContextEntry
   }
   deriving (Eq, Show)
 
--- Collected in @cmd_goal_type_context_and@ (InteractionTop.hs:1061-1067). Note
+-- Collected in @cmd_goal_type_context_and@ (InteractionTop.hs). Note
 -- the goal type is not part of @Goal_GoalType@. Both frontends re-query it at
--- render time via @typeOfMeta@ (@prettyTypeOfMeta@, EmacsTop.hs:378 /
--- JSONTop.hs:395). We carry it explicitly as a @GoalShape@.
+-- render time via @typeOfMeta@ (@prettyTypeOfMeta@, EmacsTop.hs /
+-- JSONTop.hs). We carry it explicitly as a @GoalShape@.
 
 {- | Extracted version of @Goal_GoalType@ used by the @Cmd_goal_type_context*@
 family of commands.
@@ -191,7 +191,7 @@ data GoalError
 {- | Directions for how to place to modify a hole once a
 | give/refine/intro/give-elaborate command succeeds.
 
-Mirrors @GiveResult@ (Response/Base.hs:175-178) and exists because
+Mirrors @GiveResult@ (Response/Base.hs) and exists because
 @GiveResult@ has no `Eq` or `Show` instances.
 -}
 data GiveAction

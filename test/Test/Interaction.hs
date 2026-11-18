@@ -1281,7 +1281,7 @@ refineTests warm =
               >>= liftIO . expectLoadOk "load"
 
           -- `refine` appends up to ten metavariables before giving up
-          -- (BasicOps.hs:267), and `tt` fits at no arity.
+          -- (BasicOps.hs), and `tt` fits at no arity.
           unrefinable <-
             refine
               Refine.Request
@@ -1588,7 +1588,7 @@ makeCaseTests warm =
                 >>= liftIO . expectMakeCaseFailure "an unbound variable"
             pure $ Corpus.normalizeError path e
         e @?= Corpus.caseSplitError
-    , -- `checkClauseIsClean` (MakeCase.hs:463-466) refuses to split a clause
+    , -- `checkClauseIsClean` (MakeCase.hs) refuses to split a clause
       -- that holds a solved interaction point, since the split would discard
       -- what was given.
       testCase "a clause refined since the last load cannot be split" $ do

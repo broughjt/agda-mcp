@@ -44,7 +44,7 @@ goalCheck = runCommandM . goalCheckInternal
 goalCheckInternal :: Request -> CommandM Response
 goalCheckInternal (Request normalization goalId expression) =
   ( do
-      -- @interpret Cmd_goal_type_context_check@ (InteractionTop.hs:740-748).
+      -- @interpret Cmd_goal_type_context_check@ (InteractionTop.hs).
       -- Parses the expression, checks it against the goal type (queried @AsIs@,
       -- deliberately), and normalizes/reifies the elaborated term.
       elaborated <-
@@ -53,12 +53,12 @@ goalCheckInternal (Request normalization goalId expression) =
           goalType <- typeOfMeta AsIs goalId
           term <- case goalType of
             OfType _ ty -> checkExpr expression' =<< isType_ ty
-            -- Agda asserts @__IMPOSSIBLE__@s here (:746). A term cannot be
+            -- Agda asserts @__IMPOSSIBLE__@s here. A term cannot be
             -- checked against a sort-shaped goal. Otherwise our mental model of
             -- Agda is wrong, so we die loudly, signaling a bug.
             _ -> liftIO $ throwIO $ CannotCheckAgainstNonType goalId
           reify =<< normalForm normalization term
-      -- Render matching EmacsTop's @auxDoc@ (:238-240).
+      -- Render matching EmacsTop's @auxDoc@.
       have <- liftLocalState $ Text.pack . render <$> prettyATop (elaborated :: Expr)
       report <- liftLocalState $ extractGoalReport normalization goalId
       pure $ Right (report, have)
