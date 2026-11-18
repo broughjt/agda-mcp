@@ -3,7 +3,7 @@
 module Test.Tool.Interruption (tests) where
 
 import Agda.Interaction.Options (defaultOptions)
-import Agda.TypeChecking.Monad (TCState)
+import AgdaMCP.Interaction (InteractionState)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (
   AsyncCancelled (..),
@@ -42,7 +42,7 @@ import AgdaMCP.Tools.State (
  )
 import Test.Tool.Harness (withFixtureToolState)
 
-tests :: IO TCState -> TestTree
+tests :: IO InteractionState -> TestTree
 tests warm =
   testGroup
     "Interruption"
@@ -53,7 +53,7 @@ tests warm =
 
 -- Interrupting Agda itself
 
-agdaTests :: IO TCState -> TestTree
+agdaTests :: IO InteractionState -> TestTree
 agdaTests warm =
   testGroup
     "interrupting a load"
@@ -83,7 +83,7 @@ agdaTests warm =
   loadOf path = Load.load Load.Request {Load.loadRequestPath = path}
 
   withSlowCheck ::
-    IO TCState -> (FilePath -> MVar ToolState -> IO a) -> IO a
+    IO InteractionState -> (FilePath -> MVar ToolState -> IO a) -> IO a
   withSlowCheck warmed k =
     withFixtureToolState warmed ["test/fixtures/SlowCheck.agda"] $
       \paths state -> case paths of

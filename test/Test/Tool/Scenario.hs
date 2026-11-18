@@ -4,7 +4,7 @@ module Test.Tool.Scenario (tests) where
 
 import Agda.Interaction.Base (Rewrite (..))
 import Agda.Syntax.Common (InteractionId)
-import Agda.TypeChecking.Monad (TCState)
+import AgdaMCP.Interaction (InteractionState)
 import Control.Monad.IO.Class (liftIO)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -31,10 +31,10 @@ import AgdaMCP.Tools.Load qualified as Load
 import AgdaMCP.Tools.LoadId (LoadId (..), LoadIdRefusal (..))
 import Test.Tool.Harness (withFixtureToolSession)
 
-tests :: IO TCState -> TestTree
+tests :: IO InteractionState -> TestTree
 tests warm = testGroup "Scenarios" [distributivity warm]
 
-distributivity :: IO TCState -> TestTree
+distributivity :: IO InteractionState -> TestTree
 distributivity warm =
   testCase
     "proof that multiplication distributes over addition for natural numbers"

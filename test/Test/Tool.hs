@@ -2,9 +2,9 @@
 
 module Test.Tool (tests) where
 
-import Test.Tasty (TestTree, testGroup, withResource)
+import Test.Tasty (TestTree, testGroup)
 
-import Test.Harness (warmInteractionState)
+import Test.Harness (withWarmSession)
 import Test.Tool.CaseSplit qualified as CaseSplit
 import Test.Tool.Check qualified as Check
 import Test.Tool.Give qualified as Give
@@ -17,7 +17,7 @@ import Test.Tool.Source qualified as Source
 
 tests :: TestTree
 tests =
-  withResource warmInteractionState (const $ pure ()) $ \warm ->
+  withWarmSession $ \warm ->
     testGroup
       "Tool"
       [ Source.tests

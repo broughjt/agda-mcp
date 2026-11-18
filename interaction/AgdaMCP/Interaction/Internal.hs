@@ -1,7 +1,6 @@
 module AgdaMCP.Interaction.Internal (
   InteractionState (..),
   InteractionM,
-  GiveSlot,
   newInteractionState,
   runCommandM,
   catchTCErr,
@@ -16,16 +15,9 @@ import Agda.Interaction.Command (CommandM)
 import Agda.Interaction.Options (
   CommandLineOptions (..),
  )
-import Agda.Interaction.Response (
-  GiveResult,
-  Response,
-  Response_boot (Resp_GiveAction),
- )
-import Agda.Syntax.Common (InteractionId)
 import Agda.TypeChecking.Monad (
   PersistentTCState (..),
   TCErr (..),
-  TCM,
   TCState (..),
   initEnv,
   initStateIO,
@@ -35,23 +27,16 @@ import Agda.TypeChecking.Monad (
 import Agda.Utils.Atomic (newAtomic, readAtomic)
 import Control.Concurrent.STM (newTChanIO, newTVarIO)
 import Control.Monad.Error.Class (catchError, throwError)
-import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (StateT (..))
-import Data.IORef (IORef, newIORef, writeIORef)
 
-{- | The state which comprises an Agda session (`TCState` and `CommandState`),
-together with an added mutable reference to facilitate the give family of
-command wrappers.
+{- | The state which comprises an Agda session (`TCState` and `CommandState`).
 
 The constructor is deliberately hidden to ensure that callers cannot manipulate
 Agda state outside of calling the command wrappers exposed here
 (e.g. `AgdaMCP.Interaction.Commands.Load.load`, `AgdaMCP.Interaction.Commands.Give.give`,
 `AgdaMCP.Interaction.Commands.MakeCase.makeCase`, etc.).
 -}
-data InteractionState = InteractionState TCState CommandState GiveSlot
-
--- See @captureGiveAction@.
-type GiveSlot = IORef (Maybe (InteractionId, GiveResult))
+data InteractionState = InteractionState TCState CommandState
 
 type InteractionM = StateT InteractionState IO
 
@@ -62,11 +47,12 @@ newInteractionState options = do
   -- initialized. Normally, Agda runs in a separate thread and receives commands
   -- over a channel, but we deliberately avoid that here.
   queue <- CommandQueue <$> newTChanIO <*> newTVarIO Nothing
-  slot <- newIORef Nothing
   tcState <- initStateIO
-  -- Install the capturing output callback (see @captureGiveAction@).
+  -- Agda's default output callback prints running info to stdout and treats
+  -- every other response as impossible, so replace it with one that ignores
+  -- responses.
   ((), tcState') <-
-    runTCM initEnv tcState $ setInteractionOutputCallback $ captureGiveAction slot
+    runTCM initEnv tcState $ setInteractionOutputCallback $ const $ pure ()
   -- Clear @optAbsoluteIncludePaths@ the same way that @repl@ does
   -- (AgdaTop.hs). As far as I understand, clearing this causes library
   -- resolution to run for new loads and prevents the use of stale absolute
@@ -75,21 +61,7 @@ newInteractionState options = do
         (initCommandState queue)
           { optionsOnReload = options {optAbsoluteIncludePaths = []}
           }
-  pure $ InteractionState tcState' commandState slot
-
--- Deliberate hack.
---
--- One goal of the interaction layer is to avoid needing to intercept and parse
--- @Resp_@ streams. However, @give_gen@ is a complicated and delicate looking
--- helper whose logic I don't wish to duplicate, and its output is not written
--- to @TCState@ in any form, so we can't recover the needed information by
--- querying that state after the call. Rather than reimplement @give_gen'@
--- myself I have chosen to use the response output callback in this one
--- instance.
-captureGiveAction :: GiveSlot -> Response -> TCM ()
-captureGiveAction slot (Resp_GiveAction pointId giveResult) =
-  liftIO $ writeIORef slot $ Just (pointId, giveResult)
-captureGiveAction _ _ = pure ()
+  pure $ InteractionState tcState' commandState
 
 runCommandM :: CommandM a -> InteractionM a
 runCommandM action =
@@ -100,14 +72,14 @@ runCommandM action =
   -- Since Agda 2.9.0 the session state is a mutable variable shared by every
   -- copy of a @TCState@, so each command runs on a fresh copy of it, keeping
   -- the state it ran from unchanged.
-  StateT $ \(InteractionState tcState commandState slot) -> do
+  StateT $ \(InteractionState tcState commandState) -> do
     let persistent = stPersistentState tcState
     session <- newAtomic =<< readAtomic (stPersistentSession persistent)
     let tcState0 =
           tcState {stPersistentState = persistent {stPersistentSession = session}}
     ((result, commandState'), tcState') <-
       runTCM initEnv tcState0 $ runStateT action commandState
-    pure (result, InteractionState tcState' commandState' slot)
+    pure (result, InteractionState tcState' commandState')
 
 -- @PatternErr@ is exempt, since it is used for an Agda-internal backtracking
 -- control flow mechanism. One of these escaping would be a bug in Agda code,

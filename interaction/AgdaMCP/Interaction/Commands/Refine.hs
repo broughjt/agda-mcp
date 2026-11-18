@@ -9,16 +9,13 @@ import Agda.Interaction.Base (UseForce (..))
 import Agda.Interaction.Command (CommandM)
 import Agda.Interaction.InteractionTop (GiveRefine (..))
 import Agda.Syntax.Common (InteractionId)
-import Control.Monad.State (get)
 import Data.Bifunctor (bimap)
 import Data.Text (Text)
 
 import AgdaMCP.Interaction.Commands.Give (Response)
 import AgdaMCP.Interaction.GiveFamily (giveGen', withResolvedHole)
 import AgdaMCP.Interaction.Internal (
-  GiveSlot,
   InteractionM,
-  InteractionState (..),
   runCommandM,
  )
 import AgdaMCP.Interaction.Model (GiveError (..))
@@ -32,12 +29,10 @@ data Request = Request
   }
 
 refine :: Request -> InteractionM Response
-refine request = do
-  InteractionState _ _ slot <- get
-  runCommandM $ refineInternal slot request
+refine = runCommandM . refineInternal
 
-refineInternal :: GiveSlot -> Request -> CommandM Response
-refineInternal slot (Request goalId expression) =
+refineInternal :: Request -> CommandM Response
+refineInternal (Request goalId expression) =
   withResolvedHole GiveUnknownId goalId $ \range holeSpan ->
     bimap (GiveFailed holeSpan) (holeSpan,)
-      <$> giveGen' slot WithoutForce Refine goalId range expression
+      <$> giveGen' WithoutForce Refine goalId range expression

@@ -6,26 +6,19 @@ import Agda.Interaction.Base (
   Rewrite (..),
   UseForce (..),
  )
-import Agda.Interaction.Response (InteractionOutputCallback, Response_boot (..))
 import Agda.Syntax.Common (InteractionId)
-import Agda.Syntax.Common.Pretty (prettyShow)
-import Agda.TypeChecking.Monad (SessionState (..), TCState)
-import Control.Monad (when)
+import AgdaMCP.Interaction (InteractionState)
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad.State (runStateT)
 import Data.Char (isDigit)
 import Data.Functor (void)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List.NonEmpty (NonEmpty (..))
-import Data.Map qualified as Map
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.IO qualified as Text.IO
-import Data.Time (addUTCTime)
-import System.Directory (getModificationTime, removeFile, setModificationTime)
+import System.Directory (removeFile)
 import System.FilePath (takeDirectory, takeFileName, (</>))
-import Test.Tasty (TestTree, testGroup, withResource)
+import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (
   assertBool,
   assertEqual,
@@ -45,7 +38,6 @@ import AgdaMCP.Interaction (
   GoalShape (..),
   HiddenMetavariable (..),
   InteractionM,
-  InteractionState,
   IntroError (..),
   MetasReport (..),
   NonFatalError (..),
@@ -81,23 +73,16 @@ import AgdaMCP.Interaction.Commands.Metas (metas)
 import AgdaMCP.Interaction.Commands.Metas qualified as Metas
 import AgdaMCP.Interaction.Commands.Refine (refine)
 import AgdaMCP.Interaction.Commands.Refine qualified as Refine
-import AgdaMCP.Interaction.Testing (
-  currentFile,
-  interactionSession,
-  observeResponses,
- )
 import Test.Corpus qualified as Corpus
 import Test.Harness (
-  warmInteractionState,
-  warmedSession,
   withFixtureDirectory,
   withFixtureSession,
-  withStagedFiles,
+  withWarmSession,
  )
 
 tests :: TestTree
 tests =
-  withResource warmInteractionState (const $ pure ()) $ \warm ->
+  withWarmSession $ \warm ->
     testGroup
       "interaction"
       ( map
@@ -117,7 +102,7 @@ tests =
           ]
       )
 
-loadTests :: IO TCState -> TestTree
+loadTests :: IO InteractionState -> TestTree
 loadTests warm =
   testGroup
     "Load"
@@ -131,26 +116,6 @@ loadTests warm =
         metasReportHiddenMetavariables report @?= []
         metasReportWarnings report @?= []
         metasReportNonFatalErrors report @?= []
-    , testCase "a command leaves the state it ran from unchanged" $
-        withStagedFiles ["test/fixtures/HoleNatural.agda"] $ \directory options -> do
-          before <- warmedSession warm options
-          let modules =
-                fmap (map prettyShow . Map.keys . stSessionModuleToSourceId)
-                  . interactionSession
-          known <- modules before
-          (response, after) <-
-            runStateT
-              ( load
-                  Load.Request
-                    { Load.requestPath = directory </> "HoleNatural.agda"
-                    , Load.requestArguments = []
-                    }
-              )
-              before
-          void $ expectLoadOk "load" response
-          modules after >>= assertBool "HoleNatural is registered" . elem "HoleNatural"
-          modules before
-            >>= assertBool "the original state's session is unchanged" . (== known)
     , testCase "load a file with three holes" $ do
         response <-
           withFixtureSession warm "test/fixtures/GroupProperties.agda" $ \path ->
@@ -165,14 +130,6 @@ loadTests warm =
         metasReportHiddenMetavariables report @?= []
         metasReportWarnings report @?= []
         metasReportNonFatalErrors report @?= []
-    , testCase "a successful load records the current file" $ do
-        (path, recorded) <-
-          withFixtureSession warm "test/fixtures/HoleNatural.agda" $ \path -> do
-            response <-
-              load Load.Request {Load.requestPath = path, Load.requestArguments = []}
-            void $ liftIO $ expectLoadOk "load" response
-            (,) path <$> currentFile
-        recorded @?= Just path
     , testCase "a successful load reports the file Agda loaded, canonically" $ do
         (path, reported) <-
           withFixtureSession warm "test/fixtures/HoleNatural.agda" $ \path -> do
@@ -204,17 +161,6 @@ loadTests warm =
         assertBool
           "an edited file hashes differently"
           (loadedFileSourceHash edited /= loadedFileSourceHash first')
-    , testCase "a failed load clears the recorded current file" $ do
-        (afterSuccess, afterFailure) <-
-          withFixtureSession warm "test/fixtures/HoleNatural.agda" $ \path -> do
-            let request = Load.Request {Load.requestPath = path, Load.requestArguments = []}
-            void $ load request >>= liftIO . expectLoadOk "initial load"
-            recorded <- currentFile
-            liftIO $ Text.IO.writeFile path brokenHoleNatural
-            void $ load request >>= liftIO . expectLoadError "load after breaking"
-            (,) recorded <$> currentFile
-        assertBool "the first load should have recorded a file" (isJust afterSuccess)
-        afterFailure @?= Nothing
     , testCase
         "when loading, causing a failure and loading, and then restoring \
         \and loading, the first and last responses should be equal"
@@ -289,19 +235,6 @@ loadTests warm =
               <$> load Load.Request {Load.requestPath = path, Load.requestArguments = []}
         e <- expectLoadError "load" response
         Corpus.normalizeError path e @?= Corpus.warningThenError
-    , testCase "a file changed while it is checked loads as stale" $ do
-        (response1, maybeCurrentFile, response2) <-
-          withStaleFixtureSession warm "test/fixtures/HoleNatural.agda" $
-            \path stopModifying -> do
-              let request = Load.Request {Load.requestPath = path, Load.requestArguments = []}
-              response1 <- load request
-              maybeCurrentFile <- currentFile
-              liftIO stopModifying
-              response2 <- load request
-              pure (response1, maybeCurrentFile, response2)
-        response1 @?= Load.ResponseStale
-        maybeCurrentFile @?= Nothing
-        void $ expectLoadOk "load after the file settles" response2
     , -- Agda checks a `where` module before the clause body containing it,
       -- so the hole on line 9 is created first and gets the lower id.
       -- `extractMetas` sorts by position, so the ids come back
@@ -376,7 +309,7 @@ loadTests warm =
           ("Cannot read file" `Text.isInfixOf` errorMessage e)
     ]
 
-metasTests :: IO TCState -> TestTree
+metasTests :: IO InteractionState -> TestTree
 metasTests warm =
   testGroup
     "Metas"
@@ -462,7 +395,7 @@ metasTests warm =
         withForce @?= []
     ]
 
-contextTests :: IO TCState -> TestTree
+contextTests :: IO InteractionState -> TestTree
 contextTests warm =
   testGroup
     "Context"
@@ -663,7 +596,7 @@ contextTests warm =
           liftIO $ response @?= Left (GoalUnknownId bogusGoalId)
     ]
 
-goalTests :: IO TCState -> TestTree
+goalTests :: IO InteractionState -> TestTree
 goalTests warm =
   testGroup
     "Goal"
@@ -785,7 +718,7 @@ goalTests warm =
           liftIO $ response @?= Left (GoalUnknownId bogusGoalId)
     ]
 
-inferCheckTests :: IO TCState -> TestTree
+inferCheckTests :: IO InteractionState -> TestTree
 inferCheckTests warm =
   testGroup
     "Infer and check"
@@ -958,7 +891,7 @@ inferCheckTests warm =
           liftIO $ terms @?= ["twice 2", "twice 2", "4", "twice 2", "4"]
     ]
 
-giveFamilyTests :: IO TCState -> TestTree
+giveFamilyTests :: IO InteractionState -> TestTree
 giveFamilyTests warm =
   testGroup
     "Give family"
@@ -1138,7 +1071,7 @@ giveFamilyTests warm =
           liftIO $ retried @?= GiveVerbatim False
     ]
 
-giveTests :: IO TCState -> TestTree
+giveTests :: IO InteractionState -> TestTree
 giveTests warm =
   testGroup
     "Give"
@@ -1244,7 +1177,7 @@ giveTests warm =
           liftIO $ giveAction @?= GiveVerbatim True
     ]
 
-refineTests :: IO TCState -> TestTree
+refineTests :: IO InteractionState -> TestTree
 refineTests warm =
   testGroup
     "Refine"
@@ -1297,7 +1230,7 @@ refineTests warm =
               ("CannotRefine" `Text.isInfixOf` errorMessage unrefinable)
     ]
 
-introTests :: IO TCState -> TestTree
+introTests :: IO InteractionState -> TestTree
 introTests warm =
   testGroup
     "Intro"
@@ -1380,7 +1313,7 @@ introTests warm =
               ("NotInScope" `Text.isInfixOf` errorMessage e)
     ]
 
-elaborateGiveTests :: IO TCState -> TestTree
+elaborateGiveTests :: IO InteractionState -> TestTree
 elaborateGiveTests warm =
   testGroup
     "ElaborateGive"
@@ -1416,7 +1349,7 @@ elaborateGiveTests warm =
                   ]
     ]
 
-makeCaseTests :: IO TCState -> TestTree
+makeCaseTests :: IO InteractionState -> TestTree
 makeCaseTests warm =
   testGroup
     "MakeCase"
@@ -1613,7 +1546,7 @@ makeCaseTests warm =
           ("refined" `Text.isInfixOf` errorMessage e)
     ]
 
-scenarioTests :: IO TCState -> TestTree
+scenarioTests :: IO InteractionState -> TestTree
 scenarioTests warm =
   testGroup
     "Scenarios"
@@ -1968,37 +1901,11 @@ brokenHoleNatural =
     , "foo n = ℕ"
     ]
 
--- `cmd_load'` samples the fixture's modification time before type checking and
--- again after, treating a difference as "the file changed under us". The second
--- argument disarms file modification so that a later load in the same session
--- succeeds.
-withStaleFixtureSession ::
-  IO TCState -> FilePath -> (FilePath -> IO () -> InteractionM a) -> IO a
-withStaleFixtureSession warm source k =
-  withStagedFiles [source] $ \directory options -> do
-    let staged = directory </> takeFileName source
-    armed <- newIORef True
-    state <- warmedSession warm options >>= touchWhileChecking armed staged
-    fst <$> runStateT (k staged (writeIORef armed False)) state
-
--- Agda emits `Resp_RunningInfo` from `chaseMsg` while type checking, between
--- the two modification time samples.
-touchWhileChecking ::
-  IORef Bool -> FilePath -> InteractionState -> IO InteractionState
-touchWhileChecking armed path = observeResponses callback
- where
-  callback :: InteractionOutputCallback
-  callback (Resp_RunningInfo _ _) = liftIO $ do
-    shouldTouch <- readIORef armed
-    when shouldTouch $
-      getModificationTime path >>= setModificationTime path . addUTCTime 1
-  callback _ = pure ()
-
 -- Load the make-case fixture and hand the callback the source text Agda read
 -- along with the goals in file-position order, so that cases can name a goal by
 -- where it is rather than by an id creation order does not predict.
 withMakeCaseFixture ::
-  IO TCState -> (Text -> [Goal] -> InteractionM a) -> IO a
+  IO InteractionState -> (Text -> [Goal] -> InteractionM a) -> IO a
 withMakeCaseFixture warm k =
   withFixtureSession warm "test/fixtures/MakeCase.agda" $ \path -> do
     report <-

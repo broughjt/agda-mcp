@@ -3,7 +3,7 @@
 module Test.Tool.CaseSplit (tests) where
 
 import Agda.Syntax.Common (InteractionId)
-import Agda.TypeChecking.Monad (TCState)
+import AgdaMCP.Interaction (InteractionState)
 import Control.Monad.IO.Class (liftIO)
 import Data.Aeson qualified as Aeson
 import Data.Functor (void)
@@ -47,7 +47,7 @@ import AgdaMCP.Tools.LoadId (LoadId (..), LoadIdRefusal (..))
 import AgdaMCP.Tools.MCP (parseArguments)
 import AgdaMCP.Tools.State (ToolM)
 
-tests :: IO TCState -> TestTree
+tests :: IO InteractionState -> TestTree
 tests warm =
   testGroup
     "CaseSplit"
@@ -395,7 +395,7 @@ renderResponseTests =
             )
     ]
 
-sessionTests :: IO TCState -> TestTree
+sessionTests :: IO InteractionState -> TestTree
 sessionTests warm =
   testGroup
     "sessions"

@@ -12,7 +12,7 @@ import Agda.Interaction.InteractionTop (GiveRefine (..), liftCommandMT)
 import Agda.Syntax.Common (InteractionId)
 import Agda.Syntax.Position (Range)
 import Agda.TypeChecking.Monad (withInteractionId)
-import Control.Monad.State (get, lift)
+import Control.Monad.State (lift)
 import Data.Bifunctor (bimap)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -24,9 +24,7 @@ import AgdaMCP.Interaction.GiveFamily (
   withResolvedHole,
  )
 import AgdaMCP.Interaction.Internal (
-  GiveSlot,
   InteractionM,
-  InteractionState (..),
   catchTCErr,
   runCommandM,
  )
@@ -47,18 +45,16 @@ data Request = Request
 type Response = Either IntroError (Span, Text)
 
 intro :: Request -> InteractionM Response
-intro request = do
-  InteractionState _ _ slot <- get
-  runCommandM (introInternal slot request)
+intro = runCommandM . introInternal
 
-introInternal :: GiveSlot -> Request -> CommandM Response
-introInternal slot (Request patternLambda goalId) =
+introInternal :: Request -> CommandM Response
+introInternal (Request patternLambda goalId) =
   withResolvedHole IntroUnknownId goalId $
-    introInHole slot patternLambda goalId
+    introInHole patternLambda goalId
 
 introInHole ::
-  GiveSlot -> Bool -> InteractionId -> Range -> Span -> CommandM Response
-introInHole slot patternLambda goalId range holeSpan =
+  Bool -> InteractionId -> Range -> Span -> CommandM Response
+introInHole patternLambda goalId range holeSpan =
   -- Follows @interpret Cmd_intro@ (InteractionTop.hs). @introTactic@
   -- runs outside @withInteractionId@ and the give runs inside it. Mirror the
   -- split exactly.
@@ -67,7 +63,7 @@ introInHole slot patternLambda goalId range holeSpan =
       liftCommandMT (withInteractionId goalId) $ case candidates of
         [] -> pure $ Left $ IntroNotFound holeSpan
         [s] -> do
-          outcome <- giveGen' slot WithoutForce Intro goalId range $ Text.pack s
+          outcome <- giveGen' WithoutForce Intro goalId range $ Text.pack s
           bimap (IntroFailed holeSpan) (holeSpan,)
             <$> traverse (expectComputed goalId) outcome
         _ ->

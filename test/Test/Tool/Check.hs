@@ -4,7 +4,7 @@ module Test.Tool.Check (tests) where
 
 import Agda.Interaction.Base (Rewrite (..))
 import Agda.Syntax.Common (InteractionId)
-import Agda.TypeChecking.Monad (TCState)
+import AgdaMCP.Interaction (InteractionState)
 import Control.Monad.IO.Class (liftIO)
 import Data.Aeson qualified as Aeson
 import Data.Map qualified as Map
@@ -29,7 +29,7 @@ import AgdaMCP.Tools.LoadId (LoadId (..), LoadIdRefusal (..))
 import AgdaMCP.Tools.MCP (parseArguments)
 import AgdaMCP.Tools.Source (SourceRefusal (..))
 
-tests :: IO TCState -> TestTree
+tests :: IO InteractionState -> TestTree
 tests warm =
   testGroup
     "Check"
@@ -193,7 +193,7 @@ renderResponseTests =
             )
     ]
 
-sessionTests :: IO TCState -> TestTree
+sessionTests :: IO InteractionState -> TestTree
 sessionTests warm =
   testGroup
     "sessions"

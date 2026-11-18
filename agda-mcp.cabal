@@ -26,7 +26,6 @@ library interaction
     AgdaMCP.Interaction.Commands.MakeCase
     AgdaMCP.Interaction.Commands.Metas
     AgdaMCP.Interaction.Commands.Refine
-    AgdaMCP.Interaction.Testing
   other-modules:
     AgdaMCP.Interaction.Extract
     AgdaMCP.Interaction.GiveFamily

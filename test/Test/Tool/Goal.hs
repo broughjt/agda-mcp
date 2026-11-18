@@ -3,7 +3,7 @@
 module Test.Tool.Goal (tests) where
 
 import Agda.Interaction.Base (Rewrite (..))
-import Agda.TypeChecking.Monad (TCState)
+import AgdaMCP.Interaction (InteractionState)
 import Control.Monad.IO.Class (liftIO)
 import Data.Aeson qualified as Aeson
 import Data.Map qualified as Map
@@ -35,7 +35,7 @@ import AgdaMCP.Tools.MCP (normalizations, parseArguments, renderNormalization)
 import AgdaMCP.Tools.Source (SourceRefusal (..))
 import Data.Foldable (for_)
 
-tests :: IO TCState -> TestTree
+tests :: IO InteractionState -> TestTree
 tests warm =
   testGroup
     "Goal"
@@ -360,7 +360,7 @@ renderResponseTests =
             )
     ]
 
-sessionTests :: IO TCState -> TestTree
+sessionTests :: IO InteractionState -> TestTree
 sessionTests warm =
   testGroup
     "sessions"

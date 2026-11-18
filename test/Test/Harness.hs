@@ -1,8 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Test.Harness (
-  warmInteractionState,
-  warmedSession,
+  withWarmSession,
   runSession,
   withFixtureSession,
   withFixtureDirectory,
@@ -13,15 +12,20 @@ import Agda.Interaction.Options (
   CommandLineOptions (..),
   defaultOptions,
  )
-import Agda.TypeChecking.Monad (TCState)
 import Control.Monad.State (runStateT)
 import System.Directory (
   copyFile,
   listDirectory,
+  removeDirectoryRecursive,
  )
 import System.Environment (lookupEnv)
 import System.FilePath (takeExtension, takeFileName, (</>))
-import System.IO.Temp (withSystemTempDirectory)
+import System.IO.Temp (
+  createTempDirectory,
+  getCanonicalTemporaryDirectory,
+  withSystemTempDirectory,
+ )
+import Test.Tasty (TestTree, withResource)
 
 import AgdaMCP.Interaction (
   InteractionM,
@@ -29,68 +33,71 @@ import AgdaMCP.Interaction (
   newInteractionState,
  )
 import AgdaMCP.Interaction.Commands.Load qualified as Load
-import AgdaMCP.Interaction.Testing (
-  interactionTCState,
-  withWarmPersistentState,
- )
 import Control.Exception (throwIO)
 
--- Cache Agda standard library interface file loading
-warmInteractionState :: IO TCState
-warmInteractionState =
-  withStagedFiles ["test/fixtures/Warmup.agda"] $ \directory options -> do
-    state <- newInteractionState options
-    let target = directory </> "Warmup.agda"
+withWarmSession :: (IO InteractionState -> TestTree) -> TestTree
+withWarmSession k =
+  withResource acquire (removeDirectoryRecursive . fst) (k . fmap snd)
+ where
+  acquire = do
+    standardLibrary <- standardLibraryPath
+    temporary <- getCanonicalTemporaryDirectory
+    directory <- createTempDirectory temporary "agda-mcp-test-warm"
+    let librariesFile = directory </> "libraries"
+    writeFile librariesFile (standardLibrary </> "standard-library.agda-lib\n")
+    stageFiles directory ["test/fixtures/Warmup.agda"]
+    state <-
+      newInteractionState
+        defaultOptions {optOverrideLibrariesFile = Just librariesFile}
     (response, warmed) <-
       runStateT
-        (Load.load Load.Request {Load.requestPath = target, Load.requestArguments = []})
+        ( Load.load
+            Load.Request
+              { Load.requestPath = directory </> "Warmup.agda"
+              , Load.requestArguments = []
+              }
+        )
         state
     case response of
-      Load.ResponseOk {} -> pure $ interactionTCState warmed
+      Load.ResponseOk {} -> pure (directory, warmed)
       other ->
         throwIO $
           userError $
             "The test warm-up fixture failed to load: " <> show other
 
-warmedSession :: IO TCState -> CommandLineOptions -> IO InteractionState
-warmedSession warm options = do
-  warmed <- warm
-  newInteractionState options >>= withWarmPersistentState warmed
-
 withFixtureSession ::
-  IO TCState -> FilePath -> (FilePath -> InteractionM a) -> IO a
+  IO InteractionState -> FilePath -> (FilePath -> InteractionM a) -> IO a
 withFixtureSession warm source k =
-  withStagedFiles [source] $ \directory options ->
-    runSession warm options (k (directory </> takeFileName source))
+  withStagedFiles [source] $ \directory ->
+    runSession warm (k (directory </> takeFileName source))
 
 withFixtureDirectory ::
-  IO TCState -> FilePath -> (FilePath -> InteractionM a) -> IO a
+  IO InteractionState -> FilePath -> (FilePath -> InteractionM a) -> IO a
 withFixtureDirectory warm source k = do
   entries <- listDirectory source
   let sources =
         [source </> entry | entry <- entries, takeExtension entry == ".agda"]
-  withStagedFiles sources $ \directory options ->
-    runSession warm options (k directory)
+  withStagedFiles sources $ \directory ->
+    runSession warm (k directory)
 
-withStagedFiles ::
-  [FilePath] -> (FilePath -> CommandLineOptions -> IO a) -> IO a
-withStagedFiles sources k = do
-  standardLibrary <- standardLibraryPath
-  withSystemTempDirectory "agda-mcp-test" $ \directory -> do
-    let librariesFile = directory </> "libraries"
-    writeFile librariesFile (standardLibrary </> "standard-library.agda-lib\n")
-    writeFile
-      (directory </> "fixture.agda-lib")
-      ( unlines
-          [ "name: fixture"
-          , "include: ."
-          , "depend: standard-library"
-          ]
-      )
-    mapM_
-      (\source -> copyFile source (directory </> takeFileName source))
-      sources
-    k directory defaultOptions {optOverrideLibrariesFile = Just librariesFile}
+withStagedFiles :: [FilePath] -> (FilePath -> IO a) -> IO a
+withStagedFiles sources k =
+  withSystemTempDirectory "agda-mcp-test" $ \directory ->
+    stageFiles directory sources >> k directory
+
+stageFiles :: FilePath -> [FilePath] -> IO ()
+stageFiles directory sources = do
+  writeFile
+    (directory </> "fixture.agda-lib")
+    ( unlines
+        [ "name: fixture"
+        , "include: ."
+        , "depend: standard-library"
+        ]
+    )
+  mapM_
+    (\source -> copyFile source (directory </> takeFileName source))
+    sources
 
 standardLibraryPath :: IO FilePath
 standardLibraryPath =
@@ -104,6 +111,5 @@ standardLibraryPath =
       pure
 
 -- TODO: Maybe delete this when the tool layer is written and duplicates it
-runSession :: IO TCState -> CommandLineOptions -> InteractionM a -> IO a
-runSession warm options action =
-  fst <$> (warmedSession warm options >>= runStateT action)
+runSession :: IO InteractionState -> InteractionM a -> IO a
+runSession warm action = fst <$> (warm >>= runStateT action)
