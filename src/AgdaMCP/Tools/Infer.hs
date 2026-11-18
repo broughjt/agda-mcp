@@ -52,7 +52,7 @@ import AgdaMCP.Tools.Render (
   renderUnknownGoal,
   section,
  )
-import AgdaMCP.Tools.State (ToolM, liftInteraction)
+import AgdaMCP.Tools.State (ToolM, liftInteractionWithLoadedFile)
 
 inferTool :: Tool
 inferTool =
@@ -124,7 +124,7 @@ infer (Request loadId goalId normalization expression) =
   query :: ToolM Response
   query = do
     response <-
-      liftInteraction $
+      liftInteractionWithLoadedFile $
         Interaction.GoalInfer.goalInfer
           Interaction.GoalInfer.Request
             { Interaction.GoalInfer.requestNormalization = normalization

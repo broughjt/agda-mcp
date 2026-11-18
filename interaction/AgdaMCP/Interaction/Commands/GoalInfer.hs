@@ -18,10 +18,15 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 
 import AgdaMCP.Interaction.Extract (classifyInteractionError, extractGoalReport)
-import AgdaMCP.Interaction.Internal (InteractionM, catchTCErr, runCommandM)
+import AgdaMCP.Interaction.Internal (
+  InteractionM,
+  catchTCErr,
+  runCommandMWithLoadedFile,
+ )
 import AgdaMCP.Interaction.Model (
   GoalError (..),
   GoalReport,
+  NoLoadedFile,
  )
 
 data Request = Request
@@ -45,8 +50,8 @@ data Have = Have
   }
   deriving (Eq, Show)
 
-goalInfer :: Request -> InteractionM Response
-goalInfer = runCommandM . goalInferInternal
+goalInfer :: Request -> InteractionM (Either NoLoadedFile Response)
+goalInfer = runCommandMWithLoadedFile . goalInferInternal
 
 goalInferInternal :: Request -> CommandM Response
 goalInferInternal (Request normalization goalId expression) =

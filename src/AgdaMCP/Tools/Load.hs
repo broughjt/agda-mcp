@@ -70,7 +70,12 @@ import AgdaMCP.Tools.Render (
   section,
  )
 import AgdaMCP.Tools.Source (SourceRefusal, readChecked)
-import AgdaMCP.Tools.State (ToolM, ToolState (..), liftInteraction)
+import AgdaMCP.Tools.State (
+  ToolM,
+  ToolState (..),
+  liftInteraction,
+  liftInteractionWithLoadedFile,
+ )
 
 loadTool :: Tool
 loadTool =
@@ -156,7 +161,7 @@ load (Request path) = do
   -- wrapper for each reported goal.
   withContext :: Goal -> ToolM (Goal, [ContextEntry])
   withContext goal =
-    liftInteraction
+    liftInteractionWithLoadedFile
       ( Context.context
           Context.Request
             { Context.requestNormalization = AsIs

@@ -11,6 +11,7 @@ module AgdaMCP.Interaction.Model (
   -- Give family
   GiveAction (..),
   -- Command error sums
+  NoLoadedFile (..),
   GiveError (..),
   GoalError (..),
   IntroError (..),
@@ -160,10 +161,11 @@ data ContextEntry = ContextEntry
   }
   deriving (Eq, Show)
 
--- Collected in @cmd_goal_type_context_and@ (InteractionTop.hs). Note
--- the goal type is not part of @Goal_GoalType@. Both frontends re-query it at
--- render time via @typeOfMeta@ (@prettyTypeOfMeta@, EmacsTop.hs /
--- JSONTop.hs). We carry it explicitly as a @GoalShape@.
+-- Collected in @cmd_goal_type_context_and@ (InteractionTop.hs). Note the goal
+-- type is not part of @Goal_GoalType@. Both frontends re-query it at render
+-- time via @typeOfMeta@ (@prettyTypeOfMeta@, EmacsTop.hs / JSONTop.hs). Because
+-- we are explicitly trying to avoid giving access to state in the
+-- request/response types, we have an explicit @GoalShape@ field for it.
 
 {- | Extracted version of @Goal_GoalType@ used by the @Cmd_goal_type_context*@
 family of commands.
@@ -178,6 +180,10 @@ data GoalReport = GoalReport
   , goalReportConstraints :: [Text]
   -- ^ Constraints mentioning this goal's metavariable from @getConstraintsMentioning@.
   }
+  deriving (Eq, Show)
+
+-- See @runCommandMWithLoadedFile@
+data NoLoadedFile = NoLoadedFile
   deriving (Eq, Show)
 
 -- | How a goal/context command can fail.

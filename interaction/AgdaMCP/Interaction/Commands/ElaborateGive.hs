@@ -19,9 +19,9 @@ import AgdaMCP.Interaction.GiveFamily (
  )
 import AgdaMCP.Interaction.Internal (
   InteractionM,
-  runCommandM,
+  runCommandMWithLoadedFile,
  )
-import AgdaMCP.Interaction.Model (GiveError (..), Span)
+import AgdaMCP.Interaction.Model (GiveError (..), NoLoadedFile, Span)
 
 {- | Elaborate-give always sets the force parameter to false, so we do not
 include that in the request.
@@ -38,8 +38,8 @@ caller's text (see `expectComputed`), so this is a `Text` rather than
 -}
 type Response = Either GiveError (Span, Text)
 
-elaborateGive :: Request -> InteractionM Response
-elaborateGive = runCommandM . elaborateGiveInternal
+elaborateGive :: Request -> InteractionM (Either NoLoadedFile Response)
+elaborateGive = runCommandMWithLoadedFile . elaborateGiveInternal
 
 elaborateGiveInternal :: Request -> CommandM Response
 elaborateGiveInternal (Request normalization goalId expression) =

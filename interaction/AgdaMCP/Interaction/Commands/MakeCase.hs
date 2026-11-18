@@ -47,9 +47,14 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 
 import AgdaMCP.Interaction.Extract (classifyInteractionError, rangeSpan)
-import AgdaMCP.Interaction.Internal (InteractionM, catchTCErr, runCommandM)
+import AgdaMCP.Interaction.Internal (
+  InteractionM,
+  catchTCErr,
+  runCommandMWithLoadedFile,
+ )
 import AgdaMCP.Interaction.Model (
   Error,
+  NoLoadedFile,
   Span,
  )
 
@@ -201,8 +206,8 @@ data MakeCaseError
   | MakeCaseFailed Error
   deriving (Eq, Show)
 
-makeCase :: Request -> InteractionM Response
-makeCase = runCommandM . makeCaseInternal
+makeCase :: Request -> InteractionM (Either NoLoadedFile Response)
+makeCase = runCommandMWithLoadedFile . makeCaseInternal
 
 makeCaseInternal :: Request -> CommandM Response
 makeCaseInternal (Request goalId split) =

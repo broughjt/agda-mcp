@@ -55,7 +55,7 @@ import AgdaMCP.Tools.Render (
   renderUnknownGoal,
   section,
  )
-import AgdaMCP.Tools.State (ToolM, liftInteraction)
+import AgdaMCP.Tools.State (ToolM, liftInteractionWithLoadedFile)
 
 goalTool :: Tool
 goalTool =
@@ -113,7 +113,7 @@ goal request =
   query :: ToolM Response
   query = do
     response <-
-      liftInteraction $
+      liftInteractionWithLoadedFile $
         Interaction.Goal.goal
           Interaction.Goal.Request
             { Interaction.Goal.requestNormalization =

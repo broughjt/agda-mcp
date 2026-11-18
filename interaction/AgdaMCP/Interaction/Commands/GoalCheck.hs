@@ -22,10 +22,15 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 
 import AgdaMCP.Interaction.Extract (classifyInteractionError, extractGoalReport)
-import AgdaMCP.Interaction.Internal (InteractionM, catchTCErr, runCommandM)
+import AgdaMCP.Interaction.Internal (
+  InteractionM,
+  catchTCErr,
+  runCommandMWithLoadedFile,
+ )
 import AgdaMCP.Interaction.Model (
   GoalError (..),
   GoalReport,
+  NoLoadedFile,
  )
 
 data Request = Request
@@ -38,8 +43,8 @@ data Request = Request
 -- | Success pairs the goal report with the elaborated ("Elaborates to:") term.
 type Response = Either GoalError (GoalReport, Text)
 
-goalCheck :: Request -> InteractionM Response
-goalCheck = runCommandM . goalCheckInternal
+goalCheck :: Request -> InteractionM (Either NoLoadedFile Response)
+goalCheck = runCommandMWithLoadedFile . goalCheckInternal
 
 goalCheckInternal :: Request -> CommandM Response
 goalCheckInternal (Request normalization goalId expression) =

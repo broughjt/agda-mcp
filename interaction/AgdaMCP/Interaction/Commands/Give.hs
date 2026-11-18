@@ -15,11 +15,12 @@ import Data.Text (Text)
 import AgdaMCP.Interaction.GiveFamily (giveGen', withResolvedHole)
 import AgdaMCP.Interaction.Internal (
   InteractionM,
-  runCommandM,
+  runCommandMWithLoadedFile,
  )
 import AgdaMCP.Interaction.Model (
   GiveAction (..),
   GiveError (..),
+  NoLoadedFile,
   Span,
  )
 
@@ -31,8 +32,8 @@ data Request = Request
 
 type Response = Either GiveError (Span, GiveAction)
 
-give :: Request -> InteractionM Response
-give = runCommandM . giveInternal
+give :: Request -> InteractionM (Either NoLoadedFile Response)
+give = runCommandMWithLoadedFile . giveInternal
 
 giveInternal :: Request -> CommandM Response
 giveInternal (Request force goalId expression) =

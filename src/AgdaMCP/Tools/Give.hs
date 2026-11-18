@@ -82,7 +82,7 @@ import AgdaMCP.Tools.Source (
   commitEdits,
   readChecked,
  )
-import AgdaMCP.Tools.State (ToolM, liftInteraction)
+import AgdaMCP.Tools.State (ToolM, liftInteractionWithLoadedFile)
 
 -- The `minItems` and `default` keywords this schema used to carry are not
 -- expressible in the library's schema type. The action default is stated in
@@ -242,7 +242,7 @@ give (Request loadId items) =
 
   runItem :: Int -> Item -> ToolM (Either Refusal Edit)
   runItem index (goalId, action) = do
-    response <- liftInteraction $ case action of
+    response <- liftInteractionWithLoadedFile $ case action of
       ActionGive expression ->
         Interaction.Give.give
           Interaction.Give.Request

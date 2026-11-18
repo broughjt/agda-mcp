@@ -6,9 +6,11 @@ import Agda.Interaction.Base (
   Rewrite (..),
   UseForce (..),
  )
+import Agda.Interaction.Options (defaultOptions)
 import Agda.Syntax.Common (InteractionId)
 import AgdaMCP.Interaction (InteractionState)
 import Control.Monad.IO.Class (liftIO)
+import Control.Monad.State (evalStateT)
 import Data.Char (isDigit)
 import Data.Functor (void)
 import Data.List.NonEmpty (NonEmpty (..))
@@ -40,25 +42,21 @@ import AgdaMCP.Interaction (
   InteractionM,
   IntroError (..),
   MetasReport (..),
+  NoLoadedFile (..),
   NonFatalError (..),
   Position (..),
   Span (..),
   Warning (..),
+  newInteractionState,
   spanText,
  )
-import AgdaMCP.Interaction.Commands.Context (context)
 import AgdaMCP.Interaction.Commands.Context qualified as Context
-import AgdaMCP.Interaction.Commands.ElaborateGive (elaborateGive)
 import AgdaMCP.Interaction.Commands.ElaborateGive qualified as ElaborateGive
-import AgdaMCP.Interaction.Commands.Give (give)
 import AgdaMCP.Interaction.Commands.Give qualified as Give
-import AgdaMCP.Interaction.Commands.Goal (goal)
 import AgdaMCP.Interaction.Commands.Goal qualified as Goal
-import AgdaMCP.Interaction.Commands.GoalCheck (goalCheck)
 import AgdaMCP.Interaction.Commands.GoalCheck qualified as GoalCheck
-import AgdaMCP.Interaction.Commands.GoalInfer (Have (..), goalInfer)
+import AgdaMCP.Interaction.Commands.GoalInfer (Have (..))
 import AgdaMCP.Interaction.Commands.GoalInfer qualified as GoalInfer
-import AgdaMCP.Interaction.Commands.Intro (intro)
 import AgdaMCP.Interaction.Commands.Intro qualified as Intro
 import AgdaMCP.Interaction.Commands.Load (LoadedFile (..), load)
 import AgdaMCP.Interaction.Commands.Load qualified as Load
@@ -66,12 +64,9 @@ import AgdaMCP.Interaction.Commands.MakeCase (
   MakeCaseError (..),
   MakeCaseReport (..),
   MakeCaseVariant (..),
-  makeCase,
  )
 import AgdaMCP.Interaction.Commands.MakeCase qualified as MakeCase
-import AgdaMCP.Interaction.Commands.Metas (metas)
 import AgdaMCP.Interaction.Commands.Metas qualified as Metas
-import AgdaMCP.Interaction.Commands.Refine (refine)
 import AgdaMCP.Interaction.Commands.Refine qualified as Refine
 import Test.Corpus qualified as Corpus
 import Test.Harness (
@@ -88,6 +83,7 @@ tests =
       ( map
           ($ warm)
           [ loadTests
+          , noLoadedFileTests
           , metasTests
           , contextTests
           , goalTests
@@ -307,6 +303,37 @@ loadTests warm =
         assertBool
           ("expected a read failure, got " <> Text.unpack (errorMessage e))
           ("Cannot read file" `Text.isInfixOf` errorMessage e)
+    ]
+
+noLoadedFileTests :: IO InteractionState -> TestTree
+noLoadedFileTests warm =
+  testGroup
+    "NoLoadedFile"
+    [ testCase "a command is refused before anything is loaded" $ do
+        response <-
+          newInteractionState defaultOptions
+            >>= evalStateT
+              (Metas.metas Metas.Request {Metas.requestNormalization = AsIs})
+        response @?= Left NoLoadedFile
+    , testCase "commands are refused after a failed load" $ do
+        (metasResponse, giveResponse) <-
+          withFixtureSession warm "test/fixtures/HoleNatural.agda" $ \path -> do
+            let request = Load.Request {Load.requestPath = path, Load.requestArguments = []}
+            void $ load request >>= liftIO . expectLoadOk "initial load"
+            liftIO $ Text.IO.writeFile path brokenHoleNatural
+            void $ load request >>= liftIO . expectLoadError "load after breaking"
+            metasResponse <-
+              Metas.metas Metas.Request {Metas.requestNormalization = AsIs}
+            giveResponse <-
+              Give.give
+                Give.Request
+                  { Give.requestForce = WithoutForce
+                  , Give.requestGoalId = 0
+                  , Give.requestExpression = "zero"
+                  }
+            pure (metasResponse, giveResponse)
+        metasResponse @?= Left NoLoadedFile
+        giveResponse @?= Left NoLoadedFile
     ]
 
 metasTests :: IO InteractionState -> TestTree
@@ -1724,6 +1751,44 @@ scenarioTests warm =
               >>= liftIO . expectElaborated "the standard library's inductive step"
           liftIO $ elaborated @?= body
     ]
+
+context :: Context.Request -> InteractionM Context.Response
+context = expectLoaded . Context.context
+
+elaborateGive ::
+  ElaborateGive.Request -> InteractionM ElaborateGive.Response
+elaborateGive = expectLoaded . ElaborateGive.elaborateGive
+
+give :: Give.Request -> InteractionM Give.Response
+give = expectLoaded . Give.give
+
+goal :: Goal.Request -> InteractionM Goal.Response
+goal = expectLoaded . Goal.goal
+
+goalCheck :: GoalCheck.Request -> InteractionM GoalCheck.Response
+goalCheck = expectLoaded . GoalCheck.goalCheck
+
+goalInfer :: GoalInfer.Request -> InteractionM GoalInfer.Response
+goalInfer = expectLoaded . GoalInfer.goalInfer
+
+intro :: Intro.Request -> InteractionM Intro.Response
+intro = expectLoaded . Intro.intro
+
+makeCase :: MakeCase.Request -> InteractionM MakeCase.Response
+makeCase = expectLoaded . MakeCase.makeCase
+
+metas :: Metas.Request -> InteractionM Metas.Response
+metas = expectLoaded . Metas.metas
+
+refine :: Refine.Request -> InteractionM Refine.Response
+refine = expectLoaded . Refine.refine
+
+expectLoaded :: InteractionM (Either NoLoadedFile a) -> InteractionM a
+expectLoaded command =
+  command
+    >>= either
+      (\NoLoadedFile -> liftIO $ assertFailure "expected a loaded file")
+      pure
 
 expectLoadOk ::
   String ->

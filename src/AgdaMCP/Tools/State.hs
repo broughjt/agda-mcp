@@ -3,12 +3,16 @@ module AgdaMCP.Tools.State (
   ToolM,
   newToolState,
   liftInteraction,
+  liftInteractionWithLoadedFile,
+  LoadedFileMissing (..),
   runToolM,
   withBudget,
 ) where
 
 import Agda.Interaction.Options (CommandLineOptions)
 import Control.Concurrent.MVar (MVar, modifyMVar)
+import Control.Exception (Exception, throwIO)
+import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (StateT (..))
 import Data.Bifunctor (first)
 import System.Timeout (timeout)
@@ -16,6 +20,7 @@ import System.Timeout (timeout)
 import AgdaMCP.Interaction (
   InteractionM,
   InteractionState,
+  NoLoadedFile (..),
   newInteractionState,
  )
 import AgdaMCP.Tools.LoadId (LoadGeneration (..))
@@ -36,13 +41,22 @@ newToolState options =
   flip ToolState LoadGeneration {loadsIssued = 0, currentLoad = Nothing}
     <$> newInteractionState options
 
-{- | Run an interaction-layer action on the session inside @ToolState@, writing
-the successor session back.
--}
 liftInteraction :: InteractionM a -> ToolM a
 liftInteraction action = StateT $ \state -> do
   (result, interactionState) <- runStateT action $ toolInteractionState state
   pure (result, state {toolInteractionState = interactionState})
+
+liftInteractionWithLoadedFile :: InteractionM (Either NoLoadedFile a) -> ToolM a
+liftInteractionWithLoadedFile action =
+  liftInteraction action
+    >>= either (\NoLoadedFile -> liftIO $ throwIO LoadedFileMissing) pure
+
+-- Bug: the tool layer has a current load, but the interaction layer has no
+-- loaded file.
+data LoadedFileMissing = LoadedFileMissing
+  deriving (Show)
+
+instance Exception LoadedFileMissing
 
 -- Run a @ToolM@ action against the state held in the @MVar@, storing the
 -- successor state back. The transport runs each request in its own task, so

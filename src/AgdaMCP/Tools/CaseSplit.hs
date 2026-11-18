@@ -73,7 +73,7 @@ import AgdaMCP.Tools.Source (
   commitEdits,
   readChecked,
  )
-import AgdaMCP.Tools.State (ToolM, liftInteraction)
+import AgdaMCP.Tools.State (ToolM, liftInteractionWithLoadedFile)
 
 caseSplitTool :: Tool
 caseSplitTool =
@@ -171,7 +171,7 @@ caseSplit (Request loadId goalId variables) =
     runSplit :: Text -> ToolM Outcome
     runSplit original = do
       response <-
-        liftInteraction $
+        liftInteractionWithLoadedFile $
           Interaction.MakeCase.makeCase
             Interaction.MakeCase.Request
               { Interaction.MakeCase.requestGoalId = goalId

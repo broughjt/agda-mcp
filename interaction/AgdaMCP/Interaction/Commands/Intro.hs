@@ -26,10 +26,11 @@ import AgdaMCP.Interaction.GiveFamily (
 import AgdaMCP.Interaction.Internal (
   InteractionM,
   catchTCErr,
-  runCommandM,
+  runCommandMWithLoadedFile,
  )
 import AgdaMCP.Interaction.Model (
   IntroError (..),
+  NoLoadedFile,
   Span,
  )
 
@@ -44,8 +45,8 @@ data Request = Request
 -- | Success is the hole and the introduction form Agda chose.
 type Response = Either IntroError (Span, Text)
 
-intro :: Request -> InteractionM Response
-intro = runCommandM . introInternal
+intro :: Request -> InteractionM (Either NoLoadedFile Response)
+intro = runCommandMWithLoadedFile . introInternal
 
 introInternal :: Request -> CommandM Response
 introInternal (Request patternLambda goalId) =

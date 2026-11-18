@@ -50,7 +50,7 @@ import AgdaMCP.Tools.Render (
   renderUnknownGoal,
   section,
  )
-import AgdaMCP.Tools.State (ToolM, liftInteraction)
+import AgdaMCP.Tools.State (ToolM, liftInteractionWithLoadedFile)
 
 checkTool :: Tool
 checkTool =
@@ -117,7 +117,7 @@ check (Request loadId goalId normalization expression) =
   query :: ToolM Response
   query = do
     response <-
-      liftInteraction $
+      liftInteractionWithLoadedFile $
         Interaction.GoalCheck.goalCheck
           Interaction.GoalCheck.Request
             { Interaction.GoalCheck.requestNormalization = normalization

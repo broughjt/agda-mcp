@@ -3,6 +3,7 @@ module AgdaMCP.Interaction.Internal (
   InteractionM,
   newInteractionState,
   runCommandM,
+  runCommandMWithLoadedFile,
   catchTCErr,
 ) where
 
@@ -27,7 +28,9 @@ import Agda.TypeChecking.Monad (
 import Agda.Utils.Atomic (newAtomic, readAtomic)
 import Control.Concurrent.STM (newTChanIO, newTVarIO)
 import Control.Monad.Error.Class (catchError, throwError)
-import Control.Monad.State (StateT (..))
+import Control.Monad.State (StateT (..), gets)
+
+import AgdaMCP.Interaction.Model (NoLoadedFile (..))
 
 {- | The state which comprises an Agda session (`TCState` and `CommandState`).
 
@@ -80,6 +83,20 @@ runCommandM action =
     ((result, commandState'), tcState') <-
       runTCM initEnv tcState0 $ runStateT action commandState
     pure (result, InteractionState tcState' commandState')
+
+-- During @runInteraction@, the file path passed in the request is checked
+-- against the current file (@theCurrentFile@). If they disagree or there is no
+-- current file, @cmd_load'@ is called to make the file at the given path the
+-- currently loaded file. We avoid loading files automatically in those cases
+-- because our wrappers for the non-load commands have the file implicit.
+-- However, we want to avoid weird cases where a load fails but subsequent calls
+-- to goal or metas continue to reference the previous successful
+-- load. Therefore, all the wrappers for non-@independent@ commands return
+-- @Either NoLoadedFile _@ to distinguish this case.
+runCommandMWithLoadedFile :: CommandM a -> InteractionM (Either NoLoadedFile a)
+runCommandMWithLoadedFile action =
+  gets (\(InteractionState _ commandState) -> theCurrentFile commandState)
+    >>= maybe (pure $ Left NoLoadedFile) (const $ Right <$> runCommandM action)
 
 -- @PatternErr@ is exempt, since it is used for an Agda-internal backtracking
 -- control flow mechanism. One of these escaping would be a bug in Agda code,

@@ -102,7 +102,8 @@ loadInternal (Request path arguments) = do
     -- the automatic state rollback in the @StateT@ and @TCM@
     -- @MonadError@ instances would restore the previously loaded file when the
     -- load throws. The @onFail@ clause in @runInteraction@ sets it back to
-    -- @Nothing@. We match this behavior here.
+    -- @Nothing@. We match this behavior here, so that @runCommandMWithLoadedFile@
+    -- refuses commands until the next successful load.
     modify $ \state -> state {theCurrentFile = Nothing}
     Left <$> lift (extractError e)
 

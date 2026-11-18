@@ -16,9 +16,9 @@ import AgdaMCP.Interaction.Commands.Give (Response)
 import AgdaMCP.Interaction.GiveFamily (giveGen', withResolvedHole)
 import AgdaMCP.Interaction.Internal (
   InteractionM,
-  runCommandM,
+  runCommandMWithLoadedFile,
  )
-import AgdaMCP.Interaction.Model (GiveError (..))
+import AgdaMCP.Interaction.Model (GiveError (..), NoLoadedFile)
 
 {- | Refine always sets the force parameter to false, so we do not include it
 here.
@@ -28,8 +28,8 @@ data Request = Request
   , requestExpression :: Text
   }
 
-refine :: Request -> InteractionM Response
-refine = runCommandM . refineInternal
+refine :: Request -> InteractionM (Either NoLoadedFile Response)
+refine = runCommandMWithLoadedFile . refineInternal
 
 refineInternal :: Request -> CommandM Response
 refineInternal (Request goalId expression) =

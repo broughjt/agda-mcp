@@ -10,10 +10,15 @@ import Agda.Syntax.Common (InteractionId)
 import Control.Monad.State (lift)
 
 import AgdaMCP.Interaction.Extract (classifyInteractionError, extractGoalReport)
-import AgdaMCP.Interaction.Internal (InteractionM, catchTCErr, runCommandM)
+import AgdaMCP.Interaction.Internal (
+  InteractionM,
+  catchTCErr,
+  runCommandMWithLoadedFile,
+ )
 import AgdaMCP.Interaction.Model (
   GoalError (..),
   GoalReport (..),
+  NoLoadedFile,
  )
 
 data Request = Request
@@ -24,8 +29,8 @@ data Request = Request
 
 type Response = Either GoalError GoalReport
 
-goal :: Request -> InteractionM Response
-goal = runCommandM . goalInternal
+goal :: Request -> InteractionM (Either NoLoadedFile Response)
+goal = runCommandMWithLoadedFile . goalInternal
 
 goalInternal :: Request -> CommandM Response
 goalInternal (Request normalization goalId) =
